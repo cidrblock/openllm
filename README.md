@@ -1,0 +1,161 @@
+# Open LLM Provider
+
+**Use any LLM with any VS Code extension** — OpenAI, Anthropic, Google, Ollama & more. The open alternative to Copilot.
+
+## Features
+
+- **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, Ollama (local), Mistral, Azure OpenAI
+- **Configure Once, Use Everywhere** — Set up your API keys once and use them with any compatible extension
+- **Local Model Support** — Run models locally with Ollama for privacy and cost savings
+- **Continue Integration** — Automatically import your existing Continue configuration
+- **Secure Storage** — API keys stored securely using VS Code's secret storage
+- **Streaming Support** — Real-time streaming responses from all providers
+
+## Installation
+
+1. Open VS Code
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+3. Search for "Open LLM Provider"
+4. Click Install
+
+## Quick Start
+
+### Option 1: Add Provider via Command
+
+1. Open Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
+2. Run `Open LLM: Add Provider`
+3. Select your provider (OpenAI, Anthropic, etc.)
+4. Enter your API key
+5. Select models to enable
+
+### Option 2: Import from Continue
+
+If you already have Continue configured:
+
+1. Open Command Palette
+2. Run `Open LLM: Import Configuration from Continue`
+3. Your Continue models will be automatically available
+
+### Option 3: Manual Configuration
+
+Add to your VS Code settings (`settings.json`):
+
+```json
+{
+  "openLLM.providers": [
+    {
+      "name": "openai",
+      "apiKey": "${{ secrets.OPENAI_API_KEY }}",
+      "models": ["gpt-4o", "gpt-4o-mini"]
+    },
+    {
+      "name": "anthropic",
+      "apiKey": "${{ secrets.ANTHROPIC_API_KEY }}",
+      "models": ["claude-3-5-sonnet-20241022"]
+    },
+    {
+      "name": "ollama",
+      "models": ["llama3.2", "qwen2.5-coder"]
+    }
+  ]
+}
+```
+
+Create a `.env` file in `~/.openllm/` or `~/.continue/`:
+
+```bash
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-api03-...
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `Open LLM: Show Available Models` | View all configured models |
+| `Open LLM: Add Provider` | Add a new LLM provider |
+| `Open LLM: Configure Providers` | Open extension settings |
+| `Open LLM: Reload Configuration` | Reload configuration from files |
+| `Open LLM: Test Provider Connections` | Test all provider connections |
+| `Open LLM: Import Configuration from Continue` | Import Continue config |
+| `Open LLM: Send Message` | Send a test message to a model |
+| `Open LLM: Show Status Panel` | Open the status and debug panel |
+| `Open LLM: Open Playground` | Compare responses from all models side-by-side |
+
+## Supported Providers
+
+| Provider | API Key Required | Features |
+|----------|------------------|----------|
+| OpenAI | Yes | GPT-4o, GPT-4, GPT-3.5, o1 |
+| Anthropic | Yes | Claude 3.5 Sonnet, Claude 3 Opus |
+| Google Gemini | Yes | Gemini 2.0, Gemini 1.5 Pro |
+| Ollama | No | Local models (Llama, Mistral, etc.) |
+| Mistral | Yes | Mistral Large, Codestral |
+| Azure OpenAI | Yes | Azure-hosted OpenAI models |
+
+## Configuration Options
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `openLLM.providers` | `[]` | Array of provider configurations |
+| `openLLM.importContinueConfig` | `true` | Import Continue config automatically |
+| `openLLM.autoReload` | `true` | Auto-reload when config changes |
+| `openLLM.logLevel` | `info` | Logging level (debug, info, warn, error) |
+
+## Using with Other Extensions
+
+Extensions can use the VS Code Language Model API to access your configured models:
+
+```typescript
+import * as vscode from 'vscode';
+
+// Get available models
+const models = await vscode.lm.selectChatModels({
+  vendor: 'open-llm'
+});
+
+// Send a request
+if (models.length > 0) {
+  const messages = [
+    vscode.LanguageModelChatMessage.User('Generate a commit message')
+  ];
+  
+  const response = await models[0].sendRequest(messages);
+  
+  for await (const chunk of response.text) {
+    console.log(chunk);
+  }
+}
+```
+
+## Local Development
+
+```bash
+# Clone the repository
+git clone https://github.com/open-llm/open-llm-provider
+cd open-llm-provider
+
+# Install dependencies
+npm install
+
+# Compile
+npm run compile
+
+# Watch mode
+npm run watch
+```
+
+Press F5 in VS Code to launch the extension in debug mode.
+
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- Inspired by [Continue](https://continue.dev) for configuration format
+- Thanks to the VS Code team for the Language Model API

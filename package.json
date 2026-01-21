@@ -1,0 +1,160 @@
+{
+  "name": "open-llm-provider",
+  "displayName": "Open LLM Provider",
+  "description": "Use any LLM with any VS Code extension - OpenAI, Anthropic, Google, Ollama & more. The open alternative to Copilot.",
+  "version": "0.1.0",
+  "publisher": "open-llm",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "ai",
+    "openai",
+    "anthropic",
+    "claude",
+    "gpt",
+    "gemini",
+    "ollama",
+    "copilot",
+    "language model",
+    "chatgpt",
+    "local llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/open-llm/open-llm-provider"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "openLLM.configure",
+        "title": "Configure Providers",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showModels",
+        "title": "Show Available Models",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.reloadConfig",
+        "title": "Reload Configuration",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.testConnection",
+        "title": "Test Provider Connections",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.importFromContinue",
+        "title": "Import Configuration from Continue",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.addProvider",
+        "title": "Add Provider",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showStatusPanel",
+        "title": "Show Status Panel",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showPlayground",
+        "title": "Open Playground",
+        "category": "Open LLM"
+      }
+    ],
+    "configuration": {
+      "title": "Open LLM Provider",
+      "properties": {
+        "openLLM.providers": {
+          "type": "array",
+          "default": [],
+          "description": "Configured LLM providers",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Provider name (openai, anthropic, google, ollama, azure, mistral)"
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "API key or template variable (e.g., ${{ secrets.OPENAI_API_KEY }})"
+              },
+              "apiBase": {
+                "type": "string",
+                "description": "Optional custom API base URL"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of model names to use"
+              }
+            },
+            "required": ["name", "models"]
+          }
+        },
+        "openLLM.importContinueConfig": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically import configuration from Continue if available"
+        },
+        "openLLM.autoReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reload configuration when files change"
+        },
+        "openLLM.defaultProvider": {
+          "type": "string",
+          "default": "",
+          "description": "Default provider to use when multiple are available"
+        },
+        "openLLM.logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info",
+          "description": "Logging level for the extension"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

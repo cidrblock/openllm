@@ -1,0 +1,2713 @@
+# Universal LLM Provider for VS Code
+
+**A game-changing infrastructure extension that exposes any LLM provider through the standard VS Code Language Model API**
+
+---
+
+## Table of Contents
+
+1. [Executive Summary](#executive-summary)
+2. [The Problem](#the-problem)
+3. [The Solution](#the-solution)
+4. [Market Opportunity](#market-opportunity)
+5. [Technical Architecture](#technical-architecture)
+6. [Implementation Details](#implementation-details)
+7. [API Documentation](#api-documentation)
+8. [Extension Developer Guide](#extension-developer-guide)
+9. [User Guide](#user-guide)
+10. [Monetization Strategy](#monetization-strategy)
+11. [Go-to-Market Strategy](#go-to-market-strategy)
+12. [Roadmap](#roadmap)
+13. [Technical Challenges](#technical-challenges)
+14. [Success Metrics](#success-metrics)
+15. [Competitive Analysis](#competitive-analysis)
+16. [Conclusion](#conclusion)
+
+---
+
+## Executive Summary
+
+### The Vision
+
+Build a **universal LLM provider extension** that acts as infrastructure for the VS Code ecosystem, enabling any extension to add AI features through a standard API without managing API keys, implementing LLM clients, or dealing with provider-specific logic.
+
+### Key Value Propositions
+
+**For Extension Developers:**
+- Add AI features with 10 lines of code instead of 1000+
+- No API key management needed
+- Works with any provider user has configured
+- Standard VS Code API (future-proof)
+
+**For Users:**
+- Configure API keys once in one place
+- Works with all compatible extensions
+- Switch providers instantly
+- No vendor lock-in (Copilot alternatives)
+
+### Market Gap
+
+Currently, **only GitHub Copilot** registers with `vscode.lm`, creating a monopoly.  This leaves users who: 
+- Don't want to pay $10-20/month for Copilot
+- Have existing API keys with other providers
+- Need corporate-approved providers
+- Want local/private models (Ollama)
+- Prefer other models (Claude, Gemini, etc.)
+
+**Without any alternatives.**
+
+---
+
+## The Problem
+
+### Current State:  Fragmented AI Ecosystem
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Extension A                                                 │
+│  ├── Own OpenAI client implementation                       │
+│  ├── Own API key management                                 │
+│  ├── Own streaming logic                                    │
+│  └── Own error handling                                     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Extension B                                                 │
+│  ├── Different OpenAI client implementation                 │
+│  ├── Different API key management                           │
+│  ├── Different streaming logic                              │
+│  └── Different error handling                               │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Extension C                                                 │
+│  ├── Only works with Copilot ($20/month required)          │
+│  └── Users without Copilot can't use features              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Problems:**
+- ❌ Duplicated code across 100s of extensions
+- ❌ Users configure API keys separately for each extension
+- ❌ Inconsistent UX across extensions
+- ❌ Security risks (keys scattered everywhere)
+- ❌ Maintenance nightmare (API changes break every extension)
+- ❌ Many extensions require expensive Copilot subscription
+
+### User Pain Points
+
+```
+User wants to use 10 AI-powered extensions: 
+
+Extension 1: "Enter OpenAI API key in settings"
+Extension 2: "Enter Anthropic API key in settings"
+Extension 3: "Enter OpenAI API key" (again!)
+Extension 4: "Requires GitHub Copilot ($20/month)"
+Extension 5: "Enter OpenAI API key" (third time!)
+Extension 6: "Configure in config.yaml..."
+Extension 7: "Install Continue first..."
+Extension 8: "Create account on our platform..."
+Extension 9: "Only works with our service ($10/month)"
+Extension 10: "Enter Google API key..."
+
+Result: 
+😤 10 different configurations
+😤 API keys scattered across settings files
+😤 Multiple subscriptions required
+😤 Inconsistent behavior
+😤 Security nightmare
+```
+
+---
+
+## The Solution
+
+### Unified Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Universal LLM Provider Extension (Infrastructure)           │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Configuration Layer                                     │ │
+│  │ • Read Continue config (optional)                      │ │
+│  │ • Direct configuration UI                              │ │
+│  │ • . env file support                                    │ │
+│  │ • Secure secret storage                                │ │
+│  └────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ Provider Implementations                                │ │
+│  │ • OpenAI                                               │ │
+│  │ • Anthropic (Claude)                                   │ │
+│  │ • Google (Gemini)                                      │ │
+│  │ • Ollama (Local)                                       │ │
+│  │ • Azure OpenAI                                         │ │
+│  │ • Mistral                                              │ │
+│  │ • Extensible architecture for more                     │ │
+│  └────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │ vscode.lm Registration                                  │ │
+│  │ • Implements LanguageModelChatProvider                 │ │
+│  │ • Streaming support                                    │ │
+│  │ • Tool calling support                                 │ │
+│  │ • Image support                                        │ │
+│  └────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+              ┌────────────────────────┐
+              │   vscode.lm API        │
+              │   (Standard Interface) │
+              └────────────────────────┘
+                           ↓
+    ┌──────────────┬──────────────┬──────────────┬──────────────┐
+    ↓              ↓              ↓              ↓              ↓
+┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐
+│GitLens  │  │Test Gen │  │DB Client│  │PR Review│  │Doc Gen  │
+│         │  │         │  │         │  │         │  │         │
+│AI commit│  │Generate │  │Natural  │  │Code     │  │JSDoc    │
+│messages │  │tests    │  │language │  │review   │  │comments │
+└─────────┘  └─────────┘  └─────────┘  └─────────┘  └─────────┘
+```
+
+### Key Features
+
+#### 1. **Multiple Configuration Sources**
+- Import from Continue config (leverage existing setup)
+- Direct UI configuration
+- .env file support
+- VS Code secrets API integration
+
+#### 2. **Multi-Provider Support**
+- OpenAI (GPT-4, GPT-4o, GPT-3.5)
+- Anthropic (Claude 3.5 Sonnet, Opus, Haiku)
+- Google (Gemini 2.0 Flash, Pro)
+- Ollama (Local models - Llama, Mistral, etc.)
+- Azure OpenAI
+- Mistral AI
+- More via plugin system
+
+#### 3. **Enterprise Features**
+- Team secret management
+- Usage analytics
+- Policy controls
+- Audit logs
+- SSO integration
+
+#### 4. **Developer-Friendly**
+- Standard VS Code API
+- Comprehensive documentation
+- Example code
+- TypeScript types
+- Testing utilities
+
+---
+
+## Market Opportunity
+
+### Target Audiences
+
+#### 1. **Extension Developers** (Primary)
+- **Size:** 40,000+ published VS Code extensions
+- **Pain:** Complex LLM integration, API key management
+- **Value:** Add AI features in minutes instead of days
+
+#### 2. **VS Code Users** (Secondary)
+- **Size:** 20+ million active users
+- **Pain:** Configure API keys for every extension, expensive Copilot
+- **Value:** Configure once, use everywhere
+
+#### 3. **Enterprise Teams** (Tertiary)
+- **Size:** Thousands of companies using VS Code
+- **Pain:** Security, compliance, cost control
+- **Value:** Centralized management, auditing, policy enforcement
+
+### Market Size
+
+```
+TAM (Total Addressable Market):
+- 20M VS Code users × $10/year = $200M
+
+SAM (Serviceable Addressable Market):
+- 2M users with AI needs × $10/year = $20M
+
+SOM (Serviceable Obtainable Market - Year 1):
+- 20K users × $10/year = $200K
+```
+
+### Competitive Advantages
+
+| Feature | GitHub Copilot | Continue | Cline | Universal LLM |
+|---------|---------------|----------|-------|---------------|
+| **Price** | $10-20/month | Free | Free | Free + Pro |
+| **Provider Choice** | ❌ GitHub only | ✅ 15+ | ✅ 10+ | ✅ 10+ |
+| **vscode.lm Integration** | ✅ Yes | ❌ No | ❌ No | ✅ Yes |
+| **Available to Other Extensions** | ✅ Yes | ❌ No | ❌ No | ✅ Yes |
+| **Local Models** | ❌ No | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Team Features** | ✅ Yes | ✅ Pro | ❌ No | ✅ Pro |
+
+**Unique Position:** Only free, multi-provider extension that registers with `vscode.lm`
+
+---
+
+## Technical Architecture
+
+### High-Level Architecture
+
+```
+┌──────────────────────��──────────────────────────────────────┐
+│                    Extension Host                            │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Configuration Manager                      │ │
+│  │  • ConfigReader (Continue, .env, direct)               │ │
+│  │  • SecretResolver (template variables)                 │ │
+│  │  • ConfigWatcher (hot reload)                          │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                            ↓                                 │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Provider Registry                          │ │
+│  │  • ProviderFactory                                     │ │
+│  │  • ModelRegistry                                       │ │
+│  │  • CapabilitiesManager                                 │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                            ↓                                 │
+│  ┌────────────────────────────────────────────────────────�� │
+│  │         Universal LLM Chat Provider                     │ │
+│  │  • Implements vscode.lm. LanguageModelChatProvider      │ │
+│  │  • Request routing                                     │ │
+│  │  • Response streaming                                  │ │
+│  │  • Error handling                                      │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                            ↓                                 │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │              Provider Implementations                   │ │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │ │
+│  │  │ OpenAI   │ │Anthropic │ │ Gemini   │ │ Ollama   │ │ │
+│  │  │ Client   │ │ Client   │ │ Client   │ │ Client   │ │ │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ │ │
+│  └────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Core Components
+
+#### 1. Configuration Manager
+- Reads configuration from multiple sources
+- Resolves template variables (secrets)
+- Watches for configuration changes
+- Validates configurations
+
+#### 2. Provider Registry
+- Registers available providers
+- Creates provider instances
+- Manages model metadata
+- Tracks capabilities
+
+#### 3. Universal LLM Chat Provider
+- Implements VS Code's `LanguageModelChatProvider` interface
+- Routes requests to appropriate provider
+- Handles streaming responses
+- Manages errors and retries
+
+#### 4. Provider Implementations
+- Provider-specific API clients
+- Streaming handlers
+- Error converters
+- Rate limiting
+
+### Data Flow
+
+```
+User Request Flow:
+1. Extension calls vscode.lm.selectChatModels()
+   ↓
+2. VS Code queries Universal LLM Provider
+   ↓
+3. Provider returns available models (from config)
+   ↓
+4. Extension calls model.sendRequest(messages)
+   ↓
+5. Universal LLM Provider routes to appropriate provider client
+   ↓
+6. Provider client makes API call (OpenAI, Anthropic, etc.)
+   ↓
+7. Response streams back through provider → Universal LLM → VS Code
+   ↓
+8. Extension receives streaming response
+```
+
+---
+
+## Implementation Details
+
+### Project Structure
+
+```
+universal-llm-provider/
+├── src/
+│   ├── extension.ts                    # Extension entry point
+│   ├── config/
+│   │   ├── ConfigReader.ts            # Read configs from various sources
+│   │   ├── ContinueConfigReader.ts    # Continue-specific config reader
+│   │   ├── SecretResolver.ts          # Resolve template variables
+│   │   └── ConfigWatcher.ts           # Watch for config changes
+│   ├── providers/
+│   │   ├── BaseProvider.ts            # Abstract base provider
+│   │   ├── OpenAIProvider.ts          # OpenAI implementation
+│   │   ├── AnthropicProvider.ts       # Anthropic implementation
+│   │   ├── GeminiProvider.ts          # Google Gemini implementation
+│   │   ├── OllamaProvider.ts          # Ollama implementation
+│   │   ├── AzureOpenAIProvider. ts     # Azure OpenAI implementation
+│   │   ├── MistralProvider.ts         # Mistral implementation
+│   │   └── ProviderFactory.ts         # Factory for creating providers
+│   ├── registry/
+│   │   ├── ModelRegistry.ts           # Track available models
+│   │   ├── CapabilitiesManager.ts     # Model capabilities
+│   │   └── ProviderRegistry.ts        # Registered providers
+│   ├── streaming/
+│   │   ├── StreamParser.ts            # Parse SSE streams
+│   │   ├── OpenAIStreamParser.ts      # OpenAI-specific parsing
+│   │   ├── AnthropicStreamParser.ts   # Anthropic-specific parsing
+│   │   └── GeminiStreamParser.ts      # Gemini-specific parsing
+│   ├── ui/
+│   │   ├── ConfigurationPanel.ts      # WebView for configuration
+│   │   ├── ModelPickerPanel.ts        # Model selection UI
+│   │   └── StatusBar.ts               # Status bar integration
+│   ├── core/
+│   │   ├── UniversalLLMProvider.ts    # Main provider implementation
+│   │   ├── RequestRouter.ts           # Route requests to providers
+│   │   └── ErrorHandler.ts            # Centralized error handling
+│   └── utils/
+│       ├── TokenCounter.ts            # Count tokens for different models
+│       ├── RateLimiter.ts             # Rate limiting
+│       ├── Cache.ts                   # Response caching
+│       └── Logger.ts                  # Logging utilities
+├── test/
+│   ├── unit/                          # Unit tests
+│   ├── integration/                   # Integration tests
+│   └── e2e/                           # End-to-end tests
+├── docs/
+│   ├── user-guide. md                  # User documentation
+│   ├── developer-guide.md             # Developer documentation
+│   └── api-reference.md               # API documentation
+├── package.json
+├── tsconfig.json
+└── README. md
+```
+
+### Core Implementation
+
+#### 1. Extension Entry Point
+
+```typescript
+// src/extension.ts
+import * as vscode from 'vscode';
+import { UniversalLLMProvider } from './core/UniversalLLMProvider';
+import { ConfigManager } from './config/ConfigManager';
+import { ProviderRegistry } from './registry/ProviderRegistry';
+
+let provider: UniversalLLMProvider | undefined;
+let configWatcher: vscode. Disposable | undefined;
+
+export async function activate(context: vscode. ExtensionContext) {
+  console.log('Universal LLM Provider activating.. .');
+
+  // Initialize configuration manager
+  const configManager = new ConfigManager(context);
+  await configManager.initialize();
+
+  // Initialize provider registry
+  const providerRegistry = new ProviderRegistry();
+  providerRegistry.registerAllProviders();
+
+  // Create and register main provider
+  provider = new UniversalLLMProvider(configManager, providerRegistry);
+  
+  const providerDisposable = vscode.lm.registerLanguageModelChatProvider(
+    'universal-llm',
+    provider
+  );
+  context.subscriptions.push(providerDisposable);
+
+  // Watch for configuration changes
+  configWatcher = configManager.watch(() => {
+    provider?.reloadModels();
+    vscode.window.showInformationMessage('Universal LLM:  Configuration reloaded');
+  });
+  context.subscriptions.push(configWatcher);
+
+  // Register commands
+  registerCommands(context, configManager, provider);
+
+  // Show status bar
+  const statusBar = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100
+  );
+  statusBar.text = `$(sparkle) Universal LLM`;
+  statusBar.tooltip = `${provider. getModelCount()} models available`;
+  statusBar.command = 'universalLLM.showModels';
+  statusBar.show();
+  context.subscriptions.push(statusBar);
+
+  // Check for configuration
+  const hasConfig = await configManager.hasValidConfiguration();
+  if (!hasConfig) {
+    showFirstTimeSetup(context);
+  } else {
+    const modelCount = provider.getModelCount();
+    vscode.window.showInformationMessage(
+      `Universal LLM activated with ${modelCount} models`
+    );
+  }
+
+  console.log('Universal LLM Provider activated successfully');
+}
+
+export function deactivate() {
+  if (configWatcher) {
+    configWatcher.dispose();
+  }
+  console.log('Universal LLM Provider deactivated');
+}
+
+function registerCommands(
+  context: vscode.ExtensionContext,
+  configManager:  ConfigManager,
+  provider: UniversalLLMProvider
+) {
+  // Configure command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('universalLLM.configure', async () => {
+      const panel = vscode.window.createWebviewPanel(
+        'universalLLMConfig',
+        'Universal LLM Configuration',
+        vscode.ViewColumn.One,
+        { enableScripts:  true }
+      );
+      // Show configuration UI
+      panel.webview.html = await getConfigurationWebviewContent(configManager);
+    })
+  );
+
+  // Show models command
+  context.subscriptions.push(
+    vscode. commands.registerCommand('universalLLM.showModels', async () => {
+      const models = provider.getAvailableModels();
+      const items = models.map(m => ({
+        label: m. name,
+        description: `${m.provider} • ${m.contextLength} tokens`,
+        detail: m.description
+      }));
+      
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Available LLM models'
+      });
+      
+      if (selected) {
+        vscode.window.showInformationMessage(`Selected: ${selected.label}`);
+      }
+    })
+  );
+
+  // Reload configuration command
+  context.subscriptions.push(
+    vscode.commands. registerCommand('universalLLM.reloadConfig', async () => {
+      await configManager.reload();
+      provider.reloadModels();
+      vscode.window.showInformationMessage('Configuration reloaded');
+    })
+  );
+
+  // Test connection command
+  context.subscriptions. push(
+    vscode.commands.registerCommand('universalLLM.testConnection', async () => {
+      const result = await provider.testConnections();
+      vscode.window. showInformationMessage(
+        `Tested ${result.total} providers:  ${result.successful} successful, ${result.failed} failed`
+      );
+    })
+  );
+}
+
+async function showFirstTimeSetup(context: vscode.ExtensionContext) {
+  const selection = await vscode.window.showInformationMessage(
+    'Welcome to Universal LLM! Configure your first provider to get started.',
+    'Configure Now',
+    'Import from Continue',
+    'Later'
+  );
+
+  if (selection === 'Configure Now') {
+    vscode.commands.executeCommand('universalLLM.configure');
+  } else if (selection === 'Import from Continue') {
+    vscode.commands.executeCommand('universalLLM.importFromContinue');
+  }
+}
+
+async function getConfigurationWebviewContent(
+  configManager: ConfigManager
+): Promise<string> {
+  // Return HTML for configuration UI
+  return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal LLM Configuration</title>
+</head>
+<body>
+    <h1>Configure Universal LLM</h1>
+    <!-- Configuration UI -->
+</body>
+</html>`;
+}
+```
+
+#### 2. Configuration Manager
+
+```typescript
+// src/config/ConfigManager.ts
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { ContinueConfigReader } from './ContinueConfigReader';
+import { SecretResolver } from './SecretResolver';
+
+export interface ModelConfig {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  apiKey?: string;
+  apiBase?: string;
+  roles:  string[];
+  contextLength?:  number;
+  capabilities?: {
+    imageInput?: boolean;
+    toolCalling?: boolean;
+  };
+}
+
+export interface ProviderConfig {
+  name: string;
+  apiKey:  string;
+  apiBase?:  string;
+  models: string[];
+}
+
+export class ConfigManager {
+  private context: vscode.ExtensionContext;
+  private secretResolver: SecretResolver;
+  private continueReader: ContinueConfigReader;
+  private models: Map<string, ModelConfig> = new Map();
+  private watchers: vscode.FileSystemWatcher[] = [];
+
+  constructor(context: vscode.ExtensionContext) {
+    this.context = context;
+    this.secretResolver = new SecretResolver();
+    this.continueReader = new ContinueConfigReader();
+  }
+
+  async initialize(): Promise<void> {
+    // Load from multiple sources
+    await this.loadFromVSCodeSettings();
+    await this.loadFromContinueConfig();
+    await this.loadFromEnvFiles();
+    
+    // Setup watchers
+    this.setupWatchers();
+  }
+
+  private async loadFromVSCodeSettings(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('universalLLM');
+    const providers = config.get<ProviderConfig[]>('providers', []);
+
+    for (const provider of providers) {
+      const resolvedApiKey = await this.secretResolver.resolve(provider.apiKey);
+      
+      for (const modelName of provider.models) {
+        const modelId = `${provider.name}-${modelName}`;
+        this.models.set(modelId, {
+          id: modelId,
+          name: `${provider.name}/${modelName}`,
+          provider: provider.name,
+          model: modelName,
+          apiKey: resolvedApiKey,
+          apiBase: provider.apiBase,
+          roles: ['chat'],
+          contextLength: this.getDefaultContextLength(provider.name, modelName)
+        });
+      }
+    }
+  }
+
+  private async loadFromContinueConfig(): Promise<void> {
+    const continueModels = this.continueReader.getModels();
+    
+    for (const model of continueModels) {
+      if (! this.models.has(model. id)) {
+        this.models.set(model.id, {
+          id: model.id,
+          name: model.name,
+          provider: model.provider,
+          model: model.model,
+          apiKey: model.apiKey,
+          apiBase: model.apiBase,
+          roles: model.roles,
+          contextLength: this.getDefaultContextLength(model.provider, model.model),
+          capabilities: {
+            imageInput: this.supportsImages(model.provider),
+            toolCalling: this. supportsTools(model.provider)
+          }
+        });
+      }
+    }
+  }
+
+  private async loadFromEnvFiles(): Promise<void> {
+    const envPaths = [
+      path.join(os.homedir(), '.continue', '. env'),
+      path.join(vscode.workspace.workspaceFolders? .[0]?.uri.fsPath || '', '.continue', '.env'),
+      path.join(vscode.workspace.workspaceFolders?.[0]?.uri. fsPath || '', '.env')
+    ];
+
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        this.secretResolver.loadEnvFile(envPath);
+      }
+    }
+  }
+
+  private setupWatchers(): void {
+    // Watch VS Code settings
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e. affectsConfiguration('universalLLM')) {
+        this.reload();
+      }
+    });
+
+    // Watch Continue config
+    const continueConfigPath = path.join(os.homedir(), '.continue', 'config.yaml');
+    if (fs.existsSync(continueConfigPath)) {
+      const watcher = vscode.workspace.createFileSystemWatcher(continueConfigPath);
+      watcher.onDidChange(() => this.reload());
+      watcher.onDidCreate(() => this.reload());
+      watcher.onDidDelete(() => this.reload());
+      this.watchers.push(watcher);
+    }
+
+    // Watch . env files
+    const envPaths = [
+      path.join(os.homedir(), '.continue', '.env'),
+      path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', '. env')
+    ];
+
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        const watcher = vscode.workspace. createFileSystemWatcher(envPath);
+        watcher.onDidChange(() => this.reload());
+        this.watchers.push(watcher);
+      }
+    }
+  }
+
+  async reload(): Promise<void> {
+    this.models.clear();
+    await this.initialize();
+  }
+
+  getModels(): ModelConfig[] {
+    return Array. from(this.models.values());
+  }
+
+  getModel(id: string): ModelConfig | undefined {
+    return this.models.get(id);
+  }
+
+  async hasValidConfiguration(): Promise<boolean> {
+    return this.models.size > 0;
+  }
+
+  watch(callback: () => void): vscode.Disposable {
+    const disposables: vscode.Disposable[] = [];
+    
+    // Watch configuration changes
+    disposables.push(
+      vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('universalLLM')) {
+          callback();
+        }
+      })
+    );
+
+    return {
+      dispose: () => {
+        disposables.forEach(d => d.dispose());
+      }
+    };
+  }
+
+  private getDefaultContextLength(provider: string, model: string): number {
+    // Provider and model-specific context lengths
+    const contextLengths:  Record<string, number> = {
+      'openai-gpt-4':  128000,
+      'openai-gpt-4o': 128000,
+      'openai-gpt-3.5-turbo': 16385,
+      'anthropic-claude-3-opus': 200000,
+      'anthropic-claude-3-sonnet': 200000,
+      'anthropic-claude-3-haiku': 200000,
+      'google-gemini-pro': 1000000,
+      'google-gemini-flash': 1000000,
+      'ollama-*': 8192
+    };
+
+    const key = `${provider}-${model}`;
+    return contextLengths[key] || contextLengths[`${provider}-*`] || 8192;
+  }
+
+  private supportsImages(provider: string): boolean {
+    return ['openai', 'anthropic', 'google', 'gemini'].includes(provider. toLowerCase());
+  }
+
+  private supportsTools(provider: string): boolean {
+    return ['openai', 'anthropic', 'google', 'gemini'].includes(provider.toLowerCase());
+  }
+
+  dispose(): void {
+    this.watchers.forEach(w => w.dispose());
+  }
+}
+```
+
+#### 3. Continue Config Reader
+
+```typescript
+// src/config/ContinueConfigReader. ts
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import * as yaml from 'js-yaml';
+
+interface ContinueModel {
+  provider?:  string;
+  model?:  string;
+  apiKey?: string;
+  apiBase?: string;
+  uses?: string;
+  with?: Record<string, string>;
+  roles?: string[];
+  name?: string;
+}
+
+interface ContinueConfig {
+  models: ContinueModel[];
+  [key: string]: any;
+}
+
+export class ContinueConfigReader {
+  private configPath: string;
+  private envVars: Map<string, string>;
+
+  constructor() {
+    const continueDir = path.join(os.homedir(), '.continue');
+    
+    // Try config.yaml first, then config.json
+    this.configPath = path.join(continueDir, 'config. yaml');
+    if (!fs.existsSync(this. configPath)) {
+      this.configPath = path.join(continueDir, 'config.json');
+    }
+
+    this.envVars = this.loadEnvVars();
+  }
+
+  private loadEnvVars(): Map<string, string> {
+    const envMap = new Map<string, string>();
+    
+    // Load from multiple . env file locations
+    const envPaths = [
+      path.join(os.homedir(), '.continue', '.env'),
+      path.join(process.cwd(), '.continue', '.env'),
+      path.join(process.cwd(), '.env')
+    ];
+
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf-8');
+        
+        // Simple . env parser
+        content.split('\n').forEach(line => {
+          const match = line.match(/^([^=]+)=(.*)$/);
+          if (match) {
+            const [, key, value] = match;
+            envMap.set(key. trim(), value.trim());
+          }
+        });
+      }
+    }
+
+    // Include process.env
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value) {
+        envMap.set(key, value);
+      }
+    }
+
+    return envMap;
+  }
+
+  readConfig(): ContinueConfig | null {
+    if (!fs.existsSync(this.configPath)) {
+      return null;
+    }
+
+    try {
+      const content = fs. readFileSync(this.configPath, 'utf-8');
+      
+      if (this.configPath.endsWith('.yaml')) {
+        return yaml.load(content) as ContinueConfig;
+      } else {
+        return JSON.parse(content);
+      }
+    } catch (error) {
+      console.error('Error reading Continue config:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Resolve template variables like ${{ secrets.OPENAI_API_KEY }}
+   */
+  resolveSecret(template: string | undefined): string | undefined {
+    if (!template) return undefined;
+    
+    // Match ${{ secrets.NAME }} or ${{ inputs.NAME }}
+    const match = template.match(/\$\{\{\s*(? :secrets|inputs)\.(\w+)\s*\}\}/);
+    if (match) {
+      const secretName = match[1];
+      return this.envVars.get(secretName) || process.env[secretName];
+    }
+    
+    // Not a template, return as-is
+    return template;
+  }
+
+  /**
+   * Get all models with resolved secrets
+   */
+  getModels(): Array<{
+    id: string;
+    name: string;
+    provider: string;
+    model:  string;
+    apiKey?: string;
+    apiBase?: string;
+    roles: string[];
+  }> {
+    const config = this.readConfig();
+    if (!config || !config.models) {
+      return [];
+    }
+
+    return config.models.map((model, index) => {
+      // Resolve provider and model name
+      let provider = model.provider || '';
+      let modelName = model.model || '';
+      
+      // Handle "uses" syntax (e.g., "anthropic/claude-4-sonnet")
+      if (model.uses) {
+        const parts = model.uses.split('/');
+        provider = parts[0];
+        modelName = parts. slice(1).join('/');
+      }
+
+      // Resolve API key from multiple sources
+      let apiKey = model.apiKey;
+      if (model.with) {
+        // Look for API key in "with" clause
+        for (const [key, value] of Object.entries(model.with)) {
+          if (key. includes('API_KEY') || key.includes('api_key')) {
+            apiKey = value;
+            break;
+          }
+        }
+      }
+
+      // Resolve secrets
+      apiKey = this.resolveSecret(apiKey);
+      const apiBase = this.resolveSecret(model.apiBase);
+
+      return {
+        id: `continue-${provider}-${modelName}-${index}`,
+        name: model.name || `${provider}/${modelName}`,
+        provider,
+        model: modelName,
+        apiKey,
+        apiBase,
+        roles: model.roles || ['chat']
+      };
+    }).filter(m => m.apiKey); // Only include models with valid API keys
+  }
+
+  exists(): boolean {
+    return fs.existsSync(this.configPath);
+  }
+}
+```
+
+#### 4. Universal LLM Provider
+
+```typescript
+// src/core/UniversalLLMProvider.ts
+import * as vscode from 'vscode';
+import { ConfigManager, ModelConfig } from '../config/ConfigManager';
+import { ProviderRegistry } from '../registry/ProviderRegistry';
+import { BaseProvider } from '../providers/BaseProvider';
+
+export class UniversalLLMProvider implements vscode.lm.LanguageModelChatProvider {
+  private configManager: ConfigManager;
+  private providerRegistry: ProviderRegistry;
+  private providerInstances: Map<string, BaseProvider> = new Map();
+
+  constructor(
+    configManager: ConfigManager,
+    providerRegistry: ProviderRegistry
+  ) {
+    this.configManager = configManager;
+    this.providerRegistry = providerRegistry;
+  }
+
+  provideLanguageModelChatInformation(): vscode.lm.LanguageModelChatInformation[] {
+    const models = this. configManager.getModels();
+    
+    return models.map(model => ({
+      id: model.id,
+      name: model.name,
+      family: this.getFamilyFromProvider(model.provider),
+      version: '1.0.0',
+      maxInputTokens: model.contextLength || 8192,
+      maxOutputTokens: 4096,
+      tooltip: `${model.provider}/${model.model}`,
+      detail: `Roles: ${model.roles.join(', ')}`,
+      capabilities: {
+        imageInput: model.capabilities?.imageInput || false,
+        toolCalling: model. capabilities?.toolCalling || false
+      }
+    }));
+  }
+
+  async provideLanguageModelChatResponse(
+    request: vscode.lm.LanguageModelChatRequest,
+    token: vscode.CancellationToken
+  ): Promise<vscode.lm.LanguageModelChatResponse> {
+    const model = this.configManager. getModel(request.model);
+    
+    if (!model) {
+      throw new Error(`Model ${request.model} not found`);
+    }
+
+    if (!model.apiKey) {
+      throw new Error(`No API key configured for ${model.provider}/${model.model}`);
+    }
+
+    // Get or create provider instance
+    const provider = this.getProviderInstance(model);
+    
+    // Route request to provider
+    try {
+      const stream = await provider.streamChat(request, model, token);
+      return { stream };
+    } catch (error) {
+      throw this.handleError(error, model);
+    }
+  }
+
+  private getProviderInstance(model: ModelConfig): BaseProvider {
+    const key = `${model.provider}-${model.apiKey?. substring(0, 10)}`;
+    
+    if (!this.providerInstances.has(key)) {
+      const ProviderClass = this.providerRegistry.getProvider(model.provider);
+      if (!ProviderClass) {
+        throw new Error(`Unsupported provider: ${model. provider}`);
+      }
+      
+      this.providerInstances.set(key, new ProviderClass());
+    }
+
+    return this.providerInstances.get(key)!;
+  }
+
+  private getFamilyFromProvider(provider: string): string {
+    const familyMap: Record<string, string> = {
+      'openai':  'gpt',
+      'anthropic':  'claude',
+      'google': 'gemini',
+      'gemini': 'gemini',
+      'ollama': 'llama',
+      'mistral': 'mistral'
+    };
+    return familyMap[provider. toLowerCase()] || provider;
+  }
+
+  private handleError(error: unknown, model: ModelConfig): Error {
+    if (error instanceof Error) {
+      // Parse provider-specific errors
+      if (error.message. includes('401') || error.message.includes('authentication')) {
+        return new Error(`Authentication failed for ${model.provider}.  Check your API key.`);
+      }
+      if (error.message.includes('429')) {
+        return new Error(`Rate limit exceeded for ${model.provider}. Please try again later.`);
+      }
+      if (error.message.includes('404')) {
+        return new Error(`Model ${model.model} not found in ${model.provider}.`);
+      }
+      
+      return error;
+    }
+    
+    return new Error(`Unknown error:  ${String(error)}`);
+  }
+
+  reloadModels(): void {
+    this.providerInstances.clear();
+  }
+
+  getModelCount(): number {
+    return this.configManager.getModels().length;
+  }
+
+  getAvailableModels() {
+    return this.configManager.getModels().map(m => ({
+      id: m.id,
+      name: m.name,
+      provider: m.provider,
+      contextLength: m.contextLength,
+      description: `${m.provider} ${m.model}`
+    }));
+  }
+
+  async testConnections(): Promise<{ total: number; successful: number; failed: number }> {
+    const models = this.configManager.getModels();
+    let successful = 0;
+    let failed = 0;
+
+    for (const model of models) {
+      try {
+        const provider = this.getProviderInstance(model);
+        const testRequest:  vscode.lm.LanguageModelChatRequest = {
+          model: model.id,
+          messages: [
+            { role: 'user', content: 'test' } as vscode.lm. LanguageModelChatMessage
+          ],
+          options: {}
+        };
+        
+        await provider.streamChat(testRequest, model, new vscode.CancellationTokenSource().token);
+        successful++;
+      } catch (error) {
+        console.error(`Connection test failed for ${model.name}:`, error);
+        failed++;
+      }
+    }
+
+    return { total: models.length, successful, failed };
+  }
+}
+```
+
+#### 5. Base Provider Interface
+
+```typescript
+// src/providers/BaseProvider.ts
+import * as vscode from 'vscode';
+import { ModelConfig } from '../config/ConfigManager';
+
+export abstract class BaseProvider {
+  /**
+   * Stream chat completion from the provider
+   */
+  abstract streamChat(
+    request: vscode. lm.LanguageModelChatRequest,
+    model: ModelConfig,
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>>;
+
+  /**
+   * Count tokens for the given text
+   */
+  abstract countTokens(text: string, model: string): Promise<number>;
+
+  /**
+   * Get the API base URL
+   */
+  protected getApiBase(model: ModelConfig): string {
+    return model.apiBase || this.getDefaultApiBase();
+  }
+
+  /**
+   * Get default API base for this provider
+   */
+  protected abstract getDefaultApiBase(): string;
+
+  /**
+   * Convert VS Code messages to provider format
+   */
+  protected convertMessages(
+    messages: vscode.lm.LanguageModelChatMessage[]
+  ): Array<{ role: string; content: string }> {
+    return messages.map(m => ({
+      role: m. role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user',
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+    }));
+  }
+
+  /**
+   * Create async iterable from ReadableStream
+   */
+  protected createStreamFromResponse(
+    response: Response,
+    token: vscode.CancellationToken,
+    parser: (line: string) => string | null
+  ): AsyncIterable<string> {
+    const reader = response.body! .getReader();
+    const decoder = new TextDecoder();
+
+    return {
+      async *[Symbol.asyncIterator]() {
+        let buffer = '';
+
+        try {
+          while (true) {
+            if (token.isCancellationRequested) {
+              await reader.cancel();
+              break;
+            }
+
+            const { done, value } = await reader. read();
+            if (done) break;
+
+            buffer += decoder. decode(value, { stream: true });
+            const lines = buffer. split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (! line.trim() || line.startsWith(': ')) continue;
+
+              const content = parser(line);
+              if (content) {
+                yield content;
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+    };
+  }
+}
+```
+
+#### 6. OpenAI Provider Implementation
+
+```typescript
+// src/providers/OpenAIProvider.ts
+import * as vscode from 'vscode';
+import { BaseProvider } from './BaseProvider';
+import { ModelConfig } from '../config/ConfigManager';
+
+export class OpenAIProvider extends BaseProvider {
+  protected getDefaultApiBase(): string {
+    return 'https://api.openai.com/v1';
+  }
+
+  async streamChat(
+    request: vscode.lm.LanguageModelChatRequest,
+    model: ModelConfig,
+    token:  vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const apiBase = this.getApiBase(model);
+    const url = `${apiBase}/chat/completions`;
+
+    const messages = this.convertMessages(request.messages);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${model.apiKey}`
+      },
+      body: JSON.stringify({
+        model: model.model,
+        messages,
+        stream: true,
+        temperature: request.options?. modelOptions?.temperature || 0.7,
+        max_tokens: request. options?.modelOptions?.maxTokens || 2048
+      }),
+      signal: token.isCancellationRequested ? AbortSignal.abort() : undefined
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI API error (${response.status}): ${error}`);
+    }
+
+    return this.createStreamFromResponse(response, token, this.parseOpenAILine);
+  }
+
+  private parseOpenAILine(line: string): string | null {
+    const data = line.replace(/^data: /, '').trim();
+    if (data === '[DONE]') return null;
+
+    try {
+      const json = JSON.parse(data);
+      return json.choices? .[0]?.delta?.content || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async countTokens(text: string, model: string): Promise<number> {
+    // Simplified token counting (in production, use tiktoken or similar)
+    return Math.ceil(text.length / 4);
+  }
+}
+```
+
+#### 7. Anthropic Provider Implementation
+
+```typescript
+// src/providers/AnthropicProvider. ts
+import * as vscode from 'vscode';
+import { BaseProvider } from './BaseProvider';
+import { ModelConfig } from '../config/ConfigManager';
+
+export class AnthropicProvider extends BaseProvider {
+  protected getDefaultApiBase(): string {
+    return 'https://api.anthropic.com';
+  }
+
+  async streamChat(
+    request: vscode. lm.LanguageModelChatRequest,
+    model: ModelConfig,
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const apiBase = this.getApiBase(model);
+    const url = `${apiBase}/v1/messages`;
+
+    // Anthropic doesn't support system messages in the messages array
+    const messages = request.messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+      }));
+
+    const systemMessage = request.messages
+      .find(m => m. role === 'system')?.content;
+
+    const response = await fetch(url, {
+      method:  'POST',
+      headers:  {
+        'Content-Type':  'application/json',
+        'x-api-key': model.apiKey! ,
+        'anthropic-version': '2023-06-01'
+      },
+      body:  JSON.stringify({
+        model: model.model,
+        messages,
+        system: systemMessage,
+        stream: true,
+        max_tokens: request.options?.modelOptions?.maxTokens || 2048
+      }),
+      signal: token.isCancellationRequested ? AbortSignal.abort() : undefined
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Anthropic API error (${response. status}): ${error}`);
+    }
+
+    return this.createStreamFromResponse(response, token, this.parseAnthropicLine);
+  }
+
+  private parseAnthropicLine(line:  string): string | null {
+    const data = line.replace(/^data: /, '').trim();
+    
+    try {
+      const json = JSON. parse(data);
+      if (json.type === 'content_block_delta') {
+        return json.delta?. text || null;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async countTokens(text: string, model:  string): Promise<number> {
+    // Simplified token counting
+    return Math.ceil(text. length / 3. 5);
+  }
+}
+```
+
+#### 8. Gemini Provider Implementation
+
+```typescript
+// src/providers/GeminiProvider.ts
+import * as vscode from 'vscode';
+import { BaseProvider } from './BaseProvider';
+import { ModelConfig } from '../config/ConfigManager';
+
+export class GeminiProvider extends BaseProvider {
+  protected getDefaultApiBase(): string {
+    return 'https://generativelanguage.googleapis.com';
+  }
+
+  async streamChat(
+    request: vscode. lm.LanguageModelChatRequest,
+    model: ModelConfig,
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const apiBase = this.getApiBase(model);
+    const url = `${apiBase}/v1beta/models/${model.model}:streamGenerateContent? key=${model.apiKey}`;
+
+    const contents = request.messages. map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ 
+        text: typeof m.content === 'string' ? m. content : JSON.stringify(m. content) 
+      }]
+    }));
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature:  request.options?.modelOptions?.temperature || 0.7,
+          maxOutputTokens: request.options?. modelOptions?.maxTokens || 2048
+        }
+      }),
+      signal: token.isCancellationRequested ? AbortSignal.abort() : undefined
+    });
+
+    if (!response. ok) {
+      const error = await response.text();
+      throw new Error(`Gemini API error (${response.status}): ${error}`);
+    }
+
+    return this.createStreamFromResponse(response, token, this.parseGeminiLine);
+  }
+
+  private parseGeminiLine(line: string): string | null {
+    const data = line.replace(/^data: /, '').trim();
+    
+    try {
+      const json = JSON.parse(data);
+      return json.candidates?.[0]?. content?.parts?.[0]?. text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async countTokens(text: string, model: string): Promise<number> {
+    // Simplified token counting
+    return Math.ceil(text. length / 4);
+  }
+}
+```
+
+#### 9. Ollama Provider Implementation
+
+```typescript
+// src/providers/OllamaProvider.ts
+import * as vscode from 'vscode';
+import { BaseProvider } from './BaseProvider';
+import { ModelConfig } from '../config/ConfigManager';
+
+export class OllamaProvider extends BaseProvider {
+  protected getDefaultApiBase(): string {
+    return 'http://localhost:11434';
+  }
+
+  async streamChat(
+    request: vscode. lm.LanguageModelChatRequest,
+    model: ModelConfig,
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const apiBase = this.getApiBase(model);
+    const url = `${apiBase}/api/chat`;
+
+    const messages = this.convertMessages(request.messages);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model.model,
+        messages,
+        stream: true
+      }),
+      signal: token. isCancellationRequested ?  AbortSignal.abort() : undefined
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Ollama API error (${response.status}): ${error}`);
+    }
+
+    return this.createStreamFromResponse(response, token, this. parseOllamaLine);
+  }
+
+  private parseOllamaLine(line: string): string | null {
+    try {
+      const json = JSON. parse(line);
+      return json.message?. content || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async countTokens(text: string, model: string): Promise<number> {
+    // Simplified token counting
+    return Math.ceil(text. length / 4);
+  }
+}
+```
+
+#### 10. Provider Registry
+
+```typescript
+// src/registry/ProviderRegistry.ts
+import { BaseProvider } from '../providers/BaseProvider';
+import { OpenAIProvider } from '../providers/OpenAIProvider';
+import { AnthropicProvider } from '../providers/AnthropicProvider';
+import { GeminiProvider } from '../providers/GeminiProvider';
+import { OllamaProvider } from '../providers/OllamaProvider';
+
+export class ProviderRegistry {
+  private providers: Map<string, new () => BaseProvider> = new Map();
+
+  constructor() {
+    this.registerAllProviders();
+  }
+
+  registerAllProviders(): void {
+    this.register('openai', OpenAIProvider);
+    this.register('anthropic', AnthropicProvider);
+    this.register('google', GeminiProvider);
+    this.register('gemini', GeminiProvider);
+    this.register('ollama', OllamaProvider);
+  }
+
+  register(name: string, providerClass: new () => BaseProvider): void {
+    this.providers.set(name. toLowerCase(), providerClass);
+  }
+
+  getProvider(name:  string): (new () => BaseProvider) | undefined {
+    return this.providers.get(name.toLowerCase());
+  }
+
+  getSupportedProviders(): string[] {
+    return Array.from(this.providers.keys());
+  }
+}
+```
+
+### Package.json
+
+```json
+{
+  "name": "universal-llm-provider",
+  "displayName": "Universal LLM Provider",
+  "description": "Use any LLM with any VS Code extension - OpenAI, Anthropic, Google, Ollama & more",
+  "version": "1.0.0",
+  "publisher": "your-publisher-name",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode":  "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "ai",
+    "openai",
+    "anthropic",
+    "claude",
+    "gpt",
+    "gemini",
+    "ollama",
+    "copilot",
+    "language model"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "universal-llm",
+        "displayName": "Universal LLM",
+        "managementCommand": "universalLLM.configure"
+      }
+    ],
+    "commands": [
+      {
+        "command": "universalLLM.configure",
+        "title":  "Configure Universal LLM Provider",
+        "category": "Universal LLM"
+      },
+      {
+        "command":  "universalLLM.showModels",
+        "title": "Show Available Models",
+        "category": "Universal LLM"
+      },
+      {
+        "command": "universalLLM.reloadConfig",
+        "title": "Reload Configuration",
+        "category":  "Universal LLM"
+      },
+      {
+        "command": "universalLLM. testConnection",
+        "title": "Test Provider Connections",
+        "category": "Universal LLM"
+      },
+      {
+        "command":  "universalLLM.importFromContinue",
+        "title": "Import Configuration from Continue",
+        "category":  "Universal LLM"
+      }
+    ],
+    "configuration": {
+      "title": "Universal LLM",
+      "properties": {
+        "universalLLM.autoReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reload configuration when files change"
+        },
+        "universalLLM.providers": {
+          "type": "array",
+          "default": [],
+          "description": "Configured LLM providers",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Provider name (openai, anthropic, google, ollama, etc.)"
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "API key or template variable (e.g., ${{ secrets.OPENAI_API_KEY }})"
+              },
+              "apiBase": {
+                "type":  "string",
+                "description":  "Optional custom API base URL"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type":  "string"
+                },
+                "description":  "List of model names to use"
+              }
+            }
+          }
+        },
+        "universalLLM.importContinueConfig": {
+          "type": "boolean",
+          "default": true,
+          "description": "Import configuration from Continue if available"
+        },
+        "universalLLM.enableCaching": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable response caching (experimental)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint":  "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "^20.0.0",
+    "@types/js-yaml": "^4.0.5",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.40.0",
+    "typescript":  "^5.0.0"
+  },
+  "dependencies":  {
+    "js-yaml": "^4.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/universal-llm-provider"
+  },
+  "homepage": "https://github.com/yourusername/universal-llm-provider#readme",
+  "bugs": {
+    "url": "https://github.com/yourusername/universal-llm-provider/issues"
+  },
+  "license": "MIT"
+}
+```
+
+---
+
+## API Documentation
+
+### For Extension Developers
+
+#### Basic Usage
+
+```typescript
+import * as vscode from 'vscode';
+
+// Get available models
+const models = await vscode.lm.selectChatModels({
+  vendor: 'universal-llm' // Optional: filter by vendor
+});
+
+if (models.length === 0) {
+  vscode.window.showErrorMessage('No LLM provider available.  Please install Universal LLM.');
+  return;
+}
+
+// Use first available model
+const model = models[0];
+
+// Create messages
+const messages = [
+  vscode. LanguageModelChatMessage.User('Generate a commit message for this diff:  .. .')
+];
+
+// Send request
+const response = await model.sendRequest(messages, {
+  modelOptions: {
+    temperature: 0.7,
+    maxTokens: 500
+  }
+});
+
+// Process streaming response
+let fullResponse = '';
+for await (const chunk of response. text) {
+  fullResponse += chunk;
+}
+
+console.log(fullResponse);
+```
+
+#### Advanced:  Model Selection
+
+```typescript
+// Select specific provider
+const openaiModels = await vscode.lm.selectChatModels({
+  vendor: 'universal-llm',
+  family: 'gpt' // OpenAI models
+});
+
+const claudeModels = await vscode. lm.selectChatModels({
+  vendor: 'universal-llm',
+  family:  'claude' // Anthropic models
+});
+
+// Let user choose
+const modelItems = models.map(m => ({
+  label: m.name,
+  description: `${m.family} • ${m.maxInputTokens} tokens`,
+  model: m
+}));
+
+const selected = await vscode.window.showQuickPick(modelItems);
+if (selected) {
+  // Use selected. model
+}
+```
+
+#### Advanced: With System Message
+
+```typescript
+const messages = [
+  vscode. LanguageModelChatMessage. User('You are a helpful coding assistant. '),
+  vscode.LanguageModelChatMessage.User('Explain this code: ...')
+];
+
+const response = await model.sendRequest(messages, {});
+```
+
+#### Advanced: Cancellation
+
+```typescript
+const tokenSource = new vscode.CancellationTokenSource();
+
+// Start request with cancellation token
+const response = model.sendRequest(messages, {}, tokenSource.token);
+
+// Cancel after 5 seconds
+setTimeout(() => tokenSource.cancel(), 5000);
+
+// Process response
+try {
+  for await (const chunk of response.text) {
+    console.log(chunk);
+  }
+} catch (error) {
+  if (error.message. includes('cancel')) {
+    console.log('Request was cancelled');
+  }
+}
+```
+
+#### Checking for Provider Availability
+
+```typescript
+export async function activate(context: vscode.ExtensionContext) {
+  // Check if Universal LLM is installed
+  const models = await vscode.lm. selectChatModels({ vendor: 'universal-llm' });
+  
+  if (models.length === 0) {
+    const selection = await vscode.window.showInformationMessage(
+      'This extension requires Universal LLM Provider for AI features.',
+      'Install Now',
+      'Later'
+    );
+
+    if (selection === 'Install Now') {
+      await vscode.commands.executeCommand(
+        'workbench.extensions.installExtension',
+        'yourpublisher.universal-llm-provider'
+      );
+      
+      // Prompt user to configure
+      await vscode.commands.executeCommand('universalLLM.configure');
+    }
+    return;
+  }
+
+  // Provider available, register AI commands
+  registerAICommands(context);
+}
+```
+
+#### Extension Dependency Declaration
+
+```json
+{
+  "name": "my-ai-extension",
+  "extensionDependencies": [
+    "yourpublisher.universal-llm-provider"
+  ]
+}
+```
+
+---
+
+## Extension Developer Guide
+
+### Creating an AI-Powered Extension
+
+#### Example 1: AI Commit Message Generator
+
+```typescript
+// extension.ts
+import * as vscode from 'vscode';
+import * as cp from 'child_process';
+
+export function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('myext.generateCommitMessage', async () => {
+      // Get git diff
+      const diff = await getGitDiff();
+      if (! diff) {
+        vscode.window.showErrorMessage('No changes to commit');
+        return;
+      }
+
+      // Get LLM model
+      const models = await vscode.lm. selectChatModels();
+      if (models.length === 0) {
+        vscode.window.showErrorMessage('No LLM provider available');
+        return;
+      }
+
+      // Generate commit message
+      const model = models[0];
+      const messages = [
+        vscode. LanguageModelChatMessage. User(
+          `Generate a conventional commit message for this diff:\n\n${diff}`
+        )
+      ];
+
+      const response = await model.sendRequest(messages, {});
+      let commitMessage = '';
+      for await (const chunk of response.text) {
+        commitMessage += chunk;
+      }
+
+      // Show in input box
+      const finalMessage = await vscode.window. showInputBox({
+        prompt:  'Commit message',
+        value: commitMessage. trim(),
+        placeHolder: 'Edit commit message...'
+      });
+
+      if (finalMessage) {
+        // Commit with message
+        await commitWithMessage(finalMessage);
+      }
+    })
+  );
+}
+
+async function getGitDiff(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    cp.exec('git diff --staged', (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
+}
+
+async function commitWithMessage(message: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    cp.exec(`git commit -m "${message}"`, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+```
+
+#### Example 2: AI Test Generator
+
+```typescript
+// extension.ts
+import * as vscode from 'vscode';
+
+export function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('myext.generateTests', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      // Get selected code
+      const selection = editor.selection;
+      const code = editor.document.getText(selection);
+
+      if (!code) {
+        vscode.window.showErrorMessage('Please select code to generate tests for');
+        return;
+      }
+
+      // Get language
+      const language = editor. document.languageId;
+
+      // Get LLM model
+      const models = await vscode.lm.selectChatModels();
+      if (models.length === 0) {
+        vscode.window.showErrorMessage('No LLM provider available');
+        return;
+      }
+
+      // Generate tests
+      const model = models[0];
+      const messages = [
+        vscode.LanguageModelChatMessage.User(
+          `Generate comprehensive unit tests for this ${language} code:\n\n${code}\n\nUse Jest testing framework. `
+        )
+      ];
+
+      // Show progress
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation. Notification,
+          title: 'Generating tests...',
+          cancellable: true
+        },
+        async (progress, token) => {
+          const response = await model.sendRequest(messages, {}, token);
+          
+          let tests = '';
+          for await (const chunk of response.text) {
+            tests += chunk;
+            progress.report({ message: `${tests.length} characters... ` });
+          }
+
+          // Create new test file
+          const testFileName = editor.document.fileName. replace(/\.(ts|js)$/, '.test.$1');
+          const testUri = vscode.Uri.file(testFileName);
+          
+          const edit = new vscode.WorkspaceEdit();
+          edit.createFile(testUri, { ignoreIfExists: true });
+          edit.insert(testUri, new vscode.Position(0, 0), tests);
+          
+          await vscode.workspace.applyEdit(edit);
+          
+          // Open test file
+          const doc = await vscode.workspace.openTextDocument(testUri);
+          await vscode.window.showTextDocument(doc);
+        }
+      );
+    })
+  );
+}
+```
+
+#### Example 3: AI Code Reviewer
+
+```typescript
+// extension.ts
+import * as vscode from 'vscode';
+
+export function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('myext.reviewCode', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) return;
+
+      const code = editor.document.getText();
+
+      // Get LLM model
+      const models = await vscode.lm.selectChatModels();
+      if (models.length === 0) return;
+
+      const model = models[0];
+      const messages = [
+        vscode.LanguageModelChatMessage.User(
+          `Review this code for:\n- Bugs\n- Security issues\n- Performance problems\n- Best practices\n\nCode:\n${code}`
+        )
+      ];
+
+      const response = await model.sendRequest(messages, {});
+      
+      let review = '';
+      for await (const chunk of response.text) {
+        review += chunk;
+      }
+
+      // Show review in panel
+      const panel = vscode. window.createWebviewPanel(
+        'codeReview',
+        'Code Review',
+        vscode.ViewColumn. Beside,
+        {}
+      );
+
+      panel.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: sans-serif; padding: 20px; }
+                h1 { color: #007acc; }
+                pre { background: #f4f4f4; padding: 10px; border-radius: 4px; }
+            </style>
+        </head>
+        <body>
+            <h1>Code Review Results</h1>
+            <pre>${review}</pre>
+        </body>
+        </html>
+      `;
+    })
+  );
+}
+```
+
+---
+
+## User Guide
+
+### Installation
+
+1. Open VS Code
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
+3. Search for "Universal LLM Provider"
+4. Click Install
+
+### Configuration
+
+#### Option 1: Direct Configuration
+
+1. Open Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
+2. Run "Universal LLM:  Configure Universal LLM Provider"
+3. Choose your provider (OpenAI, Anthropic, Google, Ollama)
+4. Enter your API key
+5. Select models to use
+
+#### Option 2: Import from Continue
+
+If you already have Continue configured:
+
+1. Open Command Palette
+2. Run "Universal LLM: Import Configuration from Continue"
+3. Your Continue models will be automatically available
+
+#### Option 3: Manual Configuration (. env files)
+
+Create a `.env` file in one of these locations:
+- `~/.continue/. env` (global)
+- `<workspace>/.continue/.env` (per-workspace)
+- `<workspace>/.env` (per-workspace)
+
+Example `.env`:
+```bash
+OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-api03-... 
+GEMINI_API_KEY=AIza...
+```
+
+Then configure in VS Code settings:
+```json
+{
+  "universalLLM.providers": [
+    {
+      "name": "openai",
+      "apiKey": "${{ secrets.OPENAI_API_KEY }}",
+      "models": ["gpt-4", "gpt-3.5-turbo"]
+    },
+    {
+      "name": "anthropic",
+      "apiKey":  "${{ secrets.ANTHROPIC_API_KEY }}",
+      "models": ["claude-3-5-sonnet-20241022"]
+    }
+  ]
+}
+```
+
+### Using with Extensions
+
+Once configured, any extension that uses the VS Code Language Model API will automatically work with your configured models.
+
+**Compatible extensions:**
+- GitLens (AI commit messages)
+- Test Explorer (Generate tests)
+- Database Client (Natural language queries)
+- And many more...
+
+### Viewing Available Models
+
+1. Open Command Palette
+2. Run "Universal LLM: Show Available Models"
+3. Browse your configured models
+
+### Testing Connection
+
+1. Open Command Palette
+2. Run "Universal LLM: Test Provider Connections"
+3. View connection test results
+
+### Troubleshooting
+
+#### No models available
+- Check that you've configured at least one provider
+- Verify your API keys are correct
+- Run "Universal LLM: Test Provider Connections"
+
+#### API key errors
+- Ensure API keys are valid and active
+- Check that secrets are properly resolved
+- Verify . env file syntax (no quotes around values)
+
+#### Rate limit errors
+- You've exceeded your provider's rate limit
+- Wait a few minutes and try again
+- Consider upgrading your provider plan
+
+---
+
+## Monetization Strategy
+
+### Pricing Tiers
+
+#### Free (Open Source Core)
+**Price:** $0
+
+**Features:**
+- ✅ OpenAI support (BYOK)
+- ✅ Anthropic support (BYOK)
+- ✅ Google Gemini support (BYOK)
+- ✅ Ollama support (local models)
+- ✅ Basic configuration
+- ✅ Community support
+- ✅ Import from Continue
+
+**Target:** Individual developers
+
+---
+
+#### Pro
+**Price:** $5/month or $50/year
+
+**Features:**
+- ✅ Everything in Free
+- ✅ Team secret management
+- ✅ Usage analytics dashboard
+- ✅ Priority support (email)
+- ✅ Early access to new providers
+- ✅ Custom API endpoints
+- ✅ Response caching
+- �� Advanced rate limiting
+
+**Target:** Professional developers, small teams
+
+---
+
+#### Enterprise
+**Price:** $50/user/year (minimum 10 users)
+
+**Features:**
+- ✅ Everything in Pro
+- ✅ SSO integration (SAML, OAuth)
+- ✅ Audit logs
+- ✅ Policy controls
+- ✅ Compliance reporting
+- ✅ SLA (99.9% uptime)
+- ✅ Dedicated support (Slack/Teams)
+- ✅ On-premise deployment option
+- ✅ Custom integrations
+- ✅ Training and onboarding
+
+**Target:** Enterprise teams, large organizations
+
+---
+
+### Revenue Projections
+
+**Year 1:**
+```
+Free users: 10,000
+Pro users: 200 × $50/year = $10,000
+Enterprise:  5 teams × 20 users × $50/year = $5,000
+Total: $15,000
+```
+
+**Year 2:**
+```
+Free users: 50,000
+Pro users: 1,000 × $50/year = $50,000
+Enterprise:  20 teams × 30 users × $50/year = $30,000
+Total: $80,000
+```
+
+**Year 3:**
+```
+Free users: 200,000
+Pro users: 4,000 × $50/year = $200,000
+Enterprise:  50 teams × 50 users × $50/year = $125,000
+Total: $325,000
+```
+
+### Monetization Strategies
+
+#### 1. Freemium Model
+- Free tier with core functionality
+- Pro tier for advanced features
+- Enterprise tier for teams
+
+#### 2. Marketplace Fees
+- Take 20% commission on paid add-on providers
+- Plugin marketplace for community providers
+
+#### 3. Consulting Services
+- Custom provider integrations
+- Training and workshops
+- Enterprise support contracts
+
+#### 4. GitHub Sponsors / Open Collective
+- Accept donations from users
+- Corporate sponsorships
+- Grant funding
+
+---
+
+## Go-to-Market Strategy
+
+### Phase 1: Launch (Month 1-2)
+
+#### Development
+- [ ] Complete MVP with 4 core providers (OpenAI, Anthropic, Google, Ollama)
+- [ ] Polish UX/UI
+- [ ] Write comprehensive documentation
+- [ ] Create video tutorials
+- [ ] Set up website/landing page
+
+#### Pre-Launch
+- [ ] Reach out to 10 popular extension authors
+- [ ] Create demo videos
+- [ ] Prepare ProductHunt launch
+- [ ] Write blog post announcement
+- [ ] Set up Discord community
+
+#### Launch
+- [ ] Post on ProductHunt
+- [ ] Post on HackerNews
+- [ ] Post on Reddit (r/vscode, r/programming)
+- [ ] Tweet announcement
+- [ ] Email tech influencers
+
+### Phase 2: Growth (Month 3-6)
+
+#### Developer Outreach
+- [ ] Contact top 100 VS Code extensions
+- [ ] Offer integration support
+- [ ] Create showcase examples
+- [ ] Write integration guides
+
+#### Content Marketing
+- [ ] Weekly blog posts
+- [ ] YouTube tutorial series
+- [ ] Conference talks (VS Code Day, etc.)
+- [ ] Podcast appearances
+
+#### Community Building
+- [ ] Active Discord community
+- [ ] Weekly office hours
+- [ ] Contributor program
+- [ ] Documentation improvements
+
+### Phase 3: Monetization (Month 7-12)
+
+#### Pro Features
+- [ ] Build team features
+- [ ] Usage analytics dashboard
+- [ ] Priority support system
+- [ ] Billing integration
+
+#### Enterprise Sales
+- [ ] Sales deck
+- [ ] Case studies
+- [ ] Enterprise documentation
+- [ ] Demo environment
+
+#### Partnerships
+- [ ] LLM provider partnerships
+- [ ] Cloud provider partnerships
+- [ ] Enterprise tool integrations
+
+### Marketing Channels
+
+#### Primary Channels
+1. **VS Code Marketplace** - Main distribution
+2. **GitHub** - Open source development
+3. **ProductHunt** - Launch platform
+4. **HackerNews** - Tech community
+5. **Reddit** - Developer communities
+
+#### Secondary Channels
+1. **YouTube** - Video tutorials
+2. **Twitter/X** - Updates and engagement
+3. **Dev.to** - Technical blog posts
+4. **Discord** - Community support
+5. **LinkedIn** - Professional networking
+
+#### Content Strategy
+
+**Blog Topics:**
+- "How to Add AI to Your VS Code Extension in 10 Minutes"
+- "5 VS Code Extensions That Use Universal LLM"
+- "Local LLMs with Ollama and VS Code"
+- "Building an AI Code Reviewer with VS Code"
+- "VS Code Language Model API: Complete Guide"
+
+**Video Topics:**
+- Quick Start Tutorial (5 min)
+- Configuration Walkthrough (10 min)
+- Building Your First AI Extension (30 min)
+- Advanced Features Deep Dive (45 min)
+
+---
+
+## Roadmap
+
+### Q1 2024:  MVP Launch
+- [x] Core provider implementations (OpenAI, Anthropic, Google, Ollama)
+- [x] Configuration management
+- [x] Continue config import
+- [x] Basic documentation
+- [x] VS Code Marketplace publish
+
+### Q2 2024: Community Growth
+- [ ] Azure OpenAI provider
+- [ ] Mistral AI provider
+- [ ] AWS Bedrock provider
+- [ ] Response caching
+- [ ] Usage analytics (basic)
+- [ ] 10+ extension integrations
+- [ ] Video tutorials
+- [ ] 1,000 active users
+
+### Q3 2024: Pro Features
+- [ ] Team secret management
+- [ ] Advanced analytics dashboard
+- [ ] Custom API endpoints
+- [ ] Priority support system
+- [ ] Rate limiting controls
+- [ ] Pro tier launch
+- [ ] 5,000 active users
+
+### Q4 2024: Enterprise Ready
+- [ ] SSO integration
+- [ ] Audit logs
+- [ ] Policy controls
+- [ ] Compliance reporting
+- [ ] On-premise deployment
+- [ ] Enterprise tier launch
+- [ ] 10,000 active users
+
+### 2025: Platform Evolution
+- [ ] Plugin marketplace
+- [ ] Custom provider SDK
+- [ ] Model fine-tuning support
+- [ ] Multi-modal support (images, audio)
+- [ ] Workflow automation
+- [ ] VS Code Web support
+- [ ] 50,000 active users
+
+---
+
+## Technical Challenges
+
+### 1. Streaming Response Parsing
+
+**Challenge:** Each provider has different SSE format
+
+**Solution:**
+- Abstract streaming parser
+- Provider-specific parsers
+- Robust error handling
+
+```typescript
+// Generic parser interface
+interface StreamParser {
+  parse(line: string): string | null;
+}
+
+// Provider-specific implementations
+class OpenAIStreamParser implements StreamParser {
+  parse(line: string): string | null {
+    // OpenAI-specific parsing
+  }
+}
+```
+
+### 2. Secret Management
+
+**Challenge:** Securely storing and resolving API keys
+
+**Solutions:**
+- Use VS Code Secrets API for sensitive data
+- Support template variables for flexibility
+- Never log or expose secrets
+- Clear secrets from memory after use
+
+```typescript
+// Store secret
+await context.secrets.store('openai_key', apiKey);
+
+// Retrieve secret
+const apiKey = await context.secrets.get('openai_key');
+```
+
+### 3. Rate Limiting
+
+**Challenge:** Different providers have different rate limits
+
+**Solutions:**
+- Track requests per provider
+- Implement exponential backoff
+- Queue requests when approaching limits
+- Surface rate limit errors clearly to users
+
+```typescript
+class RateLimiter {
+  private requests: Map<string, number[]> = new Map();
+  
+  async checkLimit(provider: string): Promise<boolean> {
+    // Implementation
+  }
+  
+  async waitForSlot(provider: string): Promise<void> {
+    // Implementation
+  }
+}
+```
+
+### 4. Token Counting
+
+**Challenge:** Accurate token counting varies by model
+
+**Solutions:**
+- Use provider-specific tokenizers when available
+- Fallback to approximations
+- Surface token counts to users
+- Warn before expensive requests
+
+```typescript
+interface TokenCounter {
+  count(text: string, model: string): Promise<number>;
+}
+
+class OpenAITokenCounter implements TokenCounter {
+  async count(text: string, model:  string): Promise<number> {
+    // Use tiktoken or approximation
+  }
+}
+```
+
+### 5. Error Handling
+
+**Challenge:** Converting provider errors to user-friendly messages
+
+**Solutions:**
+- Centralized error handler
+- Map common error codes
+- Provide actionable solutions
+- Log for debugging
+
+```typescript
+class ErrorHandler {
+  handle(error: unknown, provider: string): Error {
+    // Parse provider-specific errors
+    // Return user-friendly messages
+  }
+}
+```
+
+### 6. Configuration Validation
+
+**Challenge:** Ensuring configurations are valid before use
+
+**Solutions:**
+- Validate on load
+- Test connections
+- Provide clear error messages
+- Suggest fixes
+
+```typescript
+class ConfigValidator {
+  async validate(config: ModelConfig): Promise<ValidationResult> {
+    // Check required fields
+    // Test API connection
+    // Validate model names
+  }
+}
+```
+
+---
+
+## Success Metrics
+
+### Key Performance Indicators (KPIs)
+
+#### User Metrics
+- **Active Users:** Monthly active users
+- **Retention:** % users active after 30/60/90 days
+- **User Satisfaction:** NPS score, GitHub stars
+
+#### Adoption Metrics
+- **Extension Integrations:** Number of extensions using Universal LLM
+- **API Calls:** Total API requests processed
+- **Providers Configured:** Average providers per user
+
+#### Revenue Metrics
+- **MRR:** Monthly recurring revenue
+- **ARR:** Annual recurring revenue
+- **Conversion Rate:** Free → Pro → Enterprise
+- **LTV:** Lifetime value per user
+- **CAC:** Customer acquisition cost
+
+#### Community Metrics
+- **GitHub Stars:** Repository popularity
+- **Contributors:** Active contributors
+- **Issues/PRs:** Community engagement
+- **Discord Members:** Community size
+
+### Goals
+
+**Year 1:**
+- 10,000 free users
+- 200 Pro users
+- 100 Enterprise seats
+- 50 extension integrations
+- $15,000 ARR
+
+**Year 2:**
+- 50,000 free users
+- 1,000 Pro users
+- 500 Enterprise seats
+- 200 extension integrations
+- $80,000 ARR
+
+**Year 3:**
+- 200,000 free users
+- 4,000 Pro users
+- 2,500 Enterprise seats
+- 500 extension integrations
+- $325,000 ARR
+
+---
+
+## Competitive Analysis
+
+### GitHub Copilot
+
+**Strengths:**
+- ✅ Official Microsoft product
+- ✅ Large user base
+- ✅ Well-integrated
+- ✅ Good model quality
+
+**Weaknesses:**
+- ❌ Expensive ($10-20/month)
+- ❌ Single provider (limited choice)
+- ❌ Requires subscription
+
+**Our Advantage:**
+- ✅ Free option with BYOK
+- ✅ Multiple provider support
+- ✅ Local model support
+
+---
+
+### Continue
+
+**Strengths:**
+- ✅ Free
+- ✅ 15+ providers
+- ✅ Popular (1M+ downloads)
+- ✅ Full-featured UI
+
+**Weaknesses:**
+- ❌ Doesn't expose via `vscode.lm`
+- ❌ Not available to other extensions
+- ❌ Standalone experience only
+
+**Our Advantage:**
+- ✅ Infrastructure for ALL extensions
+- ✅ Can import Continue config
+- ✅ Standard VS Code API
+
+---
+
+### Cline
+
+**Strengths:**
+- ✅ Free
+- ✅ Agentic capabilities
+- ✅ Growing popularity
+
+**Weaknesses:**
+- ❌ Doesn't expose via `vscode.lm`
+- ❌ Standalone extension
+- ❌ Complex for simple use cases
+
+**Our Advantage:**
+- ✅ Simpler for most use cases
+- ✅ Standard API access
+- ✅ Infrastructure layer
+
+---
+
+### Competitive Positioning
+
+```
+                    High Features
+                         |
+                    Continue/Cline
+                         |
+        Complex ---------|--------- Simple
+                         |
+             Universal LLM (Infrastructure)
+                         |
+                  GitHub Copilot
+                         |
+                    Low Features
+```
+
+**Our Position:** 
+- **Simple infrastructure layer**
+- **Enables others to build features**
+- **Not competing with Continue/Cline**
+- **Alternative to Copilot monopoly**
+
+---
+
+## Conclusion
+
+### Why This Will Succeed
+
+1. **Real Problem:** Copilot monopoly, fragmented AI ecosystem
+2. **Clear Solution:** Universal infrastructure for LLM access
+3. **Network Effects:** More extensions → more users → more extensions
+4. **Timing:** `vscode.lm` API is new, market gap exists
+5. **Open Source:** Community-driven, transparent development
+6. **Business Model:** Clear path to revenue without vendor lock-in
+
+### Why Build This Now
+
+- ✅ VS Code Language Model API is stable (v1.90+)
+- ✅ Only Copilot currently provides models
+- ✅ Growing demand for AI features in extensions
+- ✅ Users frustrated with Copilot costs
+- ✅ Developers want easier LLM integration
+- ✅ Market gap is clear and wide open
+
+### Call to Action
+
+**For Developers:**
+Build this.  The ecosystem needs it.  Thousands of extensions could benefit.
+
+**For Users:**
+Star the repo.  Spread the word. Request integrations from your favorite extensions.
+
+**For Extension Authors:**
+Integrate with Universal LLM. Add AI features in minutes, not days.
+
+---
+
+### Next Steps
+
+1. **Star the GitHub repository** (when created)
+2. **Join the Discord community** (when created)
+3. **Contribute code or documentation**
+4. **Request your favorite extensions to integrate**
+5. **Share this document** with other developers
+
+---
+
+## License
+
+This project should be MIT licensed - open, permissive, enterprise-friendly.
+
+---
+
+## Contact
+
+- **GitHub:** [Repository URL]
+- **Discord:** [Community URL]
+- **Email:** [Contact Email]
+- **Twitter:** [Twitter Handle]
+
+---
+
+**Let's build the future of AI in VS Code together. ** 🚀
