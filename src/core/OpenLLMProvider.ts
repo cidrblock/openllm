@@ -5,13 +5,15 @@ import { ModelConfig, ConnectionTestResult } from '../types';
 import { getLogger } from '../utils/logger';
 
 /**
- * Main Language Model Provider that integrates with VS Code's LM API
+ * Main Language Model Provider that implements vscode.LanguageModelChatProvider
+ * This allows our models to appear in vscode.lm alongside Copilot models
  */
-export class OpenLLMProvider {
+export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
   private configManager: ConfigManager;
   private providerRegistry: ProviderRegistry;
   private logger = getLogger();
   private disposables: vscode.Disposable[] = [];
+  private registration: vscode.Disposable | undefined;
 
   constructor(
     configManager: ConfigManager,
@@ -20,54 +22,78 @@ export class OpenLLMProvider {
     this.configManager = configManager;
     this.providerRegistry = providerRegistry;
 
-    // Listen for configuration changes
+    // Register with VS Code's Language Model API
+    this.register();
+
+    // Re-register when configuration changes
     this.disposables.push(
       configManager.onDidChange(() => {
-        this.logger.info('Configuration changed, models updated');
+        this.logger.info('Configuration changed, re-registering models');
+        this.register();
       })
     );
   }
 
   /**
-   * Get all available model information for registration
+   * Register this provider with vscode.lm
    */
-  getLanguageModelInformation(): Array<{
-    id: string;
-    name: string;
-    family: string;
-    version: string;
-    maxInputTokens: number;
-    vendor: string;
-  }> {
+  private register(): void {
+    // Dispose previous registration
+    if (this.registration) {
+      this.registration.dispose();
+    }
+
+    try {
+      // Register using the vendor ID from package.json
+      this.registration = vscode.lm.registerLanguageModelChatProvider('open-llm', this);
+      this.logger.info('Registered with vscode.lm as vendor "open-llm"');
+    } catch (error) {
+      this.logger.error('Failed to register with vscode.lm:', error);
+    }
+  }
+
+  /**
+   * Provide information about available models
+   * Called by VS Code to discover what models this provider offers
+   */
+  provideLanguageModelChatInformation(
+    _options: { silent: boolean },
+    _token: vscode.CancellationToken
+  ): vscode.ProviderResult<vscode.LanguageModelChatInformation[]> {
     const models = this.configManager.getModels();
     
+    this.logger.debug(`provideLanguageModelChatInformation called, returning ${models.length} models`);
+
     return models.map(model => ({
       id: model.id,
       name: model.name,
+      tooltip: `${model.provider}/${model.model} via Open LLM Provider`,
       family: this.getFamilyFromProvider(model.provider),
-      version: '1.0.0',
       maxInputTokens: model.contextLength || 8192,
-      vendor: 'open-llm',
+      maxOutputTokens: 4096,
+      version: '1.0.0',
+      capabilities: {
+        toolCalling: false, // TODO: detect from model config
+        imageInput: false,  // TODO: detect from model config
+      }
     }));
   }
 
   /**
-   * Send a chat request to the specified model
+   * Handle chat requests from VS Code
+   * This is called when extensions use vscode.lm.sendRequest() with our models
    */
-  async sendRequest(
-    modelId: string,
+  async provideLanguageModelChatResponse(
+    modelInfo: vscode.LanguageModelChatInformation,
     messages: vscode.LanguageModelChatMessage[],
-    options: {
-      temperature?: number;
-      maxTokens?: number;
-      stop?: string[];
-    },
+    _options: vscode.ProvideLanguageModelChatResponseOptions,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
-  ): Promise<AsyncIterable<string>> {
-    const model = this.configManager.getModel(modelId);
+  ): Promise<void> {
+    const model = this.configManager.getModel(modelInfo.id);
     
     if (!model) {
-      throw new Error(`Model not found: ${modelId}`);
+      throw new Error(`Model not found: ${modelInfo.id}`);
     }
 
     if (!model.apiKey && model.provider.toLowerCase() !== 'ollama') {
@@ -80,13 +106,43 @@ export class OpenLLMProvider {
       throw new Error(`Unsupported provider: ${model.provider}`);
     }
 
-    this.logger.info(`Sending request to ${model.provider}/${model.model}`);
+    this.logger.info(`provideLanguageModelChatResponse: ${model.provider}/${model.model}`);
 
     try {
-      return await provider.streamChat(messages, model, options, token);
+      const stream = await provider.streamChat(
+        messages,
+        model,
+        {
+          // Extract options if available
+          temperature: undefined,
+          maxTokens: undefined,
+        },
+        token
+      );
+
+      for await (const chunk of stream) {
+        if (token.isCancellationRequested) {
+          break;
+        }
+        progress.report(new vscode.LanguageModelTextPart(chunk));
+      }
     } catch (error) {
       throw this.handleError(error, model);
     }
+  }
+
+  /**
+   * Provide token count for a message
+   */
+  async provideTokenCount(
+    _model: vscode.LanguageModelChatInformation,
+    text: string | vscode.LanguageModelChatMessage,
+    _token: vscode.CancellationToken
+  ): Promise<number> {
+    // Simple approximation: ~4 chars per token
+    const content = typeof text === 'string' ? text : 
+      text.content.map(p => p instanceof vscode.LanguageModelTextPart ? p.value : '').join('');
+    return Math.ceil(content.length / 4);
   }
 
   /**
@@ -139,12 +195,53 @@ export class OpenLLMProvider {
     return new Error(`Unknown error: ${String(error)}`);
   }
 
+  // ========== Legacy methods for direct access (used by Playground fallback) ==========
+
+  /**
+   * Send a chat request directly (for Playground when vscode.lm isn't available)
+   */
+  async sendRequest(
+    modelId: string,
+    messages: vscode.LanguageModelChatMessage[],
+    options: {
+      temperature?: number;
+      maxTokens?: number;
+      stop?: string[];
+    },
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const model = this.configManager.getModel(modelId);
+    
+    if (!model) {
+      throw new Error(`Model not found: ${modelId}`);
+    }
+
+    if (!model.apiKey && model.provider.toLowerCase() !== 'ollama') {
+      throw new Error(`No API key configured for ${model.provider}/${model.model}`);
+    }
+
+    const provider = this.providerRegistry.getProvider(model.provider);
+    
+    if (!provider) {
+      throw new Error(`Unsupported provider: ${model.provider}`);
+    }
+
+    this.logger.info(`Direct sendRequest: ${model.provider}/${model.model}`);
+
+    try {
+      return await provider.streamChat(messages, model, options, token);
+    } catch (error) {
+      throw this.handleError(error, model);
+    }
+  }
+
   /**
    * Reload models from configuration
    */
   reloadModels(): void {
     this.providerRegistry.clearInstances();
-    this.logger.info('Provider instances cleared');
+    this.register();
+    this.logger.info('Provider instances cleared and models re-registered');
   }
 
   /**
@@ -253,6 +350,9 @@ export class OpenLLMProvider {
    * Dispose of resources
    */
   dispose(): void {
+    if (this.registration) {
+      this.registration.dispose();
+    }
     this.disposables.forEach(d => d.dispose());
   }
 }

@@ -179,7 +179,7 @@ export class StatusPanel {
     };
   }
 
-  private update(): void {
+  private async update(): Promise<void> {
     const models = this.configManager.getModels();
     const providers = this.providerRegistry.getSupportedProviders();
     const providerMetadata = this.providerRegistry.getProviderMetadata();
@@ -194,11 +194,29 @@ export class StatusPanel {
       modelsByProvider[provider].push(model);
     }
 
+    // Query ALL models available in VS Code (including from other extensions like Copilot)
+    let vscodeLmModels: { id: string; vendor: string; family: string; version: string; name: string; maxInputTokens: number }[] = [];
+    try {
+      const allModels = await vscode.lm.selectChatModels({});
+      vscodeLmModels = allModels.map(m => ({
+        id: m.id,
+        vendor: m.vendor,
+        family: m.family,
+        version: m.version,
+        name: m.name,
+        maxInputTokens: m.maxInputTokens
+      }));
+    } catch (e) {
+      // vscode.lm may not be available in all versions
+      console.log('Could not query vscode.lm models:', e);
+    }
+
     this.panel.webview.html = this.getWebviewContent(
       models,
       providers,
       providerMetadata,
-      modelsByProvider
+      modelsByProvider,
+      vscodeLmModels
     );
   }
 
@@ -206,7 +224,8 @@ export class StatusPanel {
     models: ReturnType<ConfigManager['getModels']>,
     providers: string[],
     providerMetadata: ReturnType<ProviderRegistry['getProviderMetadata']>,
-    modelsByProvider: Record<string, typeof models>
+    modelsByProvider: Record<string, typeof models>,
+    vscodeLmModels: { id: string; vendor: string; family: string; version: string; name: string; maxInputTokens: number }[]
   ): string {
     const nonce = this.getNonce();
 
@@ -428,6 +447,22 @@ export class StatusPanel {
       color: var(--vscode-descriptionForeground);
       font-size: 0.85em;
     }
+    .model-vendor {
+      color: var(--vscode-textLink-foreground);
+      font-size: 0.85em;
+      font-weight: 500;
+    }
+    .model-family {
+      color: var(--vscode-descriptionForeground);
+      font-size: 0.8em;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+    .vscode-lm-model {
+      border-left: 3px solid var(--vscode-textLink-foreground);
+    }
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -569,10 +604,45 @@ export class StatusPanel {
       <div class="stat-value">${providers.length}</div>
       <div class="stat-label">Supported Providers</div>
     </div>
+    <div class="stat-card">
+      <div class="stat-value">${vscodeLmModels.length}</div>
+      <div class="stat-label">VS Code LM Models</div>
+    </div>
   </div>
 
   <div class="section">
-    <h2>Configured Models</h2>
+    <h2>VS Code Language Models (vscode.lm API)</h2>
+    <p style="color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-bottom: 12px;">
+      Models registered via vscode.lm by extensions like GitHub Copilot
+    </p>
+    ${vscodeLmModels.length === 0 ? `
+      <div class="empty-state" style="padding: 16px; background: var(--vscode-editor-inactiveSelectionBackground); border-radius: 6px;">
+        <p style="margin: 0 0 8px 0;">No vscode.lm models found.</p>
+        <p style="margin: 0; font-size: 0.85em; color: var(--vscode-descriptionForeground);">
+          <strong>Why?</strong> The vscode.lm API requires extensions that register chat models (like GitHub Copilot). 
+          Some editors (like Cursor) may not expose this API the same way VS Code does.
+        </p>
+        <p style="margin: 8px 0 0 0; font-size: 0.85em; color: var(--vscode-descriptionForeground);">
+          <strong>Note:</strong> Open LLM models use direct API calls and don't require vscode.lm registration.
+          They work independently and are shown in the "Configured Models" section below.
+        </p>
+      </div>
+    ` : `
+      <div class="model-list">
+        ${vscodeLmModels.map(m => `
+          <div class="model-item vscode-lm-model">
+            <span class="model-name">${m.name || m.id}</span>
+            <span class="model-vendor">${m.vendor}</span>
+            <span class="model-context">${m.maxInputTokens ? m.maxInputTokens.toLocaleString() + ' tokens' : 'Unknown'}</span>
+            <span class="model-family">${m.family}</span>
+          </div>
+        `).join('')}
+      </div>
+    `}
+  </div>
+
+  <div class="section">
+    <h2>Configured Models (Open LLM)</h2>
     <p style="color: var(--vscode-descriptionForeground); font-size: 0.85em; margin-bottom: 12px;">
       Hover over a model for connection details
     </p>

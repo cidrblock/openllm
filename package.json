@@ -7,12 +7,12 @@
   "license": "MIT",
   "icon": "images/icon.png",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.99.0"
   },
   "categories": [
     "AI",
-    "Machine Learning",
-    "Other"
+    "Chat",
+    "Machine Learning"
   ],
   "keywords": [
     "llm",
@@ -37,6 +37,12 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "open-llm",
+        "displayName": "Open LLM Provider"
+      }
+    ],
     "commands": [
       {
         "command": "openLLM.configure",
@@ -147,7 +153,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/vsce": "^2.24.0",

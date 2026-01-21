@@ -14,6 +14,8 @@ export class PlaygroundPanel {
   private configManager: ConfigManager;
   private openLLMProvider: OpenLLMProvider;
   private activeRequests: Map<string, vscode.CancellationTokenSource> = new Map();
+  // Cache of vscode.lm models for the current session
+  private vscodeLmModels: vscode.LanguageModelChat[] = [];
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -25,6 +27,9 @@ export class PlaygroundPanel {
     this.extensionUri = extensionUri;
     this.configManager = configManager;
     this.openLLMProvider = openLLMProvider;
+    
+    // Load vscode.lm models
+    this.refreshVSCodeLmModels();
 
     this.update();
 
@@ -109,6 +114,15 @@ export class PlaygroundPanel {
     return text.substring(0, maxLength) + '...';
   }
 
+  private escapeHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   private cancelAllRequests(): void {
     for (const tokenSource of this.activeRequests.values()) {
       tokenSource.cancel();
@@ -127,25 +141,96 @@ export class PlaygroundPanel {
     }
   }
 
+  /**
+   * Refresh the list of available models from vscode.lm API
+   */
+  private async refreshVSCodeLmModels(): Promise<void> {
+    try {
+      this.vscodeLmModels = await vscode.lm.selectChatModels({});
+      this.log('info', `Found ${this.vscodeLmModels.length} models via vscode.lm API`, {
+        models: this.vscodeLmModels.map(m => `${m.vendor}/${m.name}`),
+      });
+    } catch (error) {
+      this.log('debug', 'vscode.lm.selectChatModels not available', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.vscodeLmModels = [];
+    }
+  }
+
+  /**
+   * Get a vscode.lm model by ID
+   */
+  private getVSCodeLmModel(modelId: string): vscode.LanguageModelChat | undefined {
+    return this.vscodeLmModels.find(m => m.id === modelId);
+  }
+
+  /**
+   * Get unified list of all available models (vscode.lm + Open LLM configured)
+   */
+  private getAllModels(): Array<{
+    id: string;
+    name: string;
+    vendor: string;
+    type: 'vscode.lm' | 'openllm';
+    maxTokens: number;
+  }> {
+    const models: Array<{
+      id: string;
+      name: string;
+      vendor: string;
+      type: 'vscode.lm' | 'openllm';
+      maxTokens: number;
+    }> = [];
+
+    // Add vscode.lm models
+    for (const m of this.vscodeLmModels) {
+      models.push({
+        id: m.id,
+        name: m.name,
+        vendor: m.vendor,
+        type: 'vscode.lm',
+        maxTokens: m.maxInputTokens,
+      });
+    }
+
+    // Add Open LLM configured models (with prefix to avoid ID conflicts)
+    for (const m of this.configManager.getModels()) {
+      models.push({
+        id: `openllm:${m.id}`,
+        name: m.name,
+        vendor: `Open LLM (${m.provider})`,
+        type: 'openllm',
+        maxTokens: m.contextLength || 8192,
+      });
+    }
+
+    return models;
+  }
+
   private async sendToAllModels(prompt: string, selectedModelIds: string[]): Promise<void> {
     // Cancel any existing requests
     this.cancelAllRequests();
 
-    const models = this.configManager.getModels()
-      .filter(m => selectedModelIds.includes(m.id));
+    // Refresh vscode.lm models to get latest
+    await this.refreshVSCodeLmModels();
 
-    if (models.length === 0) {
-      this.log('error', 'No models selected');
+    // Get all models and filter to selected
+    const allModels = this.getAllModels();
+    const modelsToUse = allModels.filter(m => selectedModelIds.includes(m.id));
+
+    if (modelsToUse.length === 0) {
+      this.log('error', 'No models selected or available');
       return;
     }
 
-    this.log('info', `Starting requests to ${models.length} model(s)`, {
-      models: models.map(m => m.name),
+    this.log('info', `Starting requests to ${modelsToUse.length} model(s)`, {
+      models: modelsToUse.map(m => `${m.vendor}/${m.name} [${m.type}]`),
       promptLength: prompt.length,
     });
 
     // Initialize all responses as pending
-    for (const model of models) {
+    for (const model of modelsToUse) {
       this.panel.webview.postMessage({
         command: 'modelUpdate',
         modelId: model.id,
@@ -155,24 +240,24 @@ export class PlaygroundPanel {
     }
 
     // Send to all models concurrently
-    const promises = models.map(async (model) => {
+    const promises = modelsToUse.map(async (unifiedModel) => {
       const tokenSource = new vscode.CancellationTokenSource();
-      this.activeRequests.set(model.id, tokenSource);
+      this.activeRequests.set(unifiedModel.id, tokenSource);
       const requestStartTime = Date.now();
 
       // Log request details
-      this.log('request', `[${model.name}] Sending request`, {
-        provider: model.provider,
-        model: model.model,
-        apiBase: model.apiBase || '(default)',
+      const apiType = unifiedModel.type === 'vscode.lm' ? 'vscode.lm API' : 'Direct API';
+      this.log('request', `[${unifiedModel.name}] Sending via ${apiType}`, {
+        id: unifiedModel.id,
+        vendor: unifiedModel.vendor,
+        type: unifiedModel.type,
         prompt: this.truncate(prompt, 100),
-        options: { temperature: 0.7, maxTokens: 1024 },
       });
 
       try {
         this.panel.webview.postMessage({
           command: 'modelUpdate',
-          modelId: model.id,
+          modelId: unifiedModel.id,
           status: 'streaming',
           content: '',
           startTime: requestStartTime,
@@ -180,52 +265,102 @@ export class PlaygroundPanel {
 
         const messages = [vscode.LanguageModelChatMessage.User(prompt)];
         
-        this.log('debug', `[${model.name}] Creating LanguageModelChatMessage`, {
-          role: 'user',
-          contentLength: prompt.length,
-        });
-
-        const stream = await this.openLLMProvider.sendRequest(
-          model.id,
-          messages,
-          { temperature: 0.7, maxTokens: 1024 },
-          tokenSource.token
-        );
-
-        const streamStartTime = Date.now();
-        this.log('debug', `[${model.name}] Stream started`, {
-          timeToFirstByte: streamStartTime - requestStartTime + 'ms',
-        });
-
         let content = '';
         let chunkCount = 0;
-        for await (const chunk of stream) {
-          if (tokenSource.token.isCancellationRequested) {
-            this.log('info', `[${model.name}] Request cancelled during streaming`);
-            break;
-          }
-          chunkCount++;
-          content += chunk;
-          
-          // Log every 10th chunk to avoid spam
-          if (chunkCount % 10 === 0) {
-            this.log('debug', `[${model.name}] Received ${chunkCount} chunks`, {
-              totalLength: content.length,
-            });
+
+        if (unifiedModel.type === 'vscode.lm') {
+          // Use vscode.lm API
+          const lmModel = this.getVSCodeLmModel(unifiedModel.id);
+          if (!lmModel) {
+            throw new Error('vscode.lm model not found');
           }
 
-          this.panel.webview.postMessage({
-            command: 'modelUpdate',
-            modelId: model.id,
-            status: 'streaming',
-            content,
+          this.log('debug', `[${unifiedModel.name}] Calling vscode.lm.sendRequest()`, {
+            role: 'user',
+            contentLength: prompt.length,
           });
+
+          const response = await lmModel.sendRequest(
+            messages,
+            {},
+            tokenSource.token
+          );
+
+          const streamStartTime = Date.now();
+          this.log('debug', `[${unifiedModel.name}] vscode.lm stream started`, {
+            timeToFirstByte: streamStartTime - requestStartTime + 'ms',
+          });
+
+          for await (const part of response.text) {
+            if (tokenSource.token.isCancellationRequested) {
+              this.log('info', `[${unifiedModel.name}] Request cancelled`);
+              break;
+            }
+            chunkCount++;
+            content += part;
+            
+            if (chunkCount % 10 === 0) {
+              this.log('debug', `[${unifiedModel.name}] Received ${chunkCount} chunks`, {
+                totalLength: content.length,
+              });
+            }
+
+            this.panel.webview.postMessage({
+              command: 'modelUpdate',
+              modelId: unifiedModel.id,
+              status: 'streaming',
+              content,
+            });
+          }
+        } else {
+          // Use Open LLM direct API
+          const openLLMModelId = unifiedModel.id.replace('openllm:', '');
+          
+          this.log('debug', `[${unifiedModel.name}] Calling openLLMProvider.sendRequest()`, {
+            modelId: openLLMModelId,
+            role: 'user',
+            contentLength: prompt.length,
+          });
+
+          const stream = await this.openLLMProvider.sendRequest(
+            openLLMModelId,
+            messages,
+            { temperature: 0.7, maxTokens: 1024 },
+            tokenSource.token
+          );
+
+          const streamStartTime = Date.now();
+          this.log('debug', `[${unifiedModel.name}] Direct API stream started`, {
+            timeToFirstByte: streamStartTime - requestStartTime + 'ms',
+          });
+
+          for await (const chunk of stream) {
+            if (tokenSource.token.isCancellationRequested) {
+              this.log('info', `[${unifiedModel.name}] Request cancelled`);
+              break;
+            }
+            chunkCount++;
+            content += chunk;
+            
+            if (chunkCount % 10 === 0) {
+              this.log('debug', `[${unifiedModel.name}] Received ${chunkCount} chunks`, {
+                totalLength: content.length,
+              });
+            }
+
+            this.panel.webview.postMessage({
+              command: 'modelUpdate',
+              modelId: unifiedModel.id,
+              status: 'streaming',
+              content,
+            });
+          }
         }
 
         const endTime = Date.now();
         const duration = endTime - requestStartTime;
 
-        this.log('response', `[${model.name}] Complete`, {
+        this.log('response', `[${unifiedModel.name}] Complete (via ${apiType})`, {
           duration: duration + 'ms',
           chunks: chunkCount,
           responseLength: content.length,
@@ -234,7 +369,7 @@ export class PlaygroundPanel {
 
         this.panel.webview.postMessage({
           command: 'modelUpdate',
-          modelId: model.id,
+          modelId: unifiedModel.id,
           status: 'complete',
           content,
           endTime,
@@ -243,21 +378,21 @@ export class PlaygroundPanel {
         const endTime = Date.now();
         const errorMessage = error instanceof Error ? error.message : String(error);
         
-        this.log('error', `[${model.name}] Request failed`, {
+        this.log('error', `[${unifiedModel.name}] Request failed`, {
           duration: (endTime - requestStartTime) + 'ms',
           error: errorMessage,
         });
 
         this.panel.webview.postMessage({
           command: 'modelUpdate',
-          modelId: model.id,
+          modelId: unifiedModel.id,
           status: 'error',
           content: '',
           error: errorMessage,
           endTime,
         });
       } finally {
-        this.activeRequests.delete(model.id);
+        this.activeRequests.delete(unifiedModel.id);
         tokenSource.dispose();
       }
     });
@@ -266,13 +401,15 @@ export class PlaygroundPanel {
     this.log('info', 'All requests completed');
   }
 
-  private update(): void {
-    const models = this.configManager.getModels();
-    this.panel.webview.html = this.getWebviewContent(models);
+  private async update(): Promise<void> {
+    // Refresh vscode.lm models and get unified list
+    await this.refreshVSCodeLmModels();
+    const allModels = this.getAllModels();
+    this.panel.webview.html = this.getWebviewContent(allModels);
   }
 
   private getWebviewContent(
-    models: ReturnType<ConfigManager['getModels']>
+    models: Array<{ id: string; name: string; vendor: string; type: 'vscode.lm' | 'openllm'; maxTokens: number }>
   ): string {
     const nonce = this.getNonce();
 
@@ -366,6 +503,26 @@ export class PlaygroundPanel {
     .model-chip.selected {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
+    }
+    .model-chip.openllm {
+      border-left: 3px solid var(--vscode-charts-green);
+    }
+    .model-chip.vscode\\.lm {
+      border-left: 3px solid var(--vscode-charts-blue);
+    }
+    .api-badge {
+      font-size: 0.7em;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      margin-left: 4px;
+    }
+    .response-card.openllm {
+      border-top: 2px solid var(--vscode-charts-green);
+    }
+    .response-card.vscode\\.lm {
+      border-top: 2px solid var(--vscode-charts-blue);
     }
     .model-chip input {
       display: none;
@@ -588,11 +745,11 @@ export class PlaygroundPanel {
     </div>
     <div class="model-selector">
       <label>Models:</label>
-      ${models.length === 0 ? '<span style="color: var(--vscode-errorForeground); font-size: 0.85em;">No models configured</span>' : 
+      ${models.length === 0 ? '<span style="color: var(--vscode-errorForeground); font-size: 0.85em;">No models available</span>' : 
         models.map(m => `
-          <label class="model-chip selected" data-model-id="${m.id}">
-            <input type="checkbox" checked value="${m.id}">
-            <span>${m.name}</span>
+          <label class="model-chip selected ${m.type}" data-model-id="${this.escapeHtml(m.id)}">
+            <input type="checkbox" checked value="${this.escapeHtml(m.id)}">
+            <span>${this.escapeHtml(m.name)} <small style="opacity:0.7">(${this.escapeHtml(m.vendor)})</small></span>
           </label>
         `).join('')
       }
@@ -603,27 +760,30 @@ export class PlaygroundPanel {
     <div class="responses-section">
       ${models.length === 0 ? `
         <div class="empty-state">
-          <p>No models configured. Add a provider to get started.</p>
+          <p>No models available.</p>
+          <p style="font-size: 0.85em; color: var(--vscode-descriptionForeground);">
+            Configure Open LLM Provider or install extensions with LLM support (like Copilot).
+          </p>
         </div>
       ` : `
         <div class="responses-grid" id="responses-grid">
           ${models.map(m => `
-            <div class="response-card" data-model-id="${m.id}">
+            <div class="response-card ${m.type}" data-model-id="${this.escapeHtml(m.id)}">
               <div class="response-header">
                 <div>
-                  <div class="response-model-name">${m.name}</div>
-                  <div class="response-provider">${m.provider}</div>
+                  <div class="response-model-name">${this.escapeHtml(m.name)}</div>
+                  <div class="response-provider">${this.escapeHtml(m.vendor)} <span class="api-badge">${m.type === 'vscode.lm' ? 'vscode.lm' : 'direct'}</span></div>
                 </div>
-                <div class="response-status status-pending" id="status-${m.id}">
+                <div class="response-status status-pending" id="status-${this.escapeHtml(m.id)}">
                   <span class="status-dot"></span>
                   <span class="status-text">Ready</span>
                 </div>
               </div>
-              <div class="response-body empty" id="body-${m.id}">
+              <div class="response-body empty" id="body-${this.escapeHtml(m.id)}">
                 Waiting for prompt...
               </div>
-              <div class="response-footer" id="footer-${m.id}">
-                ${(m.contextLength || 8192).toLocaleString()} tokens
+              <div class="response-footer" id="footer-${this.escapeHtml(m.id)}">
+                ${(m.maxTokens || 0).toLocaleString()} tokens
               </div>
             </div>
           `).join('')}
