@@ -228,6 +228,358 @@ The agent space is rapidly evolving. We're monitoring:
 
 ---
 
+## Integration Guide: Using Open LLM in Your Extension
+
+### Option 1: Via vscode.lm API (When Available)
+
+This is the cleanest approach and works when the `vscode.lm` API is fully available:
+
+```typescript
+import * as vscode from 'vscode';
+
+async function askLLM(prompt: string): Promise<string> {
+  // Get available models — includes Open LLM models when registered
+  const models = await vscode.lm.selectChatModels({
+    vendor: 'open-llm'  // Filter to Open LLM models only
+  });
+
+  if (models.length === 0) {
+    // Fallback: try any available model (including Copilot)
+    const anyModels = await vscode.lm.selectChatModels({});
+    if (anyModels.length === 0) {
+      throw new Error('No LLM models available. Install Open LLM Provider or GitHub Copilot.');
+    }
+    models.push(anyModels[0]);
+  }
+
+  const messages = [
+    vscode.LanguageModelChatMessage.User(prompt)
+  ];
+
+  const response = await models[0].sendRequest(messages, {}, new vscode.CancellationTokenSource().token);
+
+  // Collect streaming response
+  let result = '';
+  for await (const chunk of response.text) {
+    result += chunk;
+  }
+
+  return result;
+}
+```
+
+### Option 2: Direct Extension Dependency
+
+For tighter integration or when `vscode.lm` isn't available, your extension can directly depend on Open LLM:
+
+**In your extension's `package.json`:**
+```json
+{
+  "extensionDependencies": [
+    "open-llm.open-llm-provider"
+  ]
+}
+```
+
+**In your extension code:**
+```typescript
+import * as vscode from 'vscode';
+
+async function getOpenLLMProvider() {
+  const openLLMExtension = vscode.extensions.getExtension('open-llm.open-llm-provider');
+  
+  if (!openLLMExtension) {
+    vscode.window.showErrorMessage('Open LLM Provider extension is required.');
+    return null;
+  }
+
+  if (!openLLMExtension.isActive) {
+    await openLLMExtension.activate();
+  }
+
+  // The extension exports its API
+  return openLLMExtension.exports;
+}
+
+async function explainCode(code: string): Promise<string> {
+  const openLLM = await getOpenLLMProvider();
+  if (!openLLM) return '';
+
+  const models = openLLM.getAvailableModels();
+  if (models.length === 0) {
+    vscode.window.showWarningMessage('No LLM models configured in Open LLM.');
+    return '';
+  }
+
+  // Use the first available model
+  const messages = [
+    vscode.LanguageModelChatMessage.User(`Explain this code:\n\n${code}`)
+  ];
+
+  let result = '';
+  const stream = await openLLM.sendRequest(models[0].id, messages, {});
+  
+  for await (const chunk of stream) {
+    result += chunk;
+  }
+
+  return result;
+}
+```
+
+### Option 3: Graceful Fallback Pattern
+
+Support multiple LLM sources with graceful fallback:
+
+```typescript
+import * as vscode from 'vscode';
+
+interface LLMProvider {
+  name: string;
+  sendMessage: (prompt: string) => Promise<string>;
+}
+
+async function getLLMProvider(): Promise<LLMProvider | null> {
+  // Try 1: vscode.lm API (works with Copilot or Open LLM when registered)
+  try {
+    const models = await vscode.lm.selectChatModels({});
+    if (models.length > 0) {
+      return {
+        name: `${models[0].vendor}/${models[0].name}`,
+        sendMessage: async (prompt) => {
+          const messages = [vscode.LanguageModelChatMessage.User(prompt)];
+          const response = await models[0].sendRequest(messages, {});
+          let result = '';
+          for await (const chunk of response.text) {
+            result += chunk;
+          }
+          return result;
+        }
+      };
+    }
+  } catch (e) {
+    // vscode.lm not available or no models
+  }
+
+  // Try 2: Open LLM extension direct API
+  const openLLM = vscode.extensions.getExtension('open-llm.open-llm-provider');
+  if (openLLM) {
+    if (!openLLM.isActive) await openLLM.activate();
+    const api = openLLM.exports;
+    const models = api.getAvailableModels();
+    
+    if (models.length > 0) {
+      return {
+        name: `Open LLM: ${models[0].name}`,
+        sendMessage: async (prompt) => {
+          const messages = [vscode.LanguageModelChatMessage.User(prompt)];
+          let result = '';
+          const stream = await api.sendRequest(models[0].id, messages, {});
+          for await (const chunk of stream) {
+            result += chunk;
+          }
+          return result;
+        }
+      };
+    }
+  }
+
+  return null;
+}
+
+// Usage in a command
+vscode.commands.registerCommand('myExtension.explainSelection', async () => {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return;
+
+  const selection = editor.document.getText(editor.selection);
+  if (!selection) {
+    vscode.window.showWarningMessage('Select some code first.');
+    return;
+  }
+
+  const provider = await getLLMProvider();
+  if (!provider) {
+    vscode.window.showErrorMessage(
+      'No LLM available. Install GitHub Copilot or Open LLM Provider.'
+    );
+    return;
+  }
+
+  vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: `Asking ${provider.name}...`,
+    cancellable: false
+  }, async () => {
+    const explanation = await provider.sendMessage(
+      `Explain this code concisely:\n\n${selection}`
+    );
+    
+    // Show in a new document
+    const doc = await vscode.workspace.openTextDocument({
+      content: explanation,
+      language: 'markdown'
+    });
+    vscode.window.showTextDocument(doc, { preview: true });
+  });
+});
+```
+
+### Real-World Example: Ansible Extension Integration
+
+Here's how the Ansible extension could add "Explain Playbook" functionality:
+
+```typescript
+// src/features/explainPlaybook.ts
+import * as vscode from 'vscode';
+
+export class PlaybookExplainer {
+  private readonly systemPrompt = `You are an Ansible expert. When explaining playbooks:
+- Describe what each play and task does
+- Highlight any potential issues or best practices
+- Be concise but thorough`;
+
+  async explain(document: vscode.TextDocument): Promise<void> {
+    const content = document.getText();
+    
+    // Get LLM (prefer Open LLM for enterprise scenarios)
+    const models = await vscode.lm.selectChatModels({ vendor: 'open-llm' });
+    const model = models[0] ?? (await vscode.lm.selectChatModels({}))[0];
+
+    if (!model) {
+      vscode.window.showErrorMessage(
+        'No LLM available. Configure Open LLM Provider or install GitHub Copilot.'
+      );
+      return;
+    }
+
+    const messages = [
+      vscode.LanguageModelChatMessage.User(
+        `${this.systemPrompt}\n\nExplain this Ansible playbook:\n\n\`\`\`yaml\n${content}\n\`\`\``
+      )
+    ];
+
+    // Stream response to output channel
+    const outputChannel = vscode.window.createOutputChannel('Ansible Explanation');
+    outputChannel.show();
+    outputChannel.appendLine(`Explaining: ${document.fileName}\n`);
+    outputChannel.appendLine('---\n');
+
+    const response = await model.sendRequest(messages, {});
+    
+    for await (const chunk of response.text) {
+      outputChannel.append(chunk);
+    }
+  }
+}
+```
+
+### Option 4: Using the Open LLM Chat UI
+
+Other extensions can open and interact with the Open LLM chat sidebar:
+
+**Open the chat panel:**
+```typescript
+// Focus the Open LLM chat sidebar
+await vscode.commands.executeCommand('openLLM.chatView.focus');
+```
+
+**Send a message to chat (with context):**
+```typescript
+// First, expose a command in Open LLM that accepts messages
+// Then other extensions can invoke it:
+
+await vscode.commands.executeCommand('openLLM.sendMessage', {
+  message: 'Explain this code',
+  context: {
+    code: selectedText,
+    filename: editor.document.fileName,
+    language: editor.document.languageId
+  }
+});
+```
+
+**Full example: "Ask Open LLM" from any extension:**
+```typescript
+import * as vscode from 'vscode';
+
+export function registerAskOpenLLM(context: vscode.ExtensionContext) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('myExtension.askOpenLLM', async () => {
+      const editor = vscode.window.activeTextEditor;
+      
+      // Check if Open LLM is installed
+      const openLLM = vscode.extensions.getExtension('open-llm.open-llm-provider');
+      if (!openLLM) {
+        const install = await vscode.window.showErrorMessage(
+          'Open LLM Provider is required for this feature.',
+          'Install'
+        );
+        if (install === 'Install') {
+          vscode.commands.executeCommand(
+            'workbench.extensions.installExtension',
+            'open-llm.open-llm-provider'
+          );
+        }
+        return;
+      }
+
+      // Get selected text or prompt for input
+      let prompt: string;
+      if (editor && !editor.selection.isEmpty) {
+        const selection = editor.document.getText(editor.selection);
+        const language = editor.document.languageId;
+        prompt = `Explain this ${language} code:\n\n\`\`\`${language}\n${selection}\n\`\`\``;
+      } else {
+        const input = await vscode.window.showInputBox({
+          prompt: 'What would you like to ask?',
+          placeHolder: 'e.g., How do I write a unit test for...'
+        });
+        if (!input) return;
+        prompt = input;
+      }
+
+      // Open the chat sidebar
+      await vscode.commands.executeCommand('openLLM.chatView.focus');
+
+      // Send the message (requires Open LLM to expose this command)
+      await vscode.commands.executeCommand('openLLM.chat.send', prompt);
+    })
+  );
+}
+```
+
+**Adding a context menu action:**
+```json
+// In your extension's package.json
+{
+  "contributes": {
+    "menus": {
+      "editor/context": [
+        {
+          "command": "myExtension.askOpenLLM",
+          "when": "editorHasSelection",
+          "group": "1_openllm"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "myExtension.askOpenLLM",
+        "title": "Ask Open LLM",
+        "icon": "$(comment-discussion)"
+      }
+    ]
+  }
+}
+```
+
+This lets users right-click selected code and choose "Ask Open LLM" to get an explanation in the chat sidebar.
+
+> **Note:** For the `openLLM.chat.send` command to work, Open LLM needs to expose it. This is on the roadmap. Currently, you can open the chat view and the user can paste/type their question.
+
+---
+
 ## Getting Started (Development)
 
 ```bash
