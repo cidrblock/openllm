@@ -4,10 +4,12 @@ import { ProviderRegistry } from './registry/ProviderRegistry';
 import { OpenLLMProvider } from './core/OpenLLMProvider';
 import { StatusPanel } from './ui/StatusPanel';
 import { PlaygroundPanel } from './ui/PlaygroundPanel';
+import { ChatViewProvider } from './ui/ChatViewProvider';
 import { getLogger, updateLogLevel, disposeLogger } from './utils/logger';
 
 let openLLMProvider: OpenLLMProvider | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let chatViewProvider: ChatViewProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   const logger = getLogger();
@@ -26,12 +28,17 @@ export async function activate(context: vscode.ExtensionContext) {
     openLLMProvider = new OpenLLMProvider(configManager, providerRegistry);
     context.subscriptions.push(openLLMProvider);
 
-    // Register language model chat provider with VS Code
-    // Note: This API is still evolving, so we register our models
-    // and expose them through commands for now
+    // Register the Chat sidebar webview
+    chatViewProvider = new ChatViewProvider(context.extensionUri, openLLMProvider);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        ChatViewProvider.viewType,
+        chatViewProvider
+      )
+    );
     
     // Register commands
-    registerCommands(context, configManager, openLLMProvider, providerRegistry);
+    registerCommands(context, configManager, openLLMProvider, providerRegistry, chatViewProvider);
 
     // Create status bar item
     statusBarItem = vscode.window.createStatusBarItem(
@@ -107,7 +114,8 @@ function registerCommands(
   context: vscode.ExtensionContext,
   configManager: ConfigManager,
   provider: OpenLLMProvider,
-  registry: ProviderRegistry
+  registry: ProviderRegistry,
+  chatProvider: ChatViewProvider
 ): void {
   // Show available models
   context.subscriptions.push(
@@ -447,6 +455,20 @@ function registerCommands(
         configManager,
         provider
       );
+    })
+  );
+
+  // Focus chat panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.focusChat', () => {
+      vscode.commands.executeCommand('openLLM.chatView.focus');
+    })
+  );
+
+  // Clear chat history
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.clearChat', () => {
+      chatProvider.clearChat();
     })
   );
 }

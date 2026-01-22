@@ -4,6 +4,7 @@
 
 ## Features
 
+- **Chat Sidebar** — Built-in chat interface in the Activity Bar, no Copilot required
 - **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, Ollama (local), Mistral, Azure OpenAI
 - **Configure Once, Use Everywhere** — Set up your API keys once and use them with any compatible extension
 - **Local Model Support** — Run models locally with Ollama for privacy and cost savings
@@ -68,6 +69,25 @@ OPENAI_API_KEY=sk-proj-...
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
+## Chat Sidebar
+
+Open LLM includes a built-in chat interface accessible from the Activity Bar:
+
+1. Click the chat icon in the Activity Bar (left sidebar)
+2. Select a model from the dropdown
+3. Type your question and press Enter or click Send
+4. Responses stream in real-time with markdown formatting
+
+The chat sidebar works independently of GitHub Copilot, allowing you to use any configured model for conversations.
+
+**Features:**
+- Model selector with all available models (vscode.lm + direct)
+- Streaming responses with real-time display
+- Markdown and code syntax highlighting
+- Stop generation button
+- Clear conversation button
+- Message history within session
+
 ## Commands
 
 | Command | Description |
@@ -81,6 +101,8 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 | `Open LLM: Send Message` | Send a test message to a model |
 | `Open LLM: Show Status Panel` | Open the status and debug panel |
 | `Open LLM: Open Playground` | Compare responses from all models side-by-side |
+| `Open LLM: Focus Chat Panel` | Open the Chat sidebar |
+| `Open LLM: Clear Chat History` | Clear the current chat conversation |
 
 ## Supported Providers
 
