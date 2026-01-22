@@ -469,6 +469,25 @@ function registerCommands(
     })
   );
 
+  // Send message to chat UI (for external extensions)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.chat.send', async (args?: {
+      message: string;
+      context?: Array<{ path: string; name: string; language: string; content: string }>;
+      newSession?: boolean;
+    }) => {
+      if (!args?.message) {
+        vscode.window.showErrorMessage('Open LLM: No message provided to openLLM.chat.send');
+        return;
+      }
+      
+      await chatProvider.sendMessage(args.message, {
+        context: args.context,
+        newSession: args.newSession
+      });
+    })
+  );
+
   // Clear chat history
   context.subscriptions.push(
     vscode.commands.registerCommand('openLLM.clearChat', () => {

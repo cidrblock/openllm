@@ -427,52 +427,61 @@ vscode.commands.registerCommand('myExtension.explainSelection', async () => {
 
 ### Real-World Example: Ansible Extension Integration
 
-Here's how the Ansible extension could add "Explain Playbook" functionality:
+Here's how the Ansible extension could add "Explain Playbook" functionality using the Open LLM chat UI:
 
 ```typescript
 // src/features/explainPlaybook.ts
 import * as vscode from 'vscode';
 
 export class PlaybookExplainer {
-  private readonly systemPrompt = `You are an Ansible expert. When explaining playbooks:
-- Describe what each play and task does
-- Highlight any potential issues or best practices
-- Be concise but thorough`;
-
   async explain(document: vscode.TextDocument): Promise<void> {
     const content = document.getText();
+    const fileName = document.fileName.split('/').pop() || 'playbook.yml';
     
-    // Get LLM (prefer Open LLM for enterprise scenarios)
-    const models = await vscode.lm.selectChatModels({ vendor: 'open-llm' });
-    const model = models[0] ?? (await vscode.lm.selectChatModels({}))[0];
-
-    if (!model) {
+    // Check if Open LLM is available
+    const openLLM = vscode.extensions.getExtension('open-llm.open-llm-provider');
+    if (!openLLM) {
       vscode.window.showErrorMessage(
-        'No LLM available. Configure Open LLM Provider or install GitHub Copilot.'
+        'Open LLM Provider is required. Please install it from the marketplace.'
       );
       return;
     }
 
-    const messages = [
-      vscode.LanguageModelChatMessage.User(
-        `${this.systemPrompt}\n\nExplain this Ansible playbook:\n\n\`\`\`yaml\n${content}\n\`\`\``
-      )
-    ];
-
-    // Stream response to output channel
-    const outputChannel = vscode.window.createOutputChannel('Ansible Explanation');
-    outputChannel.show();
-    outputChannel.appendLine(`Explaining: ${document.fileName}\n`);
-    outputChannel.appendLine('---\n');
-
-    const response = await model.sendRequest(messages, {});
-    
-    for await (const chunk of response.text) {
-      outputChannel.append(chunk);
-    }
+    // Send to Open LLM chat UI - this opens the chat sidebar,
+    // shows the playbook context, and streams the explanation
+    await vscode.commands.executeCommand('openLLM.chat.send', {
+      message: 'Explain this Ansible playbook. Describe what each play and task does, highlight any potential issues, and suggest best practices.',
+      context: [{
+        path: document.fileName,
+        name: fileName,
+        language: 'yaml',
+        content: content
+      }],
+      newSession: true
+    });
   }
 }
+
+// Register the command
+export function activate(context: vscode.ExtensionContext) {
+  const explainer = new PlaybookExplainer();
+  
+  context.subscriptions.push(
+    vscode.commands.registerCommand('ansible.explainPlaybook', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (editor && editor.document.languageId === 'yaml') {
+        await explainer.explain(editor.document);
+      }
+    })
+  );
+}
 ```
+
+This approach:
+- Uses the Open LLM chat UI for a rich, interactive experience
+- Shows the playbook content as context with proper syntax highlighting
+- Allows users to ask follow-up questions about the explanation
+- Persists the conversation for future reference
 
 ### Option 4: Using the Open LLM Chat UI
 
@@ -484,18 +493,22 @@ Other extensions can open and interact with the Open LLM chat sidebar:
 await vscode.commands.executeCommand('openLLM.chatView.focus');
 ```
 
-**Send a message to chat (with context):**
+**Send a message to chat (with file context):**
 ```typescript
-// First, expose a command in Open LLM that accepts messages
-// Then other extensions can invoke it:
+// Send a message with optional file context - this opens the chat UI,
+// displays the message, and streams the response in the chat panel
 
-await vscode.commands.executeCommand('openLLM.sendMessage', {
+await vscode.commands.executeCommand('openLLM.chat.send', {
   message: 'Explain this code',
-  context: {
-    code: selectedText,
-    filename: editor.document.fileName,
-    language: editor.document.languageId
-  }
+  context: [
+    {
+      path: editor.document.fileName,
+      name: 'myfile.ts',
+      language: editor.document.languageId,
+      content: selectedText
+    }
+  ],
+  newSession: true  // Optional: start a fresh chat session
 });
 ```
 
@@ -525,25 +538,39 @@ export function registerAskOpenLLM(context: vscode.ExtensionContext) {
       }
 
       // Get selected text or prompt for input
-      let prompt: string;
+      let message: string;
+      let context: Array<{ path: string; name: string; language: string; content: string }> | undefined;
+      
       if (editor && !editor.selection.isEmpty) {
         const selection = editor.document.getText(editor.selection);
         const language = editor.document.languageId;
-        prompt = `Explain this ${language} code:\n\n\`\`\`${language}\n${selection}\n\`\`\``;
+        const fileName = editor.document.fileName.split('/').pop() || 'file';
+        
+        message = 'Explain this code';
+        context = [{
+          path: editor.document.fileName,
+          name: fileName,
+          language: language,
+          content: selection
+        }];
       } else {
         const input = await vscode.window.showInputBox({
           prompt: 'What would you like to ask?',
           placeHolder: 'e.g., How do I write a unit test for...'
         });
         if (!input) return;
-        prompt = input;
+        message = input;
       }
 
-      // Open the chat sidebar
-      await vscode.commands.executeCommand('openLLM.chatView.focus');
-
-      // Send the message (requires Open LLM to expose this command)
-      await vscode.commands.executeCommand('openLLM.chat.send', prompt);
+      // Send to the Open LLM chat UI - this will:
+      // 1. Focus the chat sidebar
+      // 2. Display the message with context
+      // 3. Stream the AI response in the chat panel
+      await vscode.commands.executeCommand('openLLM.chat.send', {
+        message,
+        context,
+        newSession: true
+      });
     })
   );
 }

@@ -109,6 +109,11 @@
         "category": "Open LLM"
       },
       {
+        "command": "openLLM.chat.send",
+        "title": "Send Message to Chat",
+        "category": "Open LLM"
+      },
+      {
         "command": "openLLM.clearChat",
         "title": "Clear Chat History",
         "category": "Open LLM"

@@ -52,6 +52,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Public API: Send a message to the chat UI from an external extension.
+   * This will focus the chat panel, create a new session if needed,
+   * and send the message with optional file context.
+   */
+  public async sendMessage(message: string, options?: {
+    context?: Array<{ path: string; name: string; language: string; content: string }>;
+    newSession?: boolean;
+  }): Promise<void> {
+    // Focus the chat panel first
+    await vscode.commands.executeCommand('openLLM.chatView.focus');
+    
+    // Wait a bit for the webview to be ready
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Create a new session if requested or if none exists
+    if (options?.newSession || !this._currentSession) {
+      this._createNewSession();
+    }
+    
+    // Refresh models if needed
+    if (this._models.length === 0) {
+      await this._refreshModels();
+    }
+    
+    // Send the message
+    await this._handleUserMessage(message, options?.context);
+  }
+
+  /**
+   * Public API: Get available models for external extensions
+   */
+  public getAvailableModels(): ChatModel[] {
+    return [...this._models];
+  }
+
+  /**
+   * Public API: Set the model to use for chat
+   */
+  public setModel(modelId: string): boolean {
+    const model = this._models.find(m => m.id === modelId);
+    if (model) {
+      this._selectedModelId = modelId;
+      if (this._currentSession) {
+        this._currentSession.modelId = modelId;
+      }
+      this._sendModelsToWebview();
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Load sessions from storage
    */
   private _loadSessions(): void {
@@ -134,7 +186,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this._sendFullState();
           break;
         case 'sendMessage':
-          await this._handleUserMessage(message.text);
+          await this._handleUserMessage(message.text, message.context);
           break;
         case 'selectModel':
           this._selectedModelId = message.modelId;
@@ -164,6 +216,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'runInTerminal':
           await this._runInTerminal(message.command);
+          break;
+        case 'showAttachMenu':
+          await this._showAttachMenu();
           break;
       }
     });
@@ -252,14 +307,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /**
    * Handle a user message submission
    */
-  private async _handleUserMessage(text: string): Promise<void> {
+  private async _handleUserMessage(text: string, context?: Array<{path: string, name: string, language: string, content: string}>): Promise<void> {
     if (!text.trim() || this._isStreaming || !this._currentSession) {
       return;
     }
 
+    // Build the full message with context
+    let fullContent = text.trim();
+    if (context && context.length > 0) {
+      const contextParts = context.map(file => 
+        `**File: ${file.name}** (\`${file.language}\`)\n\`\`\`${file.language}\n${file.content}\n\`\`\``
+      );
+      fullContent = `${contextParts.join('\n\n')}\n\n${text.trim()}`;
+    }
+
     const userMessage: ChatMessage = {
       role: 'user',
-      content: text.trim(),
+      content: fullContent,
       timestamp: Date.now()
     };
     
@@ -384,6 +448,83 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async _updateSystemPrompt(prompt: string): Promise<void> {
     const config = vscode.workspace.getConfiguration('openLLM.chat');
     await config.update('systemPrompt', prompt, vscode.ConfigurationTarget.Global);
+  }
+
+  /**
+   * Show attach menu with options
+   */
+  private async _showAttachMenu(): Promise<void> {
+    const items: vscode.QuickPickItem[] = [];
+    
+    // Add current file option if there's an active editor
+    const editor = vscode.window.activeTextEditor;
+    if (editor && !editor.document.isUntitled) {
+      const fileName = editor.document.fileName.split('/').pop() || editor.document.fileName;
+      items.push({
+        label: '$(file) Current File',
+        description: fileName,
+        detail: 'Attach the currently open file as context'
+      });
+    }
+    
+    // Add browse option
+    items.push({
+      label: '$(folder-opened) Browse Files...',
+      description: '',
+      detail: 'Select files from the workspace'
+    });
+
+    const selection = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Attach file as context',
+      title: 'Attach Context'
+    });
+
+    if (!selection) return;
+
+    if (selection.label.includes('Current File') && editor) {
+      const content = editor.document.getText();
+      const fileName = editor.document.fileName.split('/').pop() || 'file';
+      
+      this._view?.webview.postMessage({
+        type: 'activeFile',
+        file: {
+          path: editor.document.fileName,
+          name: fileName,
+          language: editor.document.languageId,
+          content: content.length > 50000 ? content.substring(0, 50000) + '\n... (truncated)' : content
+        }
+      });
+    } else if (selection.label.includes('Browse')) {
+      const files = await vscode.window.showOpenDialog({
+        canSelectMany: true,
+        openLabel: 'Attach',
+        filters: {
+          'All Files': ['*']
+        }
+      });
+
+      if (files) {
+        for (const file of files) {
+          try {
+            const doc = await vscode.workspace.openTextDocument(file);
+            const content = doc.getText();
+            const fileName = file.path.split('/').pop() || 'file';
+            
+            this._view?.webview.postMessage({
+              type: 'attachedFile',
+              file: {
+                path: file.path,
+                name: fileName,
+                language: doc.languageId,
+                content: content.length > 50000 ? content.substring(0, 50000) + '\n... (truncated)' : content
+              }
+            });
+          } catch (e) {
+            this._logger.error('Failed to read file:', e);
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -1104,6 +1245,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       gap: 4px;
     }
 
+    /* Context/attachment chips */
+    .context-bar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+      background: var(--vscode-input-background);
+    }
+
+    .context-bar.has-items {
+      display: flex;
+    }
+
+    .context-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-radius: 10px;
+      font-size: 11px;
+      max-width: 200px;
+    }
+
+    .context-chip .filename {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .context-chip .remove-context {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      opacity: 0.7;
+    }
+
+    .context-chip .remove-context:hover {
+      opacity: 1;
+    }
+
+    .context-chip.active-file {
+      background: var(--vscode-textLink-foreground);
+      color: white;
+    }
+
     .model-dropdown {
       padding: 2px 6px;
       font-size: 11px;
@@ -1215,6 +1408,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <!-- Input Area -->
   <div class="input-area">
     <div class="input-wrapper">
+      <div class="context-bar" id="contextBar"></div>
       <textarea 
         class="message-input" 
         id="messageInput" 
@@ -1223,6 +1417,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ></textarea>
       <div class="input-footer">
         <div class="input-controls">
+          <button class="icon-btn" id="attachBtn" title="Attach file or use current file">
+            <i class="codicon codicon-attach"></i>
+          </button>
           <select class="model-dropdown" id="modelSelect" title="Select model">
             <option value="">Loading...</option>
           </select>
@@ -1289,8 +1486,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const settingsCancel = document.getElementById('settingsCancel');
     const settingsSave = document.getElementById('settingsSave');
     const systemPromptInput = document.getElementById('systemPromptInput');
+    const attachBtn = document.getElementById('attachBtn');
+    const contextBar = document.getElementById('contextBar');
     
     let systemPrompt = '';
+    let attachedFiles = []; // { path, name, content }
+    let activeFile = null; // Current editor file
 
     // Auto-resize textarea (1 line to 10 lines max, then scroll)
     messageInput.addEventListener('input', () => {
@@ -1355,12 +1556,82 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       closeSettings();
     });
 
+    // Attach button - show menu with options
+    attachBtn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'showAttachMenu' });
+    });
+
+    function updateContextBar() {
+      contextBar.innerHTML = '';
+      
+      // Add active file chip if available
+      if (activeFile) {
+        const chip = document.createElement('div');
+        chip.className = 'context-chip active-file';
+        chip.innerHTML = \`
+          <i class="codicon codicon-file"></i>
+          <span class="filename">\${activeFile.name}</span>
+          <button class="remove-context" title="Remove">
+            <i class="codicon codicon-close"></i>
+          </button>
+        \`;
+        chip.querySelector('.remove-context').addEventListener('click', () => {
+          activeFile = null;
+          updateContextBar();
+        });
+        contextBar.appendChild(chip);
+      }
+      
+      // Add attached files
+      attachedFiles.forEach((file, index) => {
+        const chip = document.createElement('div');
+        chip.className = 'context-chip';
+        chip.innerHTML = \`
+          <i class="codicon codicon-file"></i>
+          <span class="filename">\${file.name}</span>
+          <button class="remove-context" title="Remove">
+            <i class="codicon codicon-close"></i>
+          </button>
+        \`;
+        chip.querySelector('.remove-context').addEventListener('click', () => {
+          attachedFiles.splice(index, 1);
+          updateContextBar();
+        });
+        contextBar.appendChild(chip);
+      });
+      
+      // Show/hide bar
+      if (activeFile || attachedFiles.length > 0) {
+        contextBar.classList.add('has-items');
+      } else {
+        contextBar.classList.remove('has-items');
+      }
+    }
+
     function sendMessage() {
       const text = messageInput.value.trim();
       if (!text || isStreaming || !selectedModelId) return;
-      vscode.postMessage({ type: 'sendMessage', text });
+      
+      // Build context from attached files
+      const context = [];
+      if (activeFile) {
+        context.push(activeFile);
+      }
+      context.push(...attachedFiles);
+      
+      vscode.postMessage({ 
+        type: 'sendMessage', 
+        text,
+        context: context.length > 0 ? context : undefined
+      });
+      
       messageInput.value = '';
       messageInput.style.height = 'auto';
+      
+      // Clear attachments after sending
+      attachedFiles = [];
+      activeFile = null;
+      updateContextBar();
     }
 
     function formatTime(timestamp) {
@@ -1644,6 +1915,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'error':
           showError(msg.error);
+          break;
+        case 'activeFile':
+          activeFile = msg.file;
+          updateContextBar();
+          break;
+        case 'attachedFile':
+          if (msg.file && !attachedFiles.find(f => f.path === msg.file.path)) {
+            attachedFiles.push(msg.file);
+            updateContextBar();
+          }
           break;
       }
     });
