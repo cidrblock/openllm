@@ -112,8 +112,45 @@
         "command": "openLLM.clearChat",
         "title": "Clear Chat History",
         "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.moveChatToRight",
+        "title": "Move Chat to Right",
+        "category": "Open LLM",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "openLLM.moveChatToLeft",
+        "title": "Move Chat to Left",
+        "category": "Open LLM",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "openLLM.moveChatToPanel",
+        "title": "Move Chat to Panel",
+        "category": "Open LLM",
+        "icon": "$(layout-panel)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "openLLM.moveChatToLeft",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openLLM.moveChatToRight",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "openLLM.moveChatToPanel",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@3"
+        }
+      ]
+    },
     "configuration": {
       "title": "Open LLM Provider",
       "properties": {
@@ -144,7 +181,10 @@
                 "description": "List of model names to use"
               }
             },
-            "required": ["name", "models"]
+            "required": [
+              "name",
+              "models"
+            ]
           }
         },
         "openLLM.importContinueConfig": {
@@ -164,9 +204,20 @@
         },
         "openLLM.logLevel": {
           "type": "string",
-          "enum": ["debug", "info", "warn", "error"],
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "default": "info",
           "description": "Logging level for the extension"
+        },
+        "openLLM.chat.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful AI assistant. Format your responses using markdown when appropriate. Use code blocks with language identifiers for code snippets.",
+          "description": "System prompt sent to the LLM to guide response formatting. Editable via the settings icon in the chat interface.",
+          "editPresentation": "multilineText"
         }
       }
     }
@@ -190,6 +241,9 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "@vscode/codicons": "^0.0.44",
+    "js-yaml": "^4.1.0",
+    "marked": "^17.0.1"
   }
 }

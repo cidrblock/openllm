@@ -29,7 +29,11 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(openLLMProvider);
 
     // Register the Chat sidebar webview
-    chatViewProvider = new ChatViewProvider(context.extensionUri, openLLMProvider);
+    chatViewProvider = new ChatViewProvider(
+      context.extensionUri,
+      openLLMProvider,
+      context.globalState
+    );
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
         ChatViewProvider.viewType,
@@ -469,6 +473,30 @@ function registerCommands(
   context.subscriptions.push(
     vscode.commands.registerCommand('openLLM.clearChat', () => {
       chatProvider.clearChat();
+    })
+  );
+
+  // Move chat to right (secondary sidebar)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.moveChatToRight', () => {
+      vscode.commands.executeCommand('openLLM.chatView.focus');
+      vscode.commands.executeCommand('workbench.action.moveViewToSecondarySideBar');
+    })
+  );
+
+  // Move chat to left (primary sidebar)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.moveChatToLeft', () => {
+      vscode.commands.executeCommand('openLLM.chatView.focus');
+      vscode.commands.executeCommand('workbench.action.moveViewToSideBar');
+    })
+  );
+
+  // Move chat to panel (bottom)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.moveChatToPanel', () => {
+      vscode.commands.executeCommand('openLLM.chatView.focus');
+      vscode.commands.executeCommand('workbench.action.moveViewToPanel');
     })
   );
 }

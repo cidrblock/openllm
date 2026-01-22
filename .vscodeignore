@@ -10,3 +10,8 @@ plan.txt
 **/*.vsix
 node_modules/**
 !node_modules/js-yaml/**
+!node_modules/marked/lib/marked.umd.js
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
+!node_modules/@highlightjs/cdn-assets/highlight.min.js
+!node_modules/@highlightjs/cdn-assets/styles/vs2015.min.css

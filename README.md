@@ -83,10 +83,17 @@ The chat sidebar works independently of GitHub Copilot, allowing you to use any 
 **Features:**
 - Model selector with all available models (vscode.lm + direct)
 - Streaming responses with real-time display
-- Markdown and code syntax highlighting
+- Rich markdown formatting with code block language labels
+- Chat layout: your messages in bubbles on the right, AI responses as formatted text on the left
+- Session history with persistence across restarts
 - Stop generation button
-- Clear conversation button
-- Message history within session
+- New chat / clear conversation button
+
+### System Prompt (Transparency)
+
+Open LLM is committed to transparency. Click the gear icon (⚙) in the chat input area to view and edit the system prompt that guides the AI's behavior. This prompt is prepended to your conversations.
+
+- `openLLM.chat.systemPrompt` — Customizable prompt sent to the LLM (also editable via gear icon in chat)
 
 ## Commands
 
@@ -123,6 +130,10 @@ The chat sidebar works independently of GitHub Copilot, allowing you to use any 
 | `openLLM.importContinueConfig` | `true` | Import Continue config automatically |
 | `openLLM.autoReload` | `true` | Auto-reload when config changes |
 | `openLLM.logLevel` | `info` | Logging level (debug, info, warn, error) |
+| `openLLM.chat.systemPrompt` | *(see below)* | System prompt for guiding LLM responses (editable via gear icon) |
+
+**Default System Prompt:**
+> You are a helpful AI assistant. Format your responses using markdown when appropriate. Use code blocks with language identifiers for code snippets.
 
 ## Using with Other Extensions
 
