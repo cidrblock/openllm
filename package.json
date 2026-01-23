@@ -64,9 +64,10 @@
     },
     "commands": [
       {
-        "command": "openLLM.configure",
-        "title": "Configure Providers",
-        "category": "Open LLM"
+        "command": "openLLM.configureApiKeys",
+        "title": "Providers and Models",
+        "category": "Open LLM",
+        "icon": "$(key)"
       },
       {
         "command": "openLLM.showModels",
@@ -76,21 +77,6 @@
       {
         "command": "openLLM.reloadConfig",
         "title": "Reload Configuration",
-        "category": "Open LLM"
-      },
-      {
-        "command": "openLLM.testConnection",
-        "title": "Test Provider Connections",
-        "category": "Open LLM"
-      },
-      {
-        "command": "openLLM.importFromContinue",
-        "title": "Import Configuration from Continue",
-        "category": "Open LLM"
-      },
-      {
-        "command": "openLLM.addProvider",
-        "title": "Add Provider",
         "category": "Open LLM"
       },
       {
@@ -111,6 +97,11 @@
       {
         "command": "openLLM.chat.send",
         "title": "Send Message to Chat",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.listTools",
+        "title": "List Available Tools",
         "category": "Open LLM"
       },
       {
@@ -168,11 +159,12 @@
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Provider name (openai, anthropic, google, ollama, azure, mistral)"
+                "description": "Provider name (openai, anthropic, google, ollama, azure, mistral, openrouter)"
               },
-              "apiKey": {
-                "type": "string",
-                "description": "API key or template variable (e.g., ${{ secrets.OPENAI_API_KEY }})"
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this provider is enabled"
               },
               "apiBase": {
                 "type": "string",
@@ -191,11 +183,6 @@
               "models"
             ]
           }
-        },
-        "openLLM.importContinueConfig": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically import configuration from Continue if available"
         },
         "openLLM.autoReload": {
           "type": "boolean",
@@ -223,6 +210,11 @@
           "default": "You are a helpful AI assistant. Format your responses using markdown when appropriate. Use code blocks with language identifiers for code snippets.",
           "description": "System prompt sent to the LLM to guide response formatting. Editable via the settings icon in the chat interface.",
           "editPresentation": "multilineText"
+        },
+        "openLLM.chat.enableTools": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable tool calling in chat. When enabled, the LLM can use registered VS Code tools (vscode.lm.tools) to perform actions like reading files, running commands, etc."
         }
       }
     }

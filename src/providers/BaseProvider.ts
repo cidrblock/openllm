@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ModelConfig, ChatMessage } from '../types';
+import { ModelConfig, ChatMessage, Tool, StreamChunk } from '../types';
 import { getLogger } from '../utils/logger';
 
 /**
@@ -28,9 +28,11 @@ export abstract class BaseProvider {
       temperature?: number;
       maxTokens?: number;
       stop?: string[];
+      tools?: Tool[];
+      toolChoice?: 'auto' | 'none' | 'required';
     },
     token: vscode.CancellationToken
-  ): Promise<AsyncIterable<string>>;
+  ): Promise<AsyncIterable<StreamChunk>>;
 
   /**
    * Count tokens for the given text (approximate)
@@ -46,6 +48,7 @@ export abstract class BaseProvider {
 
   /**
    * Convert VS Code LanguageModelChatMessages to provider format
+   * Base implementation handles text only. Providers override for tool support.
    */
   protected convertMessages(
     messages: vscode.LanguageModelChatMessage[]
@@ -62,25 +65,28 @@ export abstract class BaseProvider {
       }
 
       // Extract text content from message parts
-      let content = '';
+      let textContent = '';
       for (const part of m.content) {
         if (part instanceof vscode.LanguageModelTextPart) {
-          content += part.value;
+          textContent += part.value;
         }
+        // Tool parts are handled by provider-specific overrides
       }
 
-      return { role, content };
+      // Fallback to prevent empty content
+      return { role, content: textContent || ' ' };
     });
   }
 
   /**
    * Create an async iterable from a fetch Response with SSE streaming
+   * Returns StreamChunk for unified handling of text and tool calls
    */
   protected createStreamFromResponse(
     response: Response,
     token: vscode.CancellationToken,
-    parser: (line: string) => string | null
-  ): AsyncIterable<string> {
+    parser: (line: string) => StreamChunk | null
+  ): AsyncIterable<StreamChunk> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     const logger = this.logger;
@@ -134,13 +140,27 @@ export abstract class BaseProvider {
   }
 
   /**
+   * Legacy text-only stream helper - wraps text in StreamChunk
+   */
+  protected createTextStreamFromResponse(
+    response: Response,
+    token: vscode.CancellationToken,
+    parser: (line: string) => string | null
+  ): AsyncIterable<StreamChunk> {
+    return this.createStreamFromResponse(response, token, (line) => {
+      const text = parser(line);
+      return text ? { type: 'text', text } : null;
+    });
+  }
+
+  /**
    * Create an async iterable from NDJSON streaming (used by Ollama)
    */
   protected createNDJSONStream(
     response: Response,
     token: vscode.CancellationToken,
-    parser: (json: Record<string, unknown>) => string | null
-  ): AsyncIterable<string> {
+    parser: (json: Record<string, unknown>) => StreamChunk | null
+  ): AsyncIterable<StreamChunk> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     const logger = this.logger;
@@ -188,6 +208,20 @@ export abstract class BaseProvider {
         }
       },
     };
+  }
+
+  /**
+   * Legacy text-only NDJSON stream helper
+   */
+  protected createTextNDJSONStream(
+    response: Response,
+    token: vscode.CancellationToken,
+    parser: (json: Record<string, unknown>) => string | null
+  ): AsyncIterable<StreamChunk> {
+    return this.createNDJSONStream(response, token, (json) => {
+      const text = parser(json);
+      return text ? { type: 'text', text } : null;
+    });
   }
 
   /**

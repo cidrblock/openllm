@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config/ConfigManager';
 import { ProviderRegistry } from '../registry/ProviderRegistry';
-import { ModelConfig, ConnectionTestResult } from '../types';
+import { ModelConfig, ConnectionTestResult, Tool, StreamChunk } from '../types';
 import { getLogger } from '../utils/logger';
 
 /**
@@ -73,10 +73,47 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
       maxOutputTokens: 4096,
       version: '1.0.0',
       capabilities: {
-        toolCalling: false, // TODO: detect from model config
-        imageInput: false,  // TODO: detect from model config
+        toolCalling: this.supportsToolCalling(model),
+        imageInput: model.capabilities?.imageInput ?? false,
       }
     }));
+  }
+
+  /**
+   * Check if a model supports tool calling
+   */
+  private supportsToolCalling(model: ModelConfig): boolean {
+    // Check explicit capability
+    if (model.capabilities?.toolCalling !== undefined) {
+      return model.capabilities.toolCalling;
+    }
+
+    // Default based on provider/model
+    const provider = model.provider.toLowerCase();
+    const modelName = model.model.toLowerCase();
+
+    // Most modern models support tools
+    if (provider === 'openai' && (modelName.includes('gpt-4') || modelName.includes('gpt-3.5'))) {
+      return true;
+    }
+    if (provider === 'anthropic' && modelName.includes('claude')) {
+      return true;
+    }
+    if (provider === 'gemini' || provider === 'google') {
+      return true;
+    }
+    if (provider === 'mistral') {
+      return true;
+    }
+    if (provider === 'azure' || provider === 'azure-openai') {
+      return true;
+    }
+    // Ollama depends on the model
+    if (provider === 'ollama') {
+      return modelName.includes('llama3') || modelName.includes('mistral') || modelName.includes('mixtral');
+    }
+
+    return false;
   }
 
   /**
@@ -86,7 +123,7 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
   async provideLanguageModelChatResponse(
     modelInfo: vscode.LanguageModelChatInformation,
     messages: vscode.LanguageModelChatMessage[],
-    _options: vscode.ProvideLanguageModelChatResponseOptions,
+    options: vscode.ProvideLanguageModelChatResponseOptions,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken
   ): Promise<void> {
@@ -106,16 +143,24 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
       throw new Error(`Unsupported provider: ${model.provider}`);
     }
 
-    this.logger.info(`provideLanguageModelChatResponse: ${model.provider}/${model.model}`);
+    // Convert vscode.lm tools to our format
+    const tools: Tool[] | undefined = options.tools?.map(t => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema as Record<string, unknown>
+    }));
+
+    this.logger.info(`provideLanguageModelChatResponse: ${model.provider}/${model.model}, tools: ${tools?.length ?? 0}`);
 
     try {
       const stream = await provider.streamChat(
         messages,
         model,
         {
-          // Extract options if available
           temperature: undefined,
           maxTokens: undefined,
+          tools,
+          toolChoice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
         },
         token
       );
@@ -124,7 +169,18 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
         if (token.isCancellationRequested) {
           break;
         }
-        progress.report(new vscode.LanguageModelTextPart(chunk));
+
+        // Handle different chunk types
+        if (chunk.type === 'text') {
+          progress.report(new vscode.LanguageModelTextPart(chunk.text));
+        } else if (chunk.type === 'tool_call') {
+          // Report tool call to VS Code
+          progress.report(new vscode.LanguageModelToolCallPart(
+            chunk.toolCall.id,
+            chunk.toolCall.name,
+            chunk.toolCall.input
+          ));
+        }
       }
     } catch (error) {
       throw this.handleError(error, model);
@@ -195,21 +251,24 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
     return new Error(`Unknown error: ${String(error)}`);
   }
 
-  // ========== Legacy methods for direct access (used by Playground fallback) ==========
+  // ========== Direct access methods (used by ChatViewProvider and Playground) ==========
 
   /**
-   * Send a chat request directly (for Playground when vscode.lm isn't available)
+   * Send a chat request directly with full tool support
+   * Returns StreamChunk iterator that includes both text and tool calls
    */
-  async sendRequest(
+  async sendRequestWithTools(
     modelId: string,
     messages: vscode.LanguageModelChatMessage[],
     options: {
       temperature?: number;
       maxTokens?: number;
       stop?: string[];
+      tools?: Tool[];
+      toolChoice?: 'auto' | 'none' | 'required';
     },
     token: vscode.CancellationToken
-  ): Promise<AsyncIterable<string>> {
+  ): Promise<AsyncIterable<StreamChunk>> {
     const model = this.configManager.getModel(modelId);
     
     if (!model) {
@@ -226,13 +285,40 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
       throw new Error(`Unsupported provider: ${model.provider}`);
     }
 
-    this.logger.info(`Direct sendRequest: ${model.provider}/${model.model}`);
+    this.logger.info(`sendRequestWithTools: ${model.provider}/${model.model}, tools: ${options.tools?.length ?? 0}`);
 
     try {
       return await provider.streamChat(messages, model, options, token);
     } catch (error) {
       throw this.handleError(error, model);
     }
+  }
+
+  /**
+   * Send a chat request directly (text-only, for backwards compatibility)
+   */
+  async sendRequest(
+    modelId: string,
+    messages: vscode.LanguageModelChatMessage[],
+    options: {
+      temperature?: number;
+      maxTokens?: number;
+      stop?: string[];
+    },
+    token: vscode.CancellationToken
+  ): Promise<AsyncIterable<string>> {
+    const stream = await this.sendRequestWithTools(modelId, messages, options, token);
+    
+    // Filter to text-only for backwards compatibility
+    const textOnlyStream = async function* () {
+      for await (const chunk of stream) {
+        if (chunk.type === 'text') {
+          yield chunk.text;
+        }
+      }
+    };
+
+    return textOnlyStream();
   }
 
   /**

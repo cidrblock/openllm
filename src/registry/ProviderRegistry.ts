@@ -5,6 +5,7 @@ import { GeminiProvider } from '../providers/GeminiProvider';
 import { OllamaProvider } from '../providers/OllamaProvider';
 import { MistralProvider } from '../providers/MistralProvider';
 import { AzureOpenAIProvider } from '../providers/AzureOpenAIProvider';
+import { OpenRouterProvider } from '../providers/OpenRouterProvider';
 import { ProviderMetadata } from '../types';
 import { getLogger } from '../utils/logger';
 
@@ -34,6 +35,7 @@ export class ProviderRegistry {
     this.register('mistral', MistralProvider);
     this.register('azure', AzureOpenAIProvider);
     this.register('azure-openai', AzureOpenAIProvider);
+    this.register('openrouter', OpenRouterProvider);
     
     this.logger.debug(`Registered ${this.providers.size} providers`);
   }
@@ -159,6 +161,19 @@ export class ProviderRegistry {
         defaultApiBase: '',
         requiresApiKey: true,
         defaultModels: [], // Azure uses deployment names, not standard model names
+      },
+      {
+        id: 'openrouter',
+        displayName: 'OpenRouter',
+        defaultApiBase: 'https://openrouter.ai/api/v1',
+        requiresApiKey: true,
+        defaultModels: [
+          { id: 'openai/gpt-4o', name: 'GPT-4o (via OpenRouter)', contextLength: 128000, capabilities: { imageInput: true, toolCalling: true, streaming: true } },
+          { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet (via OpenRouter)', contextLength: 200000, capabilities: { imageInput: true, toolCalling: true, streaming: true } },
+          { id: 'google/gemini-pro-1.5', name: 'Gemini Pro 1.5 (via OpenRouter)', contextLength: 1000000, capabilities: { imageInput: true, toolCalling: true, streaming: true } },
+          { id: 'meta-llama/llama-3.1-405b-instruct', name: 'Llama 3.1 405B (via OpenRouter)', contextLength: 128000, capabilities: { imageInput: false, toolCalling: true, streaming: true } },
+          { id: 'mistralai/mistral-large', name: 'Mistral Large (via OpenRouter)', contextLength: 128000, capabilities: { imageInput: false, toolCalling: true, streaming: true } },
+        ],
       },
     ];
   }

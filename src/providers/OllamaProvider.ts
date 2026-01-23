@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { BaseProvider } from './BaseProvider';
-import { ModelConfig } from '../types';
+import { ModelConfig, Tool, StreamChunk, ToolCall } from '../types';
+import { toOpenAITools } from '../utils/toolTranslator';
 
 /**
  * Ollama local LLM provider implementation
+ * Supports tool calling for models that have it enabled (e.g., llama3.1, mistral)
  */
 export class OllamaProvider extends BaseProvider {
   get name(): string {
@@ -21,15 +23,17 @@ export class OllamaProvider extends BaseProvider {
       temperature?: number;
       maxTokens?: number;
       stop?: string[];
+      tools?: Tool[];
+      toolChoice?: 'auto' | 'none' | 'required';
     },
     token: vscode.CancellationToken
-  ): Promise<AsyncIterable<string>> {
+  ): Promise<AsyncIterable<StreamChunk>> {
     const apiBase = this.getApiBase(model);
     const url = `${apiBase}/api/chat`;
 
     const convertedMessages = this.convertMessages(messages);
 
-    this.logger.debug(`Ollama request to ${url} with model ${model.model}`);
+    this.logger.debug(`Ollama request to ${url} with model ${model.model}, tools: ${options.tools?.length ?? 0}`);
 
     const abortController = new AbortController();
     
@@ -49,6 +53,11 @@ export class OllamaProvider extends BaseProvider {
         },
       };
 
+      // Add tools if provided (Ollama uses OpenAI-compatible format)
+      if (options.tools && options.tools.length > 0) {
+        requestBody.tools = toOpenAITools(options.tools);
+      }
+
       const response = await this.fetchWithError(
         url,
         {
@@ -62,18 +71,97 @@ export class OllamaProvider extends BaseProvider {
         'Ollama'
       );
 
-      return this.createNDJSONStream(response, token, this.parseOllamaLine.bind(this));
+      return this.createOllamaStream(response, token);
     } finally {
       cancelListener.dispose();
     }
   }
 
-  private parseOllamaLine(json: Record<string, unknown>): string | null {
-    const message = json.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === 'string') {
-      return message.content;
-    }
-    return null;
+  /**
+   * Create stream with tool call support
+   */
+  private createOllamaStream(
+    response: Response,
+    token: vscode.CancellationToken
+  ): AsyncIterable<StreamChunk> {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const logger = this.logger;
+
+    return {
+      async *[Symbol.asyncIterator]() {
+        let buffer = '';
+
+        try {
+          while (true) {
+            if (token.isCancellationRequested) {
+              logger.debug('Request cancelled, aborting stream');
+              await reader.cancel();
+              break;
+            }
+
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              try {
+                const json = JSON.parse(trimmed);
+                const message = json.message as Record<string, unknown> | undefined;
+
+                if (message) {
+                  // Handle text content
+                  if (typeof message.content === 'string' && message.content) {
+                    yield { type: 'text', text: message.content };
+                  }
+
+                  // Handle tool calls (Ollama returns them in tool_calls array)
+                  const toolCalls = message.tool_calls as Array<{
+                    function: { name: string; arguments: Record<string, unknown> | string };
+                  }> | undefined;
+
+                  if (toolCalls && toolCalls.length > 0) {
+                    for (let i = 0; i < toolCalls.length; i++) {
+                      const tc = toolCalls[i];
+                      let input: Record<string, unknown> = {};
+                      
+                      if (typeof tc.function.arguments === 'string') {
+                        try {
+                          input = JSON.parse(tc.function.arguments);
+                        } catch {
+                          logger.warn('Failed to parse Ollama tool arguments');
+                        }
+                      } else {
+                        input = tc.function.arguments || {};
+                      }
+
+                      const toolCall: ToolCall = {
+                        id: `ollama_call_${i}_${Date.now()}`,
+                        name: tc.function.name,
+                        input
+                      };
+                      yield { type: 'tool_call', toolCall };
+                    }
+                  }
+                }
+              } catch {
+                // Skip invalid JSON
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    };
   }
 
   /**

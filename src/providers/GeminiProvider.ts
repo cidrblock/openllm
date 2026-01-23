@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseProvider } from './BaseProvider';
-import { ModelConfig, ChatMessage } from '../types';
+import { ModelConfig, ChatMessage, Tool, StreamChunk, ToolCall } from '../types';
+import { toGeminiTools } from '../utils/toolTranslator';
 
 /**
  * Google Gemini API provider implementation
@@ -21,16 +22,18 @@ export class GeminiProvider extends BaseProvider {
       temperature?: number;
       maxTokens?: number;
       stop?: string[];
+      tools?: Tool[];
+      toolChoice?: 'auto' | 'none' | 'required';
     },
     token: vscode.CancellationToken
-  ): Promise<AsyncIterable<string>> {
+  ): Promise<AsyncIterable<StreamChunk>> {
     const apiBase = this.getApiBase(model);
     const url = `${apiBase}/v1beta/models/${model.model}:streamGenerateContent?key=${model.apiKey}`;
 
     const convertedMessages = this.convertMessages(messages);
     const { systemInstruction, contents } = this.convertToGeminiFormat(convertedMessages);
 
-    this.logger.debug(`Gemini request to model ${model.model}`);
+    this.logger.debug(`Gemini request to model ${model.model}, tools: ${options.tools?.length ?? 0}`);
 
     const abortController = new AbortController();
     
@@ -52,6 +55,18 @@ export class GeminiProvider extends BaseProvider {
         requestBody.systemInstruction = { parts: [{ text: systemInstruction }] };
       }
 
+      // Add tools if provided
+      if (options.tools && options.tools.length > 0) {
+        requestBody.tools = toGeminiTools(options.tools);
+        if (options.toolChoice === 'required') {
+          requestBody.toolConfig = { functionCallingConfig: { mode: 'ANY' } };
+        } else if (options.toolChoice === 'none') {
+          requestBody.toolConfig = { functionCallingConfig: { mode: 'NONE' } };
+        } else {
+          requestBody.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+        }
+      }
+
       const response = await this.fetchWithError(
         url,
         {
@@ -65,7 +80,7 @@ export class GeminiProvider extends BaseProvider {
         'Gemini'
       );
 
-      return this.createGeminiStream(response, token);
+      return this.createGeminiStreamWithTools(response, token);
     } finally {
       cancelListener.dispose();
     }
@@ -100,15 +115,16 @@ export class GeminiProvider extends BaseProvider {
   }
 
   /**
-   * Create stream from Gemini response (uses JSON array streaming)
+   * Create stream from Gemini response with tool call support
    */
-  private createGeminiStream(
+  private createGeminiStreamWithTools(
     response: Response,
     token: vscode.CancellationToken
-  ): AsyncIterable<string> {
+  ): AsyncIterable<StreamChunk> {
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     const logger = this.logger;
+    let toolCallCounter = 0;
 
     return {
       async *[Symbol.asyncIterator]() {
@@ -129,31 +145,57 @@ export class GeminiProvider extends BaseProvider {
 
             buffer += decoder.decode(value, { stream: true });
 
-            // Gemini streams JSON objects, try to parse complete objects
-            // The response is a JSON array, so we look for complete objects
-            const matches = buffer.matchAll(/\{[^{}]*"text"\s*:\s*"([^"]*)"[^{}]*\}/g);
-            
-            for (const match of matches) {
-              // Extract text from the match
-              try {
-                const jsonStr = match[0];
-                const parsed = JSON.parse(jsonStr);
-                const text = parsed.text;
-                if (text) {
-                  yield text;
-                }
-              } catch {
-                // Try extracting from candidates structure
-                try {
-                  const text = match[1];
-                  if (text) {
-                    // Unescape the string
-                    yield JSON.parse(`"${text}"`);
+            // Try to parse complete JSON objects from the buffer
+            // Gemini returns an array of response objects
+            try {
+              // Look for complete JSON objects in the buffer
+              const jsonMatches = buffer.match(/\{[\s\S]*?"candidates"[\s\S]*?\}(?=\s*[,\]]|$)/g);
+              
+              if (jsonMatches) {
+                for (const jsonStr of jsonMatches) {
+                  try {
+                    const parsed = JSON.parse(jsonStr);
+                    const candidate = parsed.candidates?.[0];
+                    const parts = candidate?.content?.parts;
+
+                    if (parts) {
+                      for (const part of parts) {
+                        // Handle text content
+                        if (part.text) {
+                          yield { type: 'text', text: part.text };
+                        }
+
+                        // Handle function calls
+                        if (part.functionCall) {
+                          const toolCall: ToolCall = {
+                            id: `gemini_call_${toolCallCounter++}_${Date.now()}`,
+                            name: part.functionCall.name,
+                            input: part.functionCall.args || {}
+                          };
+                          yield { type: 'tool_call', toolCall };
+                        }
+                      }
+                    }
+                  } catch {
+                    // Skip unparseable JSON
                   }
-                } catch {
-                  // Skip unparseable content
                 }
               }
+
+              // Also try simple text extraction for simpler responses
+              const textMatches = buffer.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g);
+              for (const match of textMatches) {
+                try {
+                  const text = JSON.parse(`"${match[1]}"`);
+                  if (text) {
+                    yield { type: 'text', text };
+                  }
+                } catch {
+                  // Skip
+                }
+              }
+            } catch {
+              // Continue accumulating buffer
             }
 
             // Keep unprocessed part of buffer

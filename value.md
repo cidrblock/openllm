@@ -39,6 +39,105 @@ Extension developers face difficult choices:
 
 There's no open, reusable layer that extension developers can depend on.
 
+### Why "Bring Your Own LLM" Is Harder Than It Looks
+
+At first glance, supporting multiple LLM providers seems straightforward: accept an API key, call an endpoint, return the response. In practice, "bring your own LLM" is a **multidimensional problem** that compounds in complexity:
+
+#### Dimension 1: Providers
+
+Each provider has its own:
+- **Authentication scheme** — Bearer tokens, API keys in headers, custom headers (`x-api-key` for Anthropic)
+- **API format** — OpenAI-style `/v1/chat/completions`, Anthropic's `/v1/messages`, Google's protobuf-influenced REST
+- **Streaming protocol** — Server-sent events with different delta formats, NDJSON for Gemini
+- **Error responses** — Different status codes, error shapes, rate limit behaviors
+- **Base URLs** — Standard endpoints, regional variants, self-hosted instances
+
+#### Dimension 2: Models
+
+Within each provider, models vary significantly:
+- **Context windows** — 8K to 2M tokens across models
+- **Pricing** — Orders of magnitude difference between GPT-4o-mini and Claude Opus
+- **Speed** — Flash/instant models vs. reasoning models
+- **Capabilities** — Not all models support all features (see below)
+
+#### Dimension 3: Capabilities
+
+Modern LLMs have varying feature support:
+- **Tool/function calling** — Native support (OpenAI, Anthropic, Gemini) vs. prompt injection (Ollama)
+- **Vision/images** — Some models accept images, others don't
+- **Structured output** — JSON mode, constrained decoding
+- **System prompts** — Different handling between providers
+- **Streaming** — Most support it, but chunk formats differ
+
+A capability matrix is needed for runtime decisions:
+
+| Model | Tools | Vision | Streaming | System Prompt |
+|-------|-------|--------|-----------|---------------|
+| GPT-4o | ✓ | ✓ | ✓ | ✓ |
+| Claude 3.5 Sonnet | ✓ | ✓ | ✓ | ✓ |
+| Gemini 1.5 Pro | ✓ | ✓ | ✓ | ✓ |
+| Llama 3 (Ollama) | ✗ | ✗ | ✓ | ✓ |
+| Mistral Large | ✓ | ✗ | ✓ | ✓ |
+
+#### Dimension 4: Settings Management
+
+Users need to configure and manage:
+- **API keys** — Securely stored, never committed to repos
+- **Base URLs** — For self-hosted, enterprise endpoints, or proxies
+- **Model selection** — Which models to expose from each provider
+- **Enabled/disabled state** — Use provider A today, switch to B tomorrow
+- **Scope** — User settings vs. workspace settings (team configurations)
+
+Each dimension multiplies complexity. Supporting 7 providers × 50+ models × 4 capability types × 3 storage locations = hundreds of permutations.
+
+#### The Combinatorial Challenge
+
+An extension developer wanting "LLM support" must consider:
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         Extension needs LLM         │
+                    └─────────────────┬───────────────────┘
+                                      │
+        ┌─────────────────────────────┼─────────────────────────────┐
+        │                             │                             │
+        ▼                             ▼                             ▼
+   ┌─────────┐                 ┌─────────────┐               ┌─────────────┐
+   │ Which   │                 │ Which       │               │ What        │
+   │ provider│                 │ models?     │               │ capabilities│
+   │ APIs?   │                 │             │               │ needed?     │
+   └────┬────┘                 └──────┬──────┘               └──────┬──────┘
+        │                             │                             │
+   ┌────┴────┐                 ┌──────┴──────┐               ┌──────┴──────┐
+   │ OpenAI  │                 │ gpt-4o      │               │ Streaming?  │
+   │ Anthrop.│                 │ claude-3.5  │               │ Tools?      │
+   │ Gemini  │                 │ gemini-1.5  │               │ Vision?     │
+   │ Mistral │                 │ llama3      │               │             │
+   │ Azure   │                 │ ...         │               │             │
+   │ Ollama  │                 │             │               │             │
+   └─────────┘                 └─────────────┘               └─────────────┘
+        │                             │                             │
+        └─────────────────────────────┼─────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────────┐
+                    │     Where do keys/settings live?    │
+                    │  - User settings.json               │
+                    │  - Workspace settings               │
+                    │  - Environment variables            │
+                    │  - Secret storage                   │
+                    │  - .env files                       │
+                    └─────────────────────────────────────┘
+```
+
+Without a unified layer, each extension solves this independently, leading to:
+- Duplicated, inconsistent implementations
+- Users configuring the same credentials in multiple places
+- No shared capability detection
+- Impossible for users to switch providers without reconfiguring each extension
+
+**This is why Open LLM Provider exists: to collapse these dimensions into a single, well-tested layer.**
+
 ---
 
 ## The Solution: Open LLM Provider
@@ -202,28 +301,44 @@ We import Continue's config format to ease migration.
 - ✅ Streaming responses
 - ✅ Syntax-highlighted code blocks
 - ✅ Copy/terminal integration
+- ✅ Context attachment (files, active editor)
+- ✅ **Tool orchestration** (vscode.lm.tools integration)
 
 ### Near-term
 - [ ] Stable `vscode.lm` registration (pending API)
 - [ ] Red Hat AI provider (RHOAI, RHEL AI)
-- [ ] Context attachment (files, selections)
 - [ ] Conversation export/import
+- [ ] Enhanced tool UI (collapsible tool call details)
 
-### Long-term Vision: Agents
-The long-term goal is agent capabilities — autonomous multi-step operations like:
-- "Refactor this module to use dependency injection"
-- "Write tests for these functions"
-- "Debug why this playbook is failing"
+### Agent Capabilities (Now Available)
+With tool orchestration implemented, Open LLM now supports agent-style operations:
+- The LLM can discover tools via `vscode.lm.tools`
+- Tool calls are automatically executed via `vscode.lm.invokeTool()`
+- Results are fed back to the LLM for multi-step reasoning
+- Works with any provider that supports function calling
 
-This requires:
-1. Tool/function calling support (partially implemented)
-2. File system access patterns
-3. Safe execution boundaries
-4. Integration with VS Code's proposed agent APIs
+This enables operations like:
+- "Read this file and explain it"
+- "Search the codebase for X"
+- "Run this command in the terminal"
 
+**Architecture:**
+```
+User prompt → LLM (with tool schemas) → Tool call request
+                                              ↓
+                               vscode.lm.invokeTool()
+                                              ↓
+                               Tool result → LLM → Final response
+```
+
+The tool orchestration loop runs in the chat interface, using native VS Code APIs
+for tool execution while our providers translate tool schemas for external LLMs.
+
+### Long-term Vision
 The agent space is rapidly evolving. We're monitoring:
-- `vscode.chat.createChatParticipant()` API
+- `vscode.chat.createChatParticipant()` API for deeper IDE integration
 - Anthropic's computer use patterns
+- Multi-agent coordination patterns
 - OpenAI's Assistants API approach
 
 ---

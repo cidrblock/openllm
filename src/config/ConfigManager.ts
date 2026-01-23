@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { SecretResolver } from './SecretResolver';
-import { ContinueConfigReader } from './ContinueConfigReader';
 import { ModelConfig, ProviderConfig } from '../types';
 import { getLogger } from '../utils/logger';
 
@@ -10,7 +9,6 @@ import { getLogger } from '../utils/logger';
 export class ConfigManager {
   private context: vscode.ExtensionContext;
   private secretResolver: SecretResolver;
-  private continueReader: ContinueConfigReader;
   private models: Map<string, ModelConfig> = new Map();
   private disposables: vscode.Disposable[] = [];
   private logger = getLogger();
@@ -22,7 +20,8 @@ export class ConfigManager {
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
     this.secretResolver = new SecretResolver();
-    this.continueReader = new ContinueConfigReader(this.secretResolver);
+    // Connect SecretStorage for secure API key storage
+    this.secretResolver.setSecretStorage(context.secrets);
   }
 
   /**
@@ -43,6 +42,13 @@ export class ConfigManager {
   }
 
   /**
+   * Get the SecretResolver instance
+   */
+  getSecretResolver(): SecretResolver {
+    return this.secretResolver;
+  }
+
+  /**
    * Load configurations from all sources
    */
   private async loadConfigurations(): Promise<void> {
@@ -50,32 +56,47 @@ export class ConfigManager {
 
     // Load from VS Code settings
     await this.loadFromVSCodeSettings();
-
-    // Load from Continue config if enabled
-    const config = vscode.workspace.getConfiguration('openLLM');
-    if (config.get<boolean>('importContinueConfig', true)) {
-      await this.loadFromContinueConfig();
-    }
   }
 
   /**
    * Load models from VS Code settings
+   * 
+   * Settings only contain provider name, optional base URL, and model list.
+   * API keys are resolved from SecretStorage or environment variables.
    */
   private async loadFromVSCodeSettings(): Promise<void> {
     const config = vscode.workspace.getConfiguration('openLLM');
     const providers = config.get<ProviderConfig[]>('providers', []);
 
+    this.logger.debug(`Found ${providers.length} providers in settings: ${providers.map(p => p.name).join(', ')}`);
+
     for (const provider of providers) {
-      const resolvedApiKey = this.secretResolver.resolve(provider.apiKey);
-      const resolvedApiBase = provider.apiBase 
-        ? this.secretResolver.resolve(provider.apiBase) 
-        : undefined;
+      // Skip disabled providers (enabled defaults to true if not set)
+      if (provider.enabled === false) {
+        this.logger.debug(`Provider ${provider.name} is disabled, skipping`);
+        continue;
+      }
+
+      // Get API key from SecretStorage or environment
+      const apiKey = await this.secretResolver.getApiKey(provider.name);
+      const keySource = await this.secretResolver.getApiKeySource(provider.name);
+
+      this.logger.debug(`Provider ${provider.name}: API key ${keySource.available ? 'found' : 'NOT found'} (source: ${keySource.source}), models: ${provider.models?.length || 0}`);
+
+      // Get base URL from settings or stored preference
+      const apiBase = provider.apiBase || 
+        this.secretResolver.getBaseUrl(provider.name, this.context.globalState);
+
+      if (!provider.models || provider.models.length === 0) {
+        this.logger.warn(`Provider ${provider.name} has no models configured`);
+        continue;
+      }
 
       for (const modelName of provider.models) {
         const modelId = `settings-${provider.name}-${modelName.replace(/[^a-zA-Z0-9-]/g, '-')}`;
         
         // Skip if no API key (except Ollama)
-        if (!resolvedApiKey && provider.name.toLowerCase() !== 'ollama') {
+        if (!apiKey && provider.name.toLowerCase() !== 'ollama') {
           this.logger.warn(`Skipping ${provider.name}/${modelName} - no API key`);
           continue;
         }
@@ -85,8 +106,8 @@ export class ConfigManager {
           name: `${provider.name}/${modelName}`,
           provider: provider.name,
           model: modelName,
-          apiKey: resolvedApiKey,
-          apiBase: resolvedApiBase,
+          apiKey: apiKey,
+          apiBase: apiBase,
           roles: ['chat'],
           contextLength: this.getDefaultContextLength(provider.name, modelName),
           capabilities: {
@@ -95,29 +116,12 @@ export class ConfigManager {
             streaming: true,
           },
         });
+        
+        this.logger.debug(`Registered model: ${modelId}`);
       }
     }
 
-    this.logger.debug(`Loaded ${providers.length} providers from VS Code settings`);
-  }
-
-  /**
-   * Load models from Continue configuration
-   */
-  private async loadFromContinueConfig(): Promise<void> {
-    if (!this.continueReader.exists()) {
-      this.logger.debug('No Continue config found');
-      return;
-    }
-
-    const continueModels = await this.continueReader.getModels();
-
-    for (const model of continueModels) {
-      // Only add if not already present (settings take precedence)
-      if (!this.models.has(model.id)) {
-        this.models.set(model.id, model);
-      }
-    }
+    this.logger.info(`Loaded ${this.models.size} models from ${providers.length} providers in settings`);
   }
 
   /**
@@ -137,16 +141,6 @@ export class ConfigManager {
         }
       })
     );
-
-    // Watch Continue config file
-    const continueConfigPath = this.continueReader.getConfigPath();
-    if (continueConfigPath) {
-      const watcher = vscode.workspace.createFileSystemWatcher(continueConfigPath);
-      watcher.onDidChange(() => this.reload());
-      watcher.onDidCreate(() => this.reload());
-      watcher.onDidDelete(() => this.reload());
-      this.disposables.push(watcher);
-    }
 
     // Watch .env files in workspace
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -217,30 +211,46 @@ export class ConfigManager {
   }
 
   /**
+   * Get the number of unique providers with models
+   */
+  getProviderCount(): number {
+    const providers = new Set<string>();
+    for (const model of this.models.values()) {
+      providers.add(model.provider.toLowerCase());
+    }
+    return providers.size;
+  }
+
+  /**
+   * Get list of configured provider names
+   */
+  getConfiguredProviders(): string[] {
+    const providers = new Set<string>();
+    for (const model of this.models.values()) {
+      providers.add(model.provider);
+    }
+    return Array.from(providers);
+  }
+
+  /**
    * Store an API key securely
    */
   async storeApiKey(provider: string, apiKey: string): Promise<void> {
-    const key = `openllm-${provider}-apikey`;
-    await this.context.secrets.store(key, apiKey);
-    this.secretResolver.set(`${provider.toUpperCase()}_API_KEY`, apiKey);
-    this.logger.info(`Stored API key for ${provider}`);
+    await this.secretResolver.storeApiKey(provider, apiKey);
   }
 
   /**
    * Get a stored API key
    */
   async getStoredApiKey(provider: string): Promise<string | undefined> {
-    const key = `openllm-${provider}-apikey`;
-    return await this.context.secrets.get(key);
+    return await this.secretResolver.getApiKey(provider);
   }
 
   /**
    * Delete a stored API key
    */
   async deleteApiKey(provider: string): Promise<void> {
-    const key = `openllm-${provider}-apikey`;
-    await this.context.secrets.delete(key);
-    this.logger.info(`Deleted API key for ${provider}`);
+    await this.secretResolver.deleteApiKey(provider);
   }
 
   /**
@@ -277,14 +287,14 @@ export class ConfigManager {
    * Check if provider supports image input
    */
   private supportsImages(provider: string): boolean {
-    return ['openai', 'anthropic', 'google', 'gemini'].includes(provider.toLowerCase());
+    return ['openai', 'anthropic', 'google', 'gemini', 'openrouter'].includes(provider.toLowerCase());
   }
 
   /**
    * Check if provider supports tool calling
    */
   private supportsTools(provider: string): boolean {
-    return ['openai', 'anthropic', 'google', 'gemini'].includes(provider.toLowerCase());
+    return ['openai', 'anthropic', 'google', 'gemini', 'openrouter', 'mistral'].includes(provider.toLowerCase());
   }
 
   /**

@@ -5,6 +5,7 @@ import { OpenLLMProvider } from './core/OpenLLMProvider';
 import { StatusPanel } from './ui/StatusPanel';
 import { PlaygroundPanel } from './ui/PlaygroundPanel';
 import { ChatViewProvider } from './ui/ChatViewProvider';
+import { ApiKeyPanel } from './ui/ApiKeyPanel';
 import { getLogger, updateLogLevel, disposeLogger } from './utils/logger';
 
 let openLLMProvider: OpenLLMProvider | undefined;
@@ -76,10 +77,12 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!configManager.hasValidConfiguration()) {
       showFirstTimeSetup();
     } else {
-      const modelCount = openLLMProvider.getModelCount();
-      logger.info(`Activated with ${modelCount} models`);
+      const modelCount = configManager.getModelCount();
+      const providerCount = configManager.getProviderCount();
+      const providers = configManager.getConfiguredProviders();
+      logger.info(`Activated with ${modelCount} models from ${providerCount} providers: ${providers.join(', ')}`);
       vscode.window.showInformationMessage(
-        `Open LLM Provider activated with ${modelCount} models`
+        `Open LLM: ${modelCount} models from ${providerCount} provider${providerCount !== 1 ? 's' : ''}`
       );
     }
 
@@ -128,12 +131,12 @@ function registerCommands(
       
       if (models.length === 0) {
         const action = await vscode.window.showInformationMessage(
-          'No models configured. Would you like to add a provider?',
-          'Add Provider',
+          'No models configured. Would you like to configure providers?',
+          'Configure Providers',
           'Cancel'
         );
-        if (action === 'Add Provider') {
-          vscode.commands.executeCommand('openLLM.addProvider');
+        if (action === 'Configure Providers') {
+          vscode.commands.executeCommand('openLLM.configureApiKeys');
         }
         return;
       }
@@ -157,214 +160,16 @@ function registerCommands(
     })
   );
 
-  // Add provider
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.addProvider', async () => {
-      const metadata = registry.getProviderMetadata();
-      
-      const providerItems = metadata.map(p => ({
-        label: p.displayName,
-        description: p.requiresApiKey ? 'Requires API key' : 'No API key required',
-        detail: p.defaultModels.length > 0 
-          ? `Models: ${p.defaultModels.map(m => m.name).join(', ')}`
-          : 'Configure deployment name',
-        provider: p,
-      }));
-
-      const selected = await vscode.window.showQuickPick(providerItems, {
-        placeHolder: 'Select a provider to add',
-      });
-
-      if (!selected) {
-        return;
-      }
-
-      const provider = selected.provider;
-
-      // Get API key if required
-      let apiKey: string | undefined;
-      if (provider.requiresApiKey) {
-        apiKey = await vscode.window.showInputBox({
-          prompt: `Enter your ${provider.displayName} API key`,
-          password: true,
-          placeHolder: 'sk-...',
-          ignoreFocusOut: true,
-        });
-
-        if (!apiKey) {
-          return;
-        }
-
-        // Store the API key securely
-        await configManager.storeApiKey(provider.id, apiKey);
-      }
-
-      // Get API base if it's Azure
-      let apiBase: string | undefined;
-      if (provider.id === 'azure') {
-        apiBase = await vscode.window.showInputBox({
-          prompt: 'Enter your Azure OpenAI endpoint URL',
-          placeHolder: 'https://your-resource.openai.azure.com',
-          ignoreFocusOut: true,
-        });
-
-        if (!apiBase) {
-          return;
-        }
-      }
-
-      // Select models
-      let selectedModels: string[] = [];
-      
-      if (provider.defaultModels.length > 0) {
-        const modelItems = provider.defaultModels.map(m => ({
-          label: m.name,
-          description: `${m.contextLength.toLocaleString()} tokens`,
-          picked: false,
-          modelId: m.id,
-        }));
-
-        const pickedModels = await vscode.window.showQuickPick(modelItems, {
-          placeHolder: 'Select models to enable',
-          canPickMany: true,
-        });
-
-        if (!pickedModels || pickedModels.length === 0) {
-          return;
-        }
-
-        selectedModels = pickedModels.map(m => m.modelId);
-      } else {
-        // For Azure, ask for deployment name
-        const deploymentName = await vscode.window.showInputBox({
-          prompt: 'Enter your Azure deployment name',
-          placeHolder: 'gpt-4-deployment',
-          ignoreFocusOut: true,
-        });
-
-        if (!deploymentName) {
-          return;
-        }
-
-        selectedModels = [deploymentName];
-      }
-
-      // Update VS Code settings
-      const config = vscode.workspace.getConfiguration('openLLM');
-      const providers = config.get<Array<{
-        name: string;
-        apiKey?: string;
-        apiBase?: string;
-        models: string[];
-      }>>('providers', []);
-
-      // Check if provider already exists
-      const existingIndex = providers.findIndex(p => p.name === provider.id);
-      
-      // Build the secret reference string (e.g., ${{ secrets.OPENAI_API_KEY }})
-      const secretRef = apiKey 
-        ? '${{ secrets.' + provider.id.toUpperCase() + '_API_KEY }}'
-        : undefined;
-
-      const newProvider = {
-        name: provider.id,
-        apiKey: secretRef,
-        apiBase,
-        models: selectedModels,
-      };
-
-      if (existingIndex >= 0) {
-        providers[existingIndex] = newProvider;
-      } else {
-        providers.push(newProvider);
-      }
-
-      await config.update('providers', providers, vscode.ConfigurationTarget.Global);
-
-      vscode.window.showInformationMessage(
-        'Added ' + provider.displayName + ' with ' + selectedModels.length + ' model(s)'
-      );
-    })
-  );
-
-  // Configure (open settings)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.configure', async () => {
-      vscode.commands.executeCommand(
-        'workbench.action.openSettings',
-        'openLLM'
-      );
-    })
-  );
-
   // Reload configuration
   context.subscriptions.push(
     vscode.commands.registerCommand('openLLM.reloadConfig', async () => {
       await configManager.reload();
       provider.reloadModels();
       updateStatusBar(provider);
-      vscode.window.showInformationMessage('Configuration reloaded');
-    })
-  );
-
-  // Test connections
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.testConnection', async () => {
-      const result = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Testing provider connections...',
-          cancellable: false,
-        },
-        async () => {
-          return await provider.testConnections();
-        }
-      );
-
-      if (result.total === 0) {
-        vscode.window.showWarningMessage('No providers configured to test');
-        return;
-      }
-
-      const message = 'Tested ' + result.total + ' model(s): ' + result.successful + ' successful, ' + result.failed + ' failed';
-      
-      if (result.failed > 0) {
-        const showDetails = await vscode.window.showWarningMessage(
-          message,
-          'Show Details'
-        );
-        
-        if (showDetails) {
-          const details = result.details
-            .filter(d => !d.success)
-            .map(d => '- ' + d.provider + '/' + d.model + ': ' + d.error)
-            .join('\n');
-          
-          vscode.window.showErrorMessage('Failed connections:\n' + details);
-        }
-      } else {
-        vscode.window.showInformationMessage(message);
-      }
-    })
-  );
-
-  // Import from Continue
-  context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.importFromContinue', async () => {
-      const config = vscode.workspace.getConfiguration('openLLM');
-      const currentValue = config.get<boolean>('importContinueConfig', true);
-      
-      if (!currentValue) {
-        await config.update('importContinueConfig', true, vscode.ConfigurationTarget.Global);
-      }
-      
-      await configManager.reload();
-      provider.reloadModels();
-      updateStatusBar(provider);
-      
-      const modelCount = provider.getModelCount();
+      const modelCount = configManager.getModelCount();
+      const providerCount = configManager.getProviderCount();
       vscode.window.showInformationMessage(
-        `Imported Continue configuration (${modelCount} models available)`
+        `Open LLM: ${modelCount} models from ${providerCount} provider${providerCount !== 1 ? 's' : ''}`
       );
     })
   );
@@ -462,6 +267,13 @@ function registerCommands(
     })
   );
 
+  // Configure API keys
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.configureApiKeys', () => {
+      ApiKeyPanel.createOrShow(context);
+    })
+  );
+
   // Focus chat panel
   context.subscriptions.push(
     vscode.commands.registerCommand('openLLM.focusChat', () => {
@@ -485,6 +297,45 @@ function registerCommands(
         context: args.context,
         newSession: args.newSession
       });
+    })
+  );
+
+  // List available tools (for debugging)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openLLM.listTools', async () => {
+      const tools = vscode.lm.tools;
+      const logger = getLogger();
+      
+      logger.info(`Total tools available: ${tools.length}`);
+      
+      if (tools.length === 0) {
+        vscode.window.showInformationMessage('No tools registered in vscode.lm.tools');
+        return;
+      }
+      
+      const output = vscode.window.createOutputChannel('Open LLM Tools');
+      output.clear();
+      output.appendLine(`=== Available VS Code LM Tools (${tools.length}) ===\n`);
+      
+      tools.forEach(t => {
+        output.appendLine(`📦 ${t.name}`);
+        output.appendLine(`   Description: ${t.description || 'None'}`);
+        try {
+          const schemaStr = t.inputSchema ? JSON.stringify(t.inputSchema, null, 2) : 'No schema';
+          const schemaLines = schemaStr.split('\n');
+          output.appendLine(`   Schema: ${schemaLines[0]}`);
+          for (let i = 1; i < schemaLines.length; i++) {
+            output.appendLine(`           ${schemaLines[i]}`);
+          }
+        } catch {
+          output.appendLine(`   Schema: [Could not serialize]`);
+        }
+        output.appendLine('');
+      });
+      
+      output.show();
+      
+      vscode.window.showInformationMessage(`Found ${tools.length} tools. See Output panel for details.`);
     })
   );
 
@@ -522,15 +373,12 @@ function registerCommands(
 
 async function showFirstTimeSetup(): Promise<void> {
   const selection = await vscode.window.showInformationMessage(
-    'Welcome to Open LLM Provider! Configure your first provider to get started.',
-    'Add Provider',
-    'Import from Continue',
+    'Welcome to Open LLM Provider! Configure your API keys to get started.',
+    'Configure Providers',
     'Later'
   );
 
-  if (selection === 'Add Provider') {
-    vscode.commands.executeCommand('openLLM.addProvider');
-  } else if (selection === 'Import from Continue') {
-    vscode.commands.executeCommand('openLLM.importFromContinue');
+  if (selection === 'Configure Providers') {
+    vscode.commands.executeCommand('openLLM.configureApiKeys');
   }
 }

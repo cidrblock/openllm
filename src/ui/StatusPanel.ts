@@ -123,9 +123,7 @@ export class StatusPanel {
    * Get the configuration source from the model ID
    */
   private getConfigSource(model: ModelConfig): string {
-    if (model.id.startsWith('continue-')) {
-      return 'Continue Config (~/.continue/config.yaml)';
-    } else if (model.id.startsWith('settings-')) {
+    if (model.id.startsWith('settings-')) {
       return 'VS Code Settings (settings.json)';
     }
     return 'Unknown';

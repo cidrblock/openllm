@@ -38,13 +38,17 @@ export interface ModelCapabilities {
 
 /**
  * Provider configuration from VS Code settings
+ * 
+ * Note: API keys are NOT stored here. They are resolved from:
+ * 1. VS Code SecretStorage (managed by Providers and Models webview)
+ * 2. Environment variables (e.g., OPENAI_API_KEY, ANTHROPIC_API_KEY)
  */
 export interface ProviderConfig {
-  /** Provider name */
+  /** Provider name (e.g., 'openai', 'anthropic', 'openrouter') */
   name: string;
-  /** API key or template variable */
-  apiKey?: string;
-  /** Custom API base URL */
+  /** Whether this provider is enabled (default: true) */
+  enabled?: boolean;
+  /** Custom API base URL (optional, uses provider default if not set) */
   apiBase?: string;
   /** List of model names to expose */
   models: string[];
@@ -78,13 +82,55 @@ export interface ChatMessage {
 }
 
 /**
- * Content part for multi-modal messages
+ * Content part for multi-modal and tool messages
  */
 export interface ContentPart {
-  type: 'text' | 'image';
+  type: 'text' | 'image' | 'tool_use' | 'tool_result';
   text?: string;
   imageUrl?: string;
+  // Tool use fields (assistant calling a tool)
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  // Tool result fields (returning tool output)
+  tool_use_id?: string;
+  content?: string;
 }
+
+/**
+ * Tool definition (matches vscode.LanguageModelChatTool)
+ */
+export interface Tool {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+/**
+ * Tool call from the LLM
+ */
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/**
+ * Tool result to send back to LLM
+ */
+export interface ToolResult {
+  callId: string;
+  content: string;
+  isError?: boolean;
+}
+
+/**
+ * Streaming chunk types
+ */
+export type StreamChunk = 
+  | { type: 'text'; text: string }
+  | { type: 'tool_call'; toolCall: ToolCall }
+  | { type: 'tool_call_delta'; id: string; name?: string; inputDelta?: string };
 
 /**
  * Streaming chat request
@@ -95,6 +141,8 @@ export interface StreamChatRequest {
   temperature?: number;
   maxTokens?: number;
   stop?: string[];
+  tools?: Tool[];
+  toolChoice?: 'auto' | 'none' | 'required';
 }
 
 /**

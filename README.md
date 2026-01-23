@@ -6,6 +6,7 @@
 
 - **Chat Sidebar** — Built-in chat interface in the Activity Bar, no Copilot required
 - **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, Ollama (local), Mistral, Azure OpenAI
+- **Tool Orchestration** — Supports VS Code tools (`vscode.lm.tools`) for agent-style operations
 - **Configure Once, Use Everywhere** — Set up your API keys once and use them with any compatible extension
 - **Local Model Support** — Run models locally with Ollama for privacy and cost savings
 - **Continue Integration** — Automatically import your existing Continue configuration
@@ -99,13 +100,9 @@ Open LLM is committed to transparency. Click the gear icon (⚙) in the chat inp
 
 | Command | Description |
 |---------|-------------|
+| `Open LLM: Providers and Models` | Configure providers, API keys, and select models |
 | `Open LLM: Show Available Models` | View all configured models |
-| `Open LLM: Add Provider` | Add a new LLM provider |
-| `Open LLM: Configure Providers` | Open extension settings |
 | `Open LLM: Reload Configuration` | Reload configuration from files |
-| `Open LLM: Test Provider Connections` | Test all provider connections |
-| `Open LLM: Import Configuration from Continue` | Import Continue config |
-| `Open LLM: Send Message` | Send a test message to a model |
 | `Open LLM: Show Status Panel` | Open the status and debug panel |
 | `Open LLM: Open Playground` | Compare responses from all models side-by-side |
 | `Open LLM: Focus Chat Panel` | Open the Chat sidebar |
@@ -118,9 +115,11 @@ Open LLM is committed to transparency. Click the gear icon (⚙) in the chat inp
 | OpenAI | Yes | GPT-4o, GPT-4, GPT-3.5, o1 |
 | Anthropic | Yes | Claude 3.5 Sonnet, Claude 3 Opus |
 | Google Gemini | Yes | Gemini 2.0, Gemini 1.5 Pro |
+| OpenRouter | Yes | 100+ models via single API (OpenAI, Anthropic, Google, Meta, etc.) |
 | Ollama | No | Local models (Llama, Mistral, etc.) |
 | Mistral | Yes | Mistral Large, Codestral |
 | Azure OpenAI | Yes | Azure-hosted OpenAI models |
+| Red Hat OpenShift AI | Yes | Enterprise AI on OpenShift (OpenAI-compatible) |
 
 ## Configuration Options
 
