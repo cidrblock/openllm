@@ -1,0 +1,347 @@
+{
+  "name": "open-llm-provider",
+  "displayName": "Open LLM Provider",
+  "description": "Use any LLM with any VS Code extension - OpenAI, Anthropic, Google, Ollama & more. The open alternative to Copilot.",
+  "version": "0.1.0",
+  "publisher": "open-llm",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "llm",
+    "ai",
+    "openai",
+    "anthropic",
+    "claude",
+    "gpt",
+    "gemini",
+    "ollama",
+    "copilot",
+    "language model",
+    "chatgpt",
+    "local llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/open-llm/open-llm-provider"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:openLLM.chatView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "open-llm",
+        "displayName": "Open LLM Provider"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "open-llm-chat",
+          "title": "Open LLM",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "open-llm-chat": [
+        {
+          "type": "webview",
+          "id": "openLLM.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "openLLM.configureApiKeys",
+        "title": "Providers and Models",
+        "category": "Open LLM",
+        "icon": "$(key)"
+      },
+      {
+        "command": "openLLM.showModels",
+        "title": "Show Available Models",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.reloadConfig",
+        "title": "Reload Configuration",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showStatusPanel",
+        "title": "Show Status Panel",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showPlayground",
+        "title": "Open Playground",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.focusChat",
+        "title": "Focus Chat Panel",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.chat.send",
+        "title": "Send Message to Chat",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.listTools",
+        "title": "List Available Tools",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.clearChat",
+        "title": "Clear Chat History",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.exportConfig",
+        "title": "Export Config to Native (YAML)",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.importConfig",
+        "title": "Import Config from Native (YAML)",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.exportConfigTo",
+        "title": "Export Config to Native (YAML) - Specify Level",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.importConfigFrom",
+        "title": "Import Config from Native (YAML) - Specify Level",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.exportKeysToKeychain",
+        "title": "Export Keys to System Keychain",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.exportKeysToVSCode",
+        "title": "Export Keys to VS Code SecretStorage",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.exportKeysToDotEnv",
+        "title": "Export Keys to .env File",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.showKeysAsEnvVars",
+        "title": "Show Keys as Environment Variables",
+        "category": "Open LLM"
+      },
+      {
+        "command": "openLLM.moveChatToRight",
+        "title": "Move Chat to Right",
+        "category": "Open LLM",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "openLLM.moveChatToLeft",
+        "title": "Move Chat to Left",
+        "category": "Open LLM",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "openLLM.moveChatToPanel",
+        "title": "Move Chat to Panel",
+        "category": "Open LLM",
+        "icon": "$(layout-panel)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "openLLM.moveChatToLeft",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "openLLM.moveChatToRight",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "openLLM.moveChatToPanel",
+          "when": "view == openLLM.chatView",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Open LLM Provider",
+      "properties": {
+        "openLLM.providers": {
+          "type": "array",
+          "default": [],
+          "description": "Configured LLM providers",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Provider name (openai, anthropic, google, ollama, azure, mistral, openrouter)"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this provider is enabled"
+              },
+              "apiBase": {
+                "type": "string",
+                "description": "Optional custom API base URL"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "List of model names to use"
+              }
+            },
+            "required": [
+              "name",
+              "models"
+            ]
+          }
+        },
+        "openLLM.autoReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reload configuration when files change"
+        },
+        "openLLM.defaultProvider": {
+          "type": "string",
+          "default": "",
+          "description": "Default provider to use when multiple are available"
+        },
+        "openLLM.logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Logging level for the extension"
+        },
+        "openLLM.chat.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful AI assistant. Format your responses using markdown when appropriate. Use code blocks with language identifiers for code snippets.",
+          "description": "System prompt sent to the LLM to guide response formatting. Editable via the settings icon in the chat interface.",
+          "editPresentation": "multilineText"
+        },
+        "openLLM.chat.enableTools": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable tool calling in chat. When enabled, the LLM can use registered VS Code tools (vscode.lm.tools) to perform actions like reading files, running commands, etc."
+        },
+        "openLLM.secrets.primaryStore": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "keychain"
+          ],
+          "enumDescriptions": [
+            "VS Code's built-in SecretStorage (workspace-aware, syncs with VS Code)",
+            "System keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) - shared across all OpenLLM tools"
+          ],
+          "default": "vscode",
+          "description": "Where to store and retrieve API keys"
+        },
+        "openLLM.secrets.checkEnvironment": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also check environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.) as a fallback"
+        },
+        "openLLM.secrets.checkDotEnv": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also check .env files in workspace and ~/.openllm/.env as a fallback"
+        },
+        "openLLM.config.source": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "native"
+          ],
+          "enumDescriptions": [
+            "Use VS Code settings.json (openLLM.providers array)",
+            "Use native config files (~/.openllm/config.yaml or .openllm/config.yaml)"
+          ],
+          "default": "vscode",
+          "description": "Where to read provider and model configuration from"
+        },
+        "openLLM.config.nativeLevel": {
+          "type": "string",
+          "enum": [
+            "user",
+            "workspace",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Use user-level config only (~/.openllm/config.yaml)",
+            "Use workspace-level config only (.openllm/config.yaml)",
+            "Use both (workspace overrides user)"
+          ],
+          "default": "both",
+          "description": "Which native config file(s) to use when config.source is 'native'"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "build": "npm run bundle",
+    "bundle": "node esbuild.js --production",
+    "compile": "tsc -p ./",
+    "compile:check": "tsc -p ./ --noEmit",
+    "clean": "rm -rf out",
+    "watch": "node esbuild.js --watch",
+    "watch:tsc": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "npm run bundle && vsce package --no-dependencies",
+    "update-native": "cp ../../target/release/libopenllm_napi.so ../../crates/openllm-napi/npm/openllm.linux-x64-gnu.node && echo 'Updated native binary from Rust build'"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.99.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.27.2",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@openllm/native": "file:../../crates/openllm-napi/npm",
+    "@vscode/codicons": "^0.0.44",
+    "js-yaml": "^4.1.0",
+    "marked": "^17.0.1",
+    "zod": "^3.24.0"
+  }
+}

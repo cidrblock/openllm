@@ -1,0 +1,14 @@
+{
+  "name": "openllm-node-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Integration tests for OpenLLM Node.js bindings",
+  "scripts": {
+    "test": "node test_secret_stores.js && node test_mock_provider.js",
+    "test:secrets": "node test_secret_stores.js",
+    "test:mock": "node test_mock_provider.js"
+  },
+  "dependencies": {
+    "@openllm/native": "file:../../crates/openllm-napi/npm"
+  }
+}

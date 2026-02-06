@@ -1,0 +1,19 @@
+[package]
+name = "openllm-napi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Node.js bindings for OpenLLM via napi-rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+openllm-core.workspace = true
+napi = { version = "2", features = ["async", "napi4", "tokio_rt"] }
+napi-derive = "2"
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[build-dependencies]
+napi-build = "2"

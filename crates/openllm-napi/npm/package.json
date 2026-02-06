@@ -1,0 +1,11 @@
+{
+  "name": "@openllm/native",
+  "version": "0.1.0",
+  "main": "index.js",
+  "napi": {
+    "name": "openllm",
+    "triples": {
+      "defaults": true
+    }
+  }
+}

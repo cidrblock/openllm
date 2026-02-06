@@ -1,193 +1,203 @@
-# Open LLM Provider
+# Open LLM
 
-**Use any LLM with any VS Code extension** — OpenAI, Anthropic, Google, Ollama & more. The open alternative to Copilot.
+Bring Your Own LLM — a unified interface for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and more.
 
 ## Features
 
-- **Chat Sidebar** — Built-in chat interface in the Activity Bar, no Copilot required
-- **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, Ollama (local), Mistral, Azure OpenAI
-- **Tool Orchestration** — Supports VS Code tools (`vscode.lm.tools`) for agent-style operations
-- **Configure Once, Use Everywhere** — Set up your API keys once and use them with any compatible extension
-- **Local Model Support** — Run models locally with Ollama for privacy and cost savings
-- **Continue Integration** — Automatically import your existing Continue configuration
-- **Secure Storage** — API keys stored securely using VS Code's secret storage
-- **Streaming Support** — Real-time streaming responses from all providers
-
-## Installation
-
-1. Open VS Code
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Open LLM Provider"
-4. Click Install
-
-## Quick Start
-
-### Option 1: Add Provider via Command
-
-1. Open Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-2. Run `Open LLM: Add Provider`
-3. Select your provider (OpenAI, Anthropic, etc.)
-4. Enter your API key
-5. Select models to enable
-
-### Option 2: Import from Continue
-
-If you already have Continue configured:
-
-1. Open Command Palette
-2. Run `Open LLM: Import Configuration from Continue`
-3. Your Continue models will be automatically available
-
-### Option 3: Manual Configuration
-
-Add to your VS Code settings (`settings.json`):
-
-```json
-{
-  "openLLM.providers": [
-    {
-      "name": "openai",
-      "apiKey": "${{ secrets.OPENAI_API_KEY }}",
-      "models": ["gpt-4o", "gpt-4o-mini"]
-    },
-    {
-      "name": "anthropic",
-      "apiKey": "${{ secrets.ANTHROPIC_API_KEY }}",
-      "models": ["claude-3-5-sonnet-20241022"]
-    },
-    {
-      "name": "ollama",
-      "models": ["llama3.2", "qwen2.5-coder"]
-    }
-  ]
-}
-```
-
-Create a `.env` file in `~/.openllm/` or `~/.continue/`:
-
-```bash
-OPENAI_API_KEY=sk-proj-...
-ANTHROPIC_API_KEY=sk-ant-api03-...
-```
-
-## Chat Sidebar
-
-Open LLM includes a built-in chat interface accessible from the Activity Bar:
-
-1. Click the chat icon in the Activity Bar (left sidebar)
-2. Select a model from the dropdown
-3. Type your question and press Enter or click Send
-4. Responses stream in real-time with markdown formatting
-
-The chat sidebar works independently of GitHub Copilot, allowing you to use any configured model for conversations.
-
-**Features:**
-- Model selector with all available models (vscode.lm + direct)
-- Streaming responses with real-time display
-- Rich markdown formatting with code block language labels
-- Chat layout: your messages in bubbles on the right, AI responses as formatted text on the left
-- Session history with persistence across restarts
-- Stop generation button
-- New chat / clear conversation button
-
-### System Prompt (Transparency)
-
-Open LLM is committed to transparency. Click the gear icon (⚙) in the chat input area to view and edit the system prompt that guides the AI's behavior. This prompt is prepended to your conversations.
-
-- `openLLM.chat.systemPrompt` — Customizable prompt sent to the LLM (also editable via gear icon in chat)
-
-## Commands
-
-| Command | Description |
-|---------|-------------|
-| `Open LLM: Providers and Models` | Configure providers, API keys, and select models |
-| `Open LLM: Show Available Models` | View all configured models |
-| `Open LLM: Reload Configuration` | Reload configuration from files |
-| `Open LLM: Show Status Panel` | Open the status and debug panel |
-| `Open LLM: Open Playground` | Compare responses from all models side-by-side |
-| `Open LLM: Focus Chat Panel` | Open the Chat sidebar |
-| `Open LLM: Clear Chat History` | Clear the current chat conversation |
+- **Multi-provider support**: 7 LLM providers with unified API
+- **Multi-language**: Rust core with Python and Node.js bindings
+- **VS Code extension**: Native integration with `vscode.lm` API
+- **Pluggable storage**: Environment variables, system keychain, or custom stores
+- **Native configuration**: YAML config files shared across all tools
 
 ## Supported Providers
 
-| Provider | API Key Required | Features |
-|----------|------------------|----------|
-| OpenAI | Yes | GPT-4o, GPT-4, GPT-3.5, o1 |
-| Anthropic | Yes | Claude 3.5 Sonnet, Claude 3 Opus |
-| Google Gemini | Yes | Gemini 2.0, Gemini 1.5 Pro |
-| OpenRouter | Yes | 100+ models via single API (OpenAI, Anthropic, Google, Meta, etc.) |
-| Ollama | No | Local models (Llama, Mistral, etc.) |
-| Mistral | Yes | Mistral Large, Codestral |
-| Azure OpenAI | Yes | Azure-hosted OpenAI models |
-| Red Hat OpenShift AI | Yes | Enterprise AI on OpenShift (OpenAI-compatible) |
+| Provider | Tool Calling | Vision | Streaming |
+|----------|-------------|--------|-----------|
+| OpenAI | ✓ | ✓ | ✓ |
+| Anthropic | ✓ | ✓ | ✓ |
+| Google Gemini | ✓ | ✓ | ✓ |
+| Mistral | ✓ | ✗ | ✓ |
+| Ollama (local) | ✗ | ✗ | ✓ |
+| Azure OpenAI | ✓ | ✓ | ✓ |
+| OpenRouter | ✓ | ✓ | ✓ |
 
-## Configuration Options
+## Installation
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `openLLM.providers` | `[]` | Array of provider configurations |
-| `openLLM.importContinueConfig` | `true` | Import Continue config automatically |
-| `openLLM.autoReload` | `true` | Auto-reload when config changes |
-| `openLLM.logLevel` | `info` | Logging level (debug, info, warn, error) |
-| `openLLM.chat.systemPrompt` | *(see below)* | System prompt for guiding LLM responses (editable via gear icon) |
-
-**Default System Prompt:**
-> You are a helpful AI assistant. Format your responses using markdown when appropriate. Use code blocks with language identifiers for code snippets.
-
-## Using with Other Extensions
-
-Extensions can use the VS Code Language Model API to access your configured models:
-
-```typescript
-import * as vscode from 'vscode';
-
-// Get available models
-const models = await vscode.lm.selectChatModels({
-  vendor: 'open-llm'
-});
-
-// Send a request
-if (models.length > 0) {
-  const messages = [
-    vscode.LanguageModelChatMessage.User('Generate a commit message')
-  ];
-  
-  const response = await models[0].sendRequest(messages);
-  
-  for await (const chunk of response.text) {
-    console.log(chunk);
-  }
-}
-```
-
-## Local Development
+### Python
 
 ```bash
-# Clone the repository
-git clone https://github.com/open-llm/open-llm-provider
-cd open-llm-provider
-
-# Install dependencies
-npm install
-
-# Compile
-npm run compile
-
-# Watch mode
-npm run watch
+pip install openllm
 ```
 
-Press F5 in VS Code to launch the extension in debug mode.
+### Node.js
 
-## Contributing
+```bash
+npm install @openllm/native
+```
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
+### VS Code Extension
+
+Install from VS Code Marketplace or:
+
+```bash
+code --install-extension open-llm.open-llm-provider
+```
+
+## Quick Start
+
+### Python
+
+```python
+from openllm import (
+    FileConfigProvider,
+    ProviderConfig,
+    KeychainSecretStore,
+    list_providers
+)
+
+# List available providers
+for p in list_providers():
+    print(f"{p.id}: {p.display_name}")
+
+# Store API key in system keychain
+keychain = KeychainSecretStore()
+keychain.store("openai", "sk-...")
+
+# Configure providers
+config = FileConfigProvider.user()
+config.add_provider(ProviderConfig(
+    name="openai",
+    enabled=True,
+    models=["gpt-4o", "gpt-4o-mini"]
+))
+```
+
+### Node.js
+
+```javascript
+const { 
+    FileConfigProvider,
+    KeychainSecretStore,
+    listProviders 
+} = require('@openllm/native');
+
+// List available providers
+listProviders().forEach(p => console.log(`${p.id}: ${p.displayName}`));
+
+// Store API key
+const keychain = new KeychainSecretStore();
+await keychain.store('openai', 'sk-...');
+
+// Configure providers
+const config = FileConfigProvider.user();
+await config.addProvider({
+    name: 'openai',
+    enabled: true,
+    models: ['gpt-4o', 'gpt-4o-mini']
+});
+```
+
+### VS Code Extension
+
+1. Open Command Palette → **"Open LLM: Providers and Models"**
+2. Add API keys for your providers
+3. Click "Models..." to fetch available models
+4. Select models and save
+5. Models appear in `vscode.lm.selectChatModels({ vendor: 'open-llm' })`
+
+## Configuration
+
+### Native Config Files
+
+**User level:** `~/.openllm/config.yaml`
+
+```yaml
+providers:
+  - name: openai
+    enabled: true
+    models:
+      - gpt-4o
+      - gpt-4o-mini
+  - name: anthropic
+    enabled: true
+    models:
+      - claude-3-5-sonnet-20241022
+  - name: ollama
+    enabled: true
+    api_base: http://localhost:11434
+    models:
+      - llama3
+```
+
+**Workspace level:** `.openllm/config.yaml`
+
+### API Keys
+
+Priority order:
+1. System keychain (or VS Code SecretStorage)
+2. Environment variables (`OPENAI_API_KEY`, etc.)
+3. `.env` files
+
+See [Configuration Guide](docs/CONFIGURATION.md) for details.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) - System design and components
+- [Configuration](docs/CONFIGURATION.md) - Settings and API key storage
+- [Usage Guide](docs/USAGE.md) - Python and Node.js examples
+- [Development](docs/DEVELOPMENT.md) - Building from source
+
+## Repository Structure
+
+```
+openllm/
+├── crates/
+│   ├── openllm-core/       # Rust core library
+│   ├── openllm-napi/       # Node.js bindings
+│   └── openllm-python/     # Python bindings
+├── packages/
+│   └── vscode/             # VS Code extension
+├── tests/
+│   ├── node/               # Node.js tests
+│   └── python/             # Python tests
+└── docs/                   # Documentation
+```
+
+## Building from Source
+
+```bash
+# Rust core
+cargo build --release
+
+# Node.js bindings
+cargo build --release -p openllm-napi
+cp target/release/libopenllm_napi.so crates/openllm-napi/npm/openllm.linux-x64-gnu.node
+
+# Python bindings
+python3 -m venv .venv
+source .venv/bin/activate
+pip install maturin
+cd crates/openllm-python && maturin develop --release
+
+# VS Code extension
+cd packages/vscode && npm install && npm run compile
+```
+
+## Testing
+
+```bash
+# Rust
+cargo test
+
+# Node.js
+cd tests/node && node test_secret_stores.js
+
+# Python
+source .venv/bin/activate
+pytest tests/python/ -v
+```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Acknowledgments
-
-- Inspired by [Continue](https://continue.dev) for configuration format
-- Thanks to the VS Code team for the Language Model API
+MIT

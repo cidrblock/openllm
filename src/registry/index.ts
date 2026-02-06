@@ -1,1 +1,0 @@
-export { ProviderRegistry } from './ProviderRegistry';

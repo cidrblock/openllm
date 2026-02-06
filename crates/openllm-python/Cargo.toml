@@ -1,0 +1,15 @@
+[package]
+name = "openllm-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Python bindings for OpenLLM via PyO3"
+
+[lib]
+name = "openllm"
+crate-type = ["cdylib"]
+
+[dependencies]
+openllm-core.workspace = true
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py39"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
