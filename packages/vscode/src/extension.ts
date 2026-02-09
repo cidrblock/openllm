@@ -8,13 +8,11 @@ import { ChatViewProvider } from './ui/ChatViewProvider';
 import { ApiKeyPanel } from './ui/ApiKeyPanel';
 import { getLogger, updateLogLevel, disposeLogger } from './utils/logger';
 import { getNative } from './utils/nativeLoader';
-import { RpcServer } from './rpc';
 import { McpToolServer } from './mcp';
 
 let openLLMProvider: OpenLLMProvider | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
 let chatViewProvider: ChatViewProvider | undefined;
-let rpcServer: RpcServer | undefined;
 let mcpToolServer: McpToolServer | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -34,62 +32,28 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
   try {
-    // Start JSON-RPC server FIRST - before ConfigManager
-    // This ensures the RPC endpoint is available when ConfigManager initializes
-    try {
-      rpcServer = new RpcServer(context, logger);
-      const rpcInfo = await rpcServer.start();
-      logger.info(`[RPC] Server started on ${rpcInfo.socketPath}`);
-      
-      // Register the endpoint with openllm-core native bindings if available
-      try {
-        const native = getNative();
-        if (native && typeof native.registerRpcEndpoint === 'function') {
-          native.registerRpcEndpoint({
-            name: 'vscode',
-            socketPath: rpcInfo.socketPath,
-            authToken: rpcInfo.authToken,
-            capabilities: ['secrets', 'config', 'workspace'],
-          });
-          logger.info('[RPC] Registered endpoint with openllm-core');
-        }
-      } catch (e) {
-        // Native bindings may not have RPC support yet
-        logger.info('[RPC] Native RPC registration not available (will be added later)');
-      }
-      
-      // Add cleanup to subscriptions
-      context.subscriptions.push({
-        dispose: async () => {
-          await rpcServer?.stop();
-        }
-      });
-    } catch (e) {
-      logger.error('[RPC] Failed to start server:', e);
-      // Non-fatal - extension can work without RPC
-    }
-
-    // Start MCP Tool Server (official MCP SDK)
-    // This exposes VS Code tools and internal tools via MCP protocol
+    // Start MCP Server (official MCP SDK)
+    // This exposes VS Code tools, secrets, and config via MCP protocol
+    // This is the unified communication channel to openllm-core
     try {
       mcpToolServer = new McpToolServer(context);
       const mcpInfo = await mcpToolServer.start();
-      logger.info(`[MCP] Tool server started on ${mcpInfo.socketPath}`);
+      logger.info(`[MCP] Server started on ${mcpInfo.socketPath}`);
       
       // Register the MCP endpoint with openllm-core native bindings
       try {
         const native = getNative();
         if (native && typeof native.registerMcpEndpoint === 'function') {
           native.registerMcpEndpoint({
-            name: 'vscode-tools',
+            name: 'vscode',
             socketPath: mcpInfo.socketPath,
             httpUrl: mcpInfo.httpUrl,
           });
-          logger.info('[MCP] Registered tool server with openllm-core');
+          logger.info('[MCP] Registered with openllm-core');
         }
       } catch (e) {
         // Native MCP support may not be available yet
-        logger.info('[MCP] Native MCP registration not available yet');
+        logger.info('[MCP] Native registration not available yet');
       }
       
       // Add cleanup to subscriptions
@@ -99,8 +63,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       });
     } catch (e) {
-      logger.error('[MCP] Failed to start tool server:', e);
-      // Non-fatal - tool orchestration can work without MCP
+      logger.error('[MCP] Failed to start server:', e);
+      // Non-fatal - extension can work without MCP (limited functionality)
     }
 
     // Initialize configuration manager (now RPC endpoint is available)
@@ -158,8 +122,6 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage(
           `Open LLM: Configuration reloaded (${openLLMProvider!.getModelCount()} models)`
         );
-        // Notify RPC clients of config change
-        rpcServer?.notifyConfigChanged('user');
       })
     );
 
@@ -189,26 +151,15 @@ export async function deactivate() {
   const logger = getLogger();
   logger.info('Open LLM Provider deactivating...');
   
-  // Stop MCP tool server
+  // Stop MCP server
   if (mcpToolServer) {
     try {
       await mcpToolServer.stop();
-      logger.info('[MCP] Tool server stopped');
+      logger.info('[MCP] Server stopped');
     } catch (e) {
-      logger.error('[MCP] Error stopping tool server:', e);
+      logger.error('[MCP] Error stopping server:', e);
     }
     mcpToolServer = undefined;
-  }
-  
-  // Stop RPC server
-  if (rpcServer) {
-    try {
-      await rpcServer.stop();
-      logger.info('[RPC] Server stopped');
-    } catch (e) {
-      logger.error('[RPC] Error stopping server:', e);
-    }
-    rpcServer = undefined;
   }
   
   if (openLLMProvider) {

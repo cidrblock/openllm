@@ -8,6 +8,10 @@
  *   - openllm_config_get, openllm_config_set
  *   - openllm_workspace_root
  * 
+ * LLM tools (for Rust core to use VS Code language models):
+ *   - openllm_llm_list: List available vscode.lm models (excluding our own)
+ *   - openllm_llm_send: Send a chat request to a vscode.lm model
+ * 
  * User tools (proxied from vscode.lm.tools):
  *   - All registered VS Code language model tools
  * 
@@ -53,6 +57,7 @@ export class McpToolServer {
     });
 
     this.registerInternalTools();
+    this.registerLlmTools();
     this.registerVSCodeTools();
   }
 
@@ -63,13 +68,12 @@ export class McpToolServer {
   private registerInternalTools(): void {
     // ========== SECRETS ==========
 
-    this.mcpServer.registerTool(
+    // Use 'as any' to bypass MCP SDK excessive type inference depth
+    (this.mcpServer as any).tool(
       'openllm_secrets_get',
-      {
-        description: 'Get an API key from VS Code SecretStorage',
-        inputSchema: { key: zod.string().describe('Provider name (e.g., openai, anthropic)') },
-      },
-      async ({ key }): Promise<CallToolResult> => {
+      'Get an API key from VS Code SecretStorage',
+      { key: zod.string().describe('Provider name (e.g., openai, anthropic)') },
+      async ({ key }: { key: string }): Promise<CallToolResult> => {
         const secretKey = `openllm.${key}`;
         const value = await this.context.secrets.get(secretKey);
         return {
@@ -78,16 +82,14 @@ export class McpToolServer {
       }
     );
 
-    this.mcpServer.registerTool(
+    (this.mcpServer as any).tool(
       'openllm_secrets_set',
+      'Store an API key in VS Code SecretStorage',
       {
-        description: 'Store an API key in VS Code SecretStorage',
-        inputSchema: {
-          key: zod.string().describe('Provider name'),
-          value: zod.string().describe('API key value'),
-        },
+        key: zod.string().describe('Provider name'),
+        value: zod.string().describe('API key value'),
       },
-      async ({ key, value }): Promise<CallToolResult> => {
+      async ({ key, value }: { key: string; value: string }): Promise<CallToolResult> => {
         const secretKey = `openllm.${key}`;
         await this.context.secrets.store(secretKey, value);
         return {
@@ -96,13 +98,11 @@ export class McpToolServer {
       }
     );
 
-    this.mcpServer.registerTool(
+    (this.mcpServer as any).tool(
       'openllm_secrets_delete',
-      {
-        description: 'Delete an API key from VS Code SecretStorage',
-        inputSchema: { key: zod.string().describe('Provider name') },
-      },
-      async ({ key }): Promise<CallToolResult> => {
+      'Delete an API key from VS Code SecretStorage',
+      { key: zod.string().describe('Provider name') },
+      async ({ key }: { key: string }): Promise<CallToolResult> => {
         const secretKey = `openllm.${key}`;
         await this.context.secrets.delete(secretKey);
         return {
@@ -111,12 +111,10 @@ export class McpToolServer {
       }
     );
 
-    this.mcpServer.registerTool(
+    (this.mcpServer as any).tool(
       'openllm_secrets_list',
-      {
-        description: 'List all stored API key names',
-        inputSchema: {},
-      },
+      'List all stored API key names',
+      {},
       async (): Promise<CallToolResult> => {
         // VS Code SecretStorage doesn't have a list method
         // Check known providers
@@ -139,16 +137,14 @@ export class McpToolServer {
 
     // ========== CONFIG ==========
 
-    this.mcpServer.registerTool(
+    (this.mcpServer as any).tool(
       'openllm_config_get',
+      'Get provider configuration from VS Code settings',
       {
-        description: 'Get provider configuration from VS Code settings',
-        inputSchema: {
-          provider: zod.string().describe('Provider name or "*" for all'),
-          scope: zod.enum(['user', 'workspace']).describe('Config scope'),
-        },
+        provider: zod.string().describe('Provider name or "*" for all'),
+        scope: zod.enum(['user', 'workspace']).describe('Config scope'),
       },
-      async ({ provider, scope }): Promise<CallToolResult> => {
+      async ({ provider, scope }: { provider: string; scope: 'user' | 'workspace' }): Promise<CallToolResult> => {
         const config = vscode.workspace.getConfiguration('openLLM');
         const inspection = config.inspect<any[]>('providers');
 
@@ -166,21 +162,20 @@ export class McpToolServer {
       }
     );
 
-    this.mcpServer.registerTool(
+    // Use 'as any' to bypass MCP SDK excessive type inference depth  
+    (this.mcpServer as any).tool(
       'openllm_config_set',
+      'Set provider configuration in VS Code settings',
       {
-        description: 'Set provider configuration in VS Code settings',
-        inputSchema: {
-          provider: zod.string().describe('Provider name'),
-          config: zod.object({
-            enabled: zod.boolean().optional(),
-            models: zod.array(zod.string()).optional(),
-            apiBase: zod.string().optional(),
-          }).passthrough().describe('Provider config object'),
-          scope: zod.enum(['user', 'workspace']).describe('Config scope'),
-        },
+        provider: zod.string().describe('Provider name'),
+        config: zod.object({
+          enabled: zod.boolean().optional(),
+          models: zod.array(zod.string()).optional(),
+          apiBase: zod.string().optional(),
+        }).passthrough().describe('Provider config object'),
+        scope: zod.enum(['user', 'workspace']).describe('Config scope'),
       },
-      async ({ provider, config: providerConfig, scope }): Promise<CallToolResult> => {
+      async ({ provider, config: providerConfig, scope }: { provider: string; config: Record<string, unknown>; scope: 'user' | 'workspace' }): Promise<CallToolResult> => {
         const vsConfig = vscode.workspace.getConfiguration('openLLM');
         const currentProviders = vsConfig.get<any[]>('providers', []);
 
@@ -217,12 +212,10 @@ export class McpToolServer {
 
     // ========== WORKSPACE ==========
 
-    this.mcpServer.registerTool(
+    (this.mcpServer as any).tool(
       'openllm_workspace_root',
-      {
-        description: 'Get the current workspace root path',
-        inputSchema: {},
-      },
+      'Get the current workspace root path',
+      {},
       async (): Promise<CallToolResult> => {
         const folders = vscode.workspace.workspaceFolders;
         return {
@@ -235,20 +228,198 @@ export class McpToolServer {
   }
 
   /**
+   * Our vendor ID for filtering out our own models
+   */
+  private static readonly OUR_VENDOR = 'open-llm';
+
+  /**
+   * Cache of active model instances by ID
+   */
+  private modelCache: Map<string, vscode.LanguageModelChat> = new Map();
+
+  /**
+   * Register LLM tools for Rust core to use vscode.lm models
+   * These allow the Rust ChatOrchestrator to use Copilot and other vscode.lm models
+   */
+  private registerLlmTools(): void {
+    // ========== LLM LIST ==========
+    // List available vscode.lm models (excluding our own to avoid circular calls)
+
+    (this.mcpServer as any).tool(
+      'openllm_llm_list',
+      'List available VS Code language models (excludes OpenLLM models to avoid circular calls)',
+      {
+        family: zod.string().optional().describe('Filter by model family (e.g., "gpt-4", "claude")'),
+      },
+      async ({ family }: { family?: string }): Promise<CallToolResult> => {
+        try {
+          // Build selector
+          const selector: vscode.LanguageModelChatSelector = {};
+          if (family) {
+            selector.family = family;
+          }
+
+          // Get models
+          const models = await vscode.lm.selectChatModels(selector);
+
+          // Filter out our own models to prevent circular calls
+          const externalModels = models.filter(m => m.vendor !== McpToolServer.OUR_VENDOR);
+
+          // Cache models for later use
+          for (const model of externalModels) {
+            this.modelCache.set(model.id, model);
+          }
+
+          // Return model info
+          const modelInfo = externalModels.map(m => ({
+            id: m.id,
+            name: m.name,
+            vendor: m.vendor,
+            family: m.family,
+            version: m.version,
+            maxInputTokens: m.maxInputTokens,
+          }));
+
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ models: modelInfo }) }],
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: String(error), models: [] }) }],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    // ========== LLM SEND ==========
+    // Send a chat request to a vscode.lm model and stream the response
+
+    (this.mcpServer as any).tool(
+      'openllm_llm_send',
+      'Send a chat request to a VS Code language model. Returns streaming response chunks.',
+      {
+        modelId: zod.string().describe('Model ID from openllm_llm_list'),
+        messages: zod.array(zod.object({
+          role: zod.enum(['system', 'user', 'assistant']).describe('Message role'),
+          content: zod.string().describe('Message content'),
+        })).describe('Chat messages'),
+        options: zod.object({
+          temperature: zod.number().optional(),
+          maxTokens: zod.number().optional(),
+          tools: zod.array(zod.object({
+            name: zod.string(),
+            description: zod.string(),
+            inputSchema: zod.any().optional(),
+          })).optional(),
+        }).optional().describe('Optional request options'),
+      },
+      async ({ modelId, messages, options }: {
+        modelId: string;
+        messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+        options?: {
+          temperature?: number;
+          maxTokens?: number;
+          tools?: Array<{ name: string; description: string; inputSchema?: any }>;
+        };
+      }): Promise<CallToolResult> => {
+        try {
+          // Get the model from cache or fetch it
+          let model = this.modelCache.get(modelId);
+          if (!model) {
+            // Try to fetch the model
+            const models = await vscode.lm.selectChatModels({ id: modelId } as any);
+            model = models.find(m => m.id === modelId && m.vendor !== McpToolServer.OUR_VENDOR);
+            if (model) {
+              this.modelCache.set(modelId, model);
+            }
+          }
+
+          if (!model) {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({ error: `Model not found: ${modelId}` }) }],
+              isError: true,
+            };
+          }
+
+          // Convert messages to VS Code format
+          const vsMessages: vscode.LanguageModelChatMessage[] = messages.map(m => {
+            switch (m.role) {
+              case 'system':
+                return vscode.LanguageModelChatMessage.User(m.content); // VS Code treats system as user
+              case 'user':
+                return vscode.LanguageModelChatMessage.User(m.content);
+              case 'assistant':
+                return vscode.LanguageModelChatMessage.Assistant(m.content);
+            }
+          });
+
+          // Build request options
+          const requestOptions: vscode.LanguageModelChatRequestOptions = {};
+          if (options?.tools) {
+            // Note: VS Code tools are registered separately, not passed per-request
+            // We can reference tools by name that are registered with vscode.lm
+          }
+
+          // Send request and collect response
+          const response = await model.sendRequest(
+            vsMessages,
+            requestOptions,
+            new vscode.CancellationTokenSource().token
+          );
+
+          // Collect all chunks into a single response
+          // (MCP tools return synchronously, so we can't stream)
+          const chunks: Array<{
+            type: 'text' | 'tool_call';
+            text?: string;
+            toolCallId?: string;
+            toolName?: string;
+            toolInput?: any;
+          }> = [];
+
+          for await (const part of response.stream) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+              chunks.push({ type: 'text', text: part.value });
+            } else if (part instanceof vscode.LanguageModelToolCallPart) {
+              chunks.push({
+                type: 'tool_call',
+                toolCallId: part.callId,
+                toolName: part.name,
+                toolInput: part.input,
+              });
+            }
+          }
+
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ chunks }) }],
+          };
+        } catch (error) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({ error: String(error) }) }],
+            isError: true,
+          };
+        }
+      }
+    );
+
+    this.logger.info('[MCP Server] Registered 2 LLM tools');
+  }
+
+  /**
    * Register VS Code tools as MCP tools (user-visible)
    */
   private registerVSCodeTools(): void {
     // Register each vscode.lm.tool as an MCP tool
     try {
       for (const tool of vscode.lm.tools) {
-        this.mcpServer.registerTool(
+        // Use 'as any' to bypass TypeScript deep type issues with MCP SDK
+        (this.mcpServer as any).tool(
           tool.name,
-          {
-            description: tool.description,
-            // Use the tool's input schema directly (it's already JSON Schema compatible)
-            inputSchema: tool.inputSchema as any,
-          },
-          async (args): Promise<CallToolResult> => {
+          tool.description,
+          // Use empty schema as placeholder - actual schema comes from tool.inputSchema
+          {},
+          async (args: Record<string, unknown>): Promise<CallToolResult> => {
             try {
               const result = await vscode.lm.invokeTool(tool.name, {
                 input: args,

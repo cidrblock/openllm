@@ -13,6 +13,9 @@
 //! Providers not natively in genai (Azure, OpenRouter, Mistral, Red Hat AI) are
 //! handled via genai's `ServiceTargetResolver` using OpenAI-compatible protocols.
 //!
+//! The `VsCodeProvider` uses MCP to communicate with the VS Code extension,
+//! allowing Rust to use vscode.lm models (Copilot, GitHub Models, etc.).
+//!
 //! Auth flows through our `UnifiedSecretResolver`, not genai's env var lookup.
 //!
 //! The `MockProvider` is kept for testing purposes.
@@ -22,6 +25,7 @@ mod error;
 mod genai_adapter;
 mod genai_provider;
 mod mock;
+mod vscode;
 
 // Core traits and types
 pub use traits::{Provider, ProviderModelConfig, StreamChatOptions, StreamResponse};
@@ -34,6 +38,9 @@ pub use genai_adapter::{is_genai_native, is_genai_supported, ProviderConfig};
 // Mock provider for testing
 pub use mock::{MockProvider, MockConfig, MockMode};
 
+// VS Code provider - uses MCP to access vscode.lm models
+pub use vscode::VsCodeProvider;
+
 // Re-export for convenience
 pub use crate::types::{ChatMessage, StreamChunk, Tool, ToolChoice, CancellationToken};
 
@@ -43,10 +50,12 @@ use std::sync::Arc;
 /// Create a provider for the given provider ID
 ///
 /// This factory function creates the appropriate provider based on the provider ID.
-/// Most providers use the unified `GenaiProvider`, while `mock` uses `MockProvider`.
+/// Most providers use the unified `GenaiProvider`, while `mock` uses `MockProvider`
+/// and `vscode` uses `VsCodeProvider` for MCP-based access to VS Code language models.
 pub fn create_provider(provider_id: &str, logger: Arc<dyn Logger>) -> Box<dyn Provider> {
     match provider_id.to_lowercase().as_str() {
         "mock" => Box::new(MockProvider::echo(Arc::clone(&logger))),
+        "vscode" => Box::new(VsCodeProvider::new(Arc::clone(&logger))),
         _ if GenaiProvider::supports(provider_id) => {
             Box::new(GenaiProvider::new(provider_id, Arc::clone(&logger)))
         }
@@ -56,6 +65,11 @@ pub fn create_provider(provider_id: &str, logger: Arc<dyn Logger>) -> Box<dyn Pr
             Box::new(GenaiProvider::new(provider_id, logger))
         }
     }
+}
+
+/// Create a VS Code provider with an MCP client already connected
+pub fn create_vscode_provider(client: Arc<crate::McpClient>, logger: Arc<dyn Logger>) -> Box<dyn Provider> {
+    Box::new(VsCodeProvider::with_client(client, logger))
 }
 
 /// List all supported provider IDs
@@ -81,6 +95,8 @@ pub fn supported_providers() -> Vec<&'static str> {
         "openrouter",
         "mistral",
         "redhat",
+        // VS Code language models (via MCP)
+        "vscode",
         // Testing
         "mock",
     ]

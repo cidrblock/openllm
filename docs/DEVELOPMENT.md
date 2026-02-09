@@ -14,11 +14,16 @@ openllm/
 ├── Cargo.toml              # Rust workspace root
 ├── crates/
 │   ├── openllm-core/       # Rust core library
+│   │   ├── providers/      # LLM providers (OpenAI, Anthropic, VsCodeProvider, etc.)
+│   │   ├── tools/          # Tool orchestration (ToolRegistry, ChatOrchestrator)
+│   │   ├── mcp/            # MCP client for VS Code communication
+│   │   ├── secrets/        # Secret stores
+│   │   └── config/         # Config providers
 │   ├── openllm-napi/       # Node.js bindings (NAPI-rs)
 │   └── openllm-python/     # Python bindings (PyO3)
 ├── packages/
 │   ├── core/               # TypeScript types (legacy, being deprecated)
-│   └── vscode/             # VS Code extension
+│   └── vscode/             # VS Code extension (MCP server + UI)
 ├── tests/
 │   ├── node/               # Node.js integration tests
 │   └── python/             # Python integration tests
@@ -179,29 +184,74 @@ mod newprovider;
 pub use newprovider::NewProvider;
 ```
 
-### 3. Add to Node.js Bindings
+### 3. Register in Provider Factory
+
+The unified `create_provider` factory handles provider instantiation:
 
 ```rust
-// crates/openllm-napi/src/lib.rs
-use openllm_core::providers::NewProvider as CoreNewProvider;
+// crates/openllm-core/src/providers/mod.rs
+pub fn create_provider(provider_id: &str, logger: Arc<dyn Logger>) -> Box<dyn Provider> {
+    match provider_id.to_lowercase().as_str() {
+        "newprovider" => Box::new(NewProvider::new(Arc::clone(&logger))),
+        // ... other providers
+    }
+}
 
-#[napi]
-pub struct NewProvider { /* ... */ }
+// Also add to supported_providers()
+pub fn supported_providers() -> Vec<ProviderInfo> {
+    vec![
+        // ... existing providers
+        ProviderInfo { id: "newprovider", display_name: "New Provider" },
+    ]
+}
 ```
 
-### 4. Add to Python Bindings
+### 4. Bindings Auto-Expose New Providers
+
+The NAPI and Python bindings use the unified `LlmProvider` class that delegates to `create_provider`. No binding-specific code is needed for new providers:
+
+```typescript
+// Node.js - just use the provider ID
+const provider = new LlmProvider("newprovider");
+
+// Python - same pattern
+provider = LlmProvider("newprovider")
+```
+
+### Special Case: VsCodeProvider
+
+The `VsCodeProvider` is unique—it uses MCP to communicate with the VS Code extension rather than direct HTTP:
 
 ```rust
-// crates/openllm-python/src/lib.rs
-use openllm_core::providers::NewProvider as CoreNewProvider;
+// crates/openllm-core/src/providers/vscode.rs
+pub struct VsCodeProvider {
+    mcp_client: Option<Arc<McpClient>>,
+    cached_models: RwLock<Vec<VsCodeModelInfo>>,
+    logger: Arc<dyn Logger>,
+}
 
-#[pyclass]
-pub struct NewProvider { /* ... */ }
+impl VsCodeProvider {
+    // Call openllm_llm_list MCP tool to get vscode.lm models
+    pub async fn list_models(&self) -> Result<Vec<VsCodeModelInfo>, ProviderError>;
+    
+    // Call openllm_llm_send MCP tool to chat with vscode.lm model
+    async fn send_request(&self, model_id: &str, messages: &[ChatMessage]) 
+        -> Result<Vec<StreamChunk>, ProviderError>;
+}
 ```
+
+This allows OpenLLM to access Copilot and other `vscode.lm` models through the same unified API.
 
 ### 5. Update VS Code Extension
 
-Add to `packages/vscode/src/registry/ProviderRegistry.ts`.
+The VS Code extension's `NativeProviderAdapter` automatically uses the unified interface. If the provider has an alias (e.g., "google" for "gemini"), add it to the name normalization:
+
+```typescript
+// packages/vscode/src/adapters/NativeProviderAdapter.ts
+if (normalizedName === 'newprovider-alias') {
+    normalizedName = 'newprovider';
+}
+```
 
 ## Adding a New Secret Store
 

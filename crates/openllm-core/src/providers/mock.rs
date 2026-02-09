@@ -178,6 +178,65 @@ impl MockProvider {
             .map(|c| c.iter().collect())
             .collect()
     }
+
+    /// Parse mock mode from model name
+    /// 
+    /// This allows the model parameter to configure the mock behavior:
+    /// - "echo" or "mock-echo" → Echo mode (echoes user message)
+    /// - "fixed" → Fixed response with default message
+    /// - "fixed:custom message" → Fixed response with custom message  
+    /// - "error" → Error mode with default message
+    /// - "error:custom error" → Error mode with custom message
+    /// - "empty" → Empty response
+    /// - Any other model name → Falls back to configured mode
+    fn parse_mode_from_model(&self, model: &str) -> MockMode {
+        let model_lower = model.to_lowercase();
+        
+        // Check for echo mode
+        if model_lower == "echo" || model_lower == "mock-echo" {
+            return MockMode::Echo;
+        }
+        
+        // Check for empty mode
+        if model_lower == "empty" || model_lower == "mock-empty" {
+            return MockMode::Empty;
+        }
+        
+        // Check for fixed mode with optional custom response
+        if model_lower == "fixed" || model_lower == "mock-fixed" {
+            return MockMode::Fixed("Hello from MockProvider!".to_string());
+        }
+        if model_lower.starts_with("fixed:") {
+            let response = model.strip_prefix("fixed:").unwrap_or("").to_string();
+            return MockMode::Fixed(if response.is_empty() {
+                "Hello from MockProvider!".to_string()
+            } else {
+                response
+            });
+        }
+        
+        // Check for error mode with optional custom message
+        if model_lower == "error" || model_lower == "mock-error" {
+            return MockMode::Error {
+                message: "Mock error for testing".to_string(),
+                delay_chunks: 0,
+            };
+        }
+        if model_lower.starts_with("error:") {
+            let msg = model.strip_prefix("error:").unwrap_or("Mock error").to_string();
+            return MockMode::Error {
+                message: if msg.is_empty() {
+                    "Mock error for testing".to_string()
+                } else {
+                    msg
+                },
+                delay_chunks: 0,
+            };
+        }
+        
+        // Fall back to configured mode
+        self.config.mode.clone()
+    }
 }
 
 #[async_trait]
@@ -198,14 +257,26 @@ impl Provider for MockProvider {
             requires_api_key: false,
             default_models: vec![
                 DefaultModel {
-                    id: "mock-echo".to_string(),
-                    name: "Mock Echo".to_string(),
+                    id: "echo".to_string(),
+                    name: "Echo (echoes user message)".to_string(),
                     context_length: 128000,
                     capabilities: ModelCapabilities::full(),
                 },
                 DefaultModel {
-                    id: "mock-fixed".to_string(),
-                    name: "Mock Fixed Response".to_string(),
+                    id: "fixed".to_string(),
+                    name: "Fixed Response".to_string(),
+                    context_length: 128000,
+                    capabilities: ModelCapabilities::full(),
+                },
+                DefaultModel {
+                    id: "error".to_string(),
+                    name: "Error (simulates failure)".to_string(),
+                    context_length: 128000,
+                    capabilities: ModelCapabilities::full(),
+                },
+                DefaultModel {
+                    id: "empty".to_string(),
+                    name: "Empty Response".to_string(),
                     context_length: 128000,
                     capabilities: ModelCapabilities::full(),
                 },
@@ -216,13 +287,22 @@ impl Provider for MockProvider {
     async fn stream_chat(
         &self,
         messages: Vec<ChatMessage>,
-        _model: ProviderModelConfig,
+        model: ProviderModelConfig,
         _options: StreamChatOptions,
         cancel_token: CancellationToken,
     ) -> ProviderResult<StreamResponse> {
-        self.logger.debug("MockProvider: stream_chat called");
+        self.logger.debug(&format!("MockProvider: stream_chat called with model={}", model.model));
 
-        let chunks: Vec<String> = match &self.config.mode {
+        // Parse mode from model name (allows dynamic configuration via model selection)
+        // Supported formats:
+        //   - "echo" or "mock-echo" → Echo mode
+        //   - "fixed" or "fixed:response text" → Fixed response
+        //   - "error" or "error:message" → Error mode  
+        //   - "empty" → Empty response
+        //   - Any other → Use configured mode (default: echo)
+        let mode = self.parse_mode_from_model(&model.model);
+
+        let chunks: Vec<String> = match mode {
             MockMode::Echo => {
                 let user_msg = self.get_last_user_message(&messages);
                 self.logger.debug(&format!("MockProvider: Echo mode, echoing: {}", user_msg));
@@ -230,7 +310,7 @@ impl Provider for MockProvider {
             }
             MockMode::Fixed(response) => {
                 self.logger.debug(&format!("MockProvider: Fixed mode, response len: {}", response.len()));
-                self.split_into_chunks(response)
+                self.split_into_chunks(&response)
             }
             MockMode::Chunks(chunks) => {
                 self.logger.debug(&format!("MockProvider: Chunks mode, {} chunks", chunks.len()));
@@ -243,7 +323,7 @@ impl Provider for MockProvider {
             MockMode::Error { message, delay_chunks } => {
                 self.logger.debug(&format!("MockProvider: Error mode after {} chunks", delay_chunks));
                 // Return some chunks before error
-                let mut result: Vec<String> = (0..*delay_chunks)
+                let mut result: Vec<String> = (0..delay_chunks)
                     .map(|i| format!("Chunk {} before error. ", i))
                     .collect();
                 // Add error marker (will be handled specially)
@@ -306,8 +386,17 @@ mod tests {
     }
 
     fn test_config() -> ProviderModelConfig {
+        // Default config - actual mode comes from model name
         ProviderModelConfig {
-            model: "mock-echo".to_string(),
+            model: "echo".to_string(),
+            api_key: None,
+            api_base: None,
+        }
+    }
+
+    fn test_config_with_model(model: &str) -> ProviderModelConfig {
+        ProviderModelConfig {
+            model: model.to_string(),
             api_key: None,
             api_base: None,
         }
@@ -341,12 +430,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_fixed_mode() {
-        let provider = MockProvider::fixed("This is a test response.", test_logger());
+        // Model name configures the response: "fixed:response text"
+        let provider = MockProvider::new(test_logger());
         let messages = test_messages("Anything");
         let cancel = CancellationToken::new();
 
         let mut stream = provider
-            .stream_chat(messages, test_config(), test_options(), cancel)
+            .stream_chat(messages, test_config_with_model("fixed:This is a test response."), test_options(), cancel)
             .await
             .expect("stream should start");
 
@@ -363,6 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_chunked_mode() {
+        // Chunked mode uses construction-time config with fallback model name
         let chunks = vec![
             "First ".to_string(),
             "second ".to_string(),
@@ -372,8 +463,9 @@ mod tests {
         let messages = test_messages("Anything");
         let cancel = CancellationToken::new();
 
+        // Use a model name that doesn't match any mode, so it falls back to configured mode
         let mut stream = provider
-            .stream_chat(messages, test_config(), test_options(), cancel)
+            .stream_chat(messages, test_config_with_model("custom-model"), test_options(), cancel)
             .await
             .expect("stream should start");
 
@@ -390,12 +482,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_mode() {
-        let provider = MockProvider::error("Test error message", test_logger());
+        // Model name configures error mode: "error:message"
+        let provider = MockProvider::new(test_logger());
         let messages = test_messages("Anything");
         let cancel = CancellationToken::new();
 
         let mut stream = provider
-            .stream_chat(messages, test_config(), test_options(), cancel)
+            .stream_chat(messages, test_config_with_model("error:Test error message"), test_options(), cancel)
             .await
             .expect("stream should start");
 
@@ -407,13 +500,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancellation() {
+        // Use construction-time config with fallback model name
         let provider = MockProvider::fixed("Long response that should be cancelled", test_logger())
             .with_delay(100);
         let messages = test_messages("Anything");
         let cancel = CancellationToken::new();
 
         let mut stream = provider
-            .stream_chat(messages, test_config(), test_options(), cancel.clone())
+            .stream_chat(messages, test_config_with_model("custom-model"), test_options(), cancel.clone())
             .await
             .expect("stream should start");
 
@@ -446,5 +540,40 @@ mod tests {
         let chunks = provider.split_into_chunks("Hello, world!");
 
         assert_eq!(chunks, vec!["Hello", ", wor", "ld!"]);
+    }
+
+    #[test]
+    fn test_model_name_mode_parsing() {
+        let provider = MockProvider::new(test_logger());
+        
+        // Echo mode variants
+        assert!(matches!(provider.parse_mode_from_model("echo"), MockMode::Echo));
+        assert!(matches!(provider.parse_mode_from_model("mock-echo"), MockMode::Echo));
+        assert!(matches!(provider.parse_mode_from_model("ECHO"), MockMode::Echo));
+        
+        // Empty mode variants
+        assert!(matches!(provider.parse_mode_from_model("empty"), MockMode::Empty));
+        assert!(matches!(provider.parse_mode_from_model("mock-empty"), MockMode::Empty));
+        
+        // Fixed mode variants
+        assert!(matches!(provider.parse_mode_from_model("fixed"), MockMode::Fixed(_)));
+        assert!(matches!(provider.parse_mode_from_model("mock-fixed"), MockMode::Fixed(_)));
+        if let MockMode::Fixed(response) = provider.parse_mode_from_model("fixed:Custom response") {
+            assert_eq!(response, "Custom response");
+        } else {
+            panic!("Expected Fixed mode");
+        }
+        
+        // Error mode variants
+        assert!(matches!(provider.parse_mode_from_model("error"), MockMode::Error { .. }));
+        if let MockMode::Error { message, .. } = provider.parse_mode_from_model("error:Custom error") {
+            assert_eq!(message, "Custom error");
+        } else {
+            panic!("Expected Error mode");
+        }
+        
+        // Unknown model names fallback to configured mode (echo by default)
+        assert!(matches!(provider.parse_mode_from_model("gpt-4"), MockMode::Echo));
+        assert!(matches!(provider.parse_mode_from_model("claude-3"), MockMode::Echo));
     }
 }

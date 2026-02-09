@@ -1281,6 +1281,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -1291,7 +1292,9 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "once_cell",
  "openllm-core",
+ "parking_lot",
  "tokio",
 ]
 
@@ -1299,7 +1302,10 @@ dependencies = [
 name = "openllm-python"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "once_cell",
  "openllm-core",
+ "parking_lot",
  "pyo3",
  "tokio",
 ]

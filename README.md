@@ -1,26 +1,31 @@
 # Open LLM
 
-Bring Your Own LLM — a unified interface for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and more.
+Bring Your Own LLM — a unified interface for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, Copilot, and more.
 
 ## Features
 
-- **Multi-provider support**: 7 LLM providers with unified API
+- **Multi-provider support**: 8+ LLM providers with unified API
 - **Multi-language**: Rust core with Python and Node.js bindings
-- **VS Code extension**: Native integration with `vscode.lm` API
+- **VS Code extension**: Native integration with `vscode.lm` API (Copilot, GitHub Models)
+- **Unified orchestration**: Tool calling handled in Rust for all providers
+- **MCP integration**: Access VS Code models and tools via Model Context Protocol
 - **Pluggable storage**: Environment variables, system keychain, or custom stores
 - **Native configuration**: YAML config files shared across all tools
 
 ## Supported Providers
 
-| Provider | Tool Calling | Vision | Streaming |
-|----------|-------------|--------|-----------|
-| OpenAI | ✓ | ✓ | ✓ |
-| Anthropic | ✓ | ✓ | ✓ |
-| Google Gemini | ✓ | ✓ | ✓ |
-| Mistral | ✓ | ✗ | ✓ |
-| Ollama (local) | ✗ | ✗ | ✓ |
-| Azure OpenAI | ✓ | ✓ | ✓ |
-| OpenRouter | ✓ | ✓ | ✓ |
+| Provider | Tool Calling | Vision | Streaming | Notes |
+|----------|-------------|--------|-----------|-------|
+| OpenAI | ✓ | ✓ | ✓ | Direct HTTP |
+| Anthropic | ✓ | ✓ | ✓ | Direct HTTP |
+| Google Gemini | ✓ | ✓ | ✓ | Direct HTTP |
+| Mistral | ✓ | ✗ | ✓ | Direct HTTP |
+| Ollama (local) | ✗ | ✗ | ✓ | Direct HTTP |
+| Azure OpenAI | ✓ | ✓ | ✓ | Direct HTTP |
+| OpenRouter | ✓ | ✓ | ✓ | Direct HTTP |
+| **VS Code LM** | ✓ | ✗ | ✓ | **MCP to vscode.lm** |
+
+The **VS Code LM** provider allows accessing Copilot, GitHub Models, and other `vscode.lm` models through the unified API. This works via MCP (Model Context Protocol) - the Rust core calls the VS Code extension, which proxies to `vscode.lm`.
 
 ## Installation
 
@@ -76,26 +81,25 @@ config.add_provider(ProviderConfig(
 ### Node.js
 
 ```javascript
-const { 
-    FileConfigProvider,
-    KeychainSecretStore,
-    listProviders 
-} = require('@openllm/native');
+const { chat, listProviders, KeychainSecretStore } = require('@openllm/native');
+
+// Simple chat - one function does everything
+await chat(
+  [{ role: 'user', content: 'Hello, world!' }],
+  { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-...' },
+  (chunk) => {
+    if (chunk.type === 'text') {
+      process.stdout.write(chunk.text);
+    }
+  }
+);
 
 // List available providers
 listProviders().forEach(p => console.log(`${p.id}: ${p.displayName}`));
 
-// Store API key
+// Store API key in system keychain
 const keychain = new KeychainSecretStore();
 await keychain.store('openai', 'sk-...');
-
-// Configure providers
-const config = FileConfigProvider.user();
-await config.addProvider({
-    name: 'openai',
-    enabled: true,
-    models: ['gpt-4o', 'gpt-4o-mini']
-});
 ```
 
 ### VS Code Extension

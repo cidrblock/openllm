@@ -11,5 +11,5 @@ mod cancellation;
 pub use message::{ChatMessage, ContentPart, MessageRole, MessageContent};
 pub use model::{ModelConfig, ModelCapabilities, ProviderConfig, ProviderMetadata, DefaultModel, ConfigSource};
 pub use tool::{Tool, ToolCall, ToolResult, ToolChoice};
-pub use stream::StreamChunk;
+pub use stream::{StreamChunk, PromptOption};
 pub use cancellation::CancellationToken;

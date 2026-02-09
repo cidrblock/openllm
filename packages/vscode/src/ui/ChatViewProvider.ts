@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { OpenLLMProvider } from '../core/OpenLLMProvider';
 import { getLogger } from '../utils/logger';
 import { Tool, ToolCall } from '../types';
+import { getNativeTyped, NativeModule } from '../utils/nativeLoader';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -367,35 +368,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       
       // Build messages array with system prompt
       const systemPrompt = this._getSystemPrompt();
-      const vsMessages: vscode.LanguageModelChatMessage[] = [];
+      const messages: Array<{ role: string; content: string }> = [];
       
       // Add system prompt as first message (if configured)
       if (systemPrompt) {
-        vsMessages.push(vscode.LanguageModelChatMessage.User(`[System Instructions]\n${systemPrompt}\n\n[User Query]`));
+        messages.push({ role: 'system', content: systemPrompt });
       }
       
       // Add conversation history
       this._currentSession.messages
         .filter(m => m.role !== 'system')
         .forEach(m => {
-          if (m.role === 'user') {
-            vsMessages.push(vscode.LanguageModelChatMessage.User(m.content));
-          } else {
-            vsMessages.push(vscode.LanguageModelChatMessage.Assistant(m.content));
-          }
+          messages.push({ role: m.role, content: m.content });
         });
 
       // Get available tools from vscode.lm
       const availableTools = this._getAvailableTools();
       const enableTools = availableTools.length > 0 && this._isToolsEnabled();
 
-      if (selectedModel.isVSCodeLM) {
-        // Use vscode.lm API with tool orchestration
-        await this._streamWithToolsVSCodeLM(selectedModel, vsMessages, assistantMessage, enableTools ? availableTools : undefined);
-      } else {
-        // Use direct provider with tool orchestration
-        await this._streamWithToolsDirect(selectedModel, vsMessages, assistantMessage, enableTools ? availableTools : undefined);
-      }
+      // ALL models go through the Rust ChatOrchestrator
+      // - Direct models (OpenAI, Anthropic) → Rust calls HTTP APIs
+      // - VS Code LM models → Rust calls MCP to extension → vscode.lm
+      await this._streamWithRustOrchestrator(
+        selectedModel,
+        messages,
+        assistantMessage,
+        enableTools ? availableTools : undefined
+      );
 
       this._currentSession.messages.push(assistantMessage);
       this._currentSession.updatedAt = Date.now();
@@ -417,222 +416,141 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Stream response using vscode.lm API with tool orchestration
+   * Stream response using the Rust chat() function
+   * 
+   * ALL models go through this method:
+   * - Direct models (OpenAI, Anthropic, etc.) → Rust calls HTTP APIs directly
+   * - VS Code LM models (Copilot, etc.) → Rust calls MCP to extension → vscode.lm
+   * 
+   * The Rust chat() function handles everything:
+   * 1. Provider creation based on config.provider
+   * 2. MCP connection for tools (if registered)
+   * 3. Tool call detection and execution
+   * 4. Tool result integration
+   * 5. Streaming all events back via callbacks
    */
-  private async _streamWithToolsVSCodeLM(
+  private async _streamWithRustOrchestrator(
     selectedModel: ChatModel,
-    vsMessages: vscode.LanguageModelChatMessage[],
+    messages: Array<{ role: string; content: string }>,
     assistantMessage: ChatMessage,
     tools?: Tool[]
   ): Promise<void> {
-    const [vendor, modelId] = selectedModel.id.replace('vscode-lm:', '').split('/');
-    const models = await vscode.lm.selectChatModels({ vendor, id: modelId });
+    const native = getNativeTyped();
+    if (!native || !native.chat) {
+      throw new Error('Native chat() function not available');
+    }
+
+    // Determine provider and model based on model type
+    let providerId: string;
+    let modelName: string;
     
-    if (models.length === 0) {
-      throw new Error(`Model ${selectedModel.name} is no longer available.`);
+    if (selectedModel.isVSCodeLM) {
+      // VS Code LM model - use the "vscode" provider which calls MCP
+      providerId = 'vscode';
+      modelName = selectedModel.id.replace('vscode-lm:', '');
+    } else {
+      // Direct model - parse provider:model from the ID
+      const idWithoutPrefix = selectedModel.id.replace('direct:', '');
+      const parts = idWithoutPrefix.split(':');
+      if (parts.length >= 2) {
+        providerId = parts[0];
+        modelName = parts.slice(1).join(':');
+      } else {
+        providerId = 'openai';
+        modelName = idWithoutPrefix;
+      }
     }
-
-    const model = models[0];
-    const MAX_TOOL_ITERATIONS = 10;
-    let iteration = 0;
-
-    while (iteration < MAX_TOOL_ITERATIONS) {
-      iteration++;
-
-      // Convert tools to vscode format
-      const vsTools = tools?.map(t => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema
-      })) as vscode.LanguageModelChatTool[] | undefined;
-
-      const response = await model.sendRequest(
-        vsMessages,
-        { tools: vsTools },
-        this._tokenSource!.token
-      );
-
-      const toolCalls: ToolCall[] = [];
-      let hasText = false;
-
-      for await (const part of response.stream) {
-        if (this._tokenSource!.token.isCancellationRequested) break;
-
-        if (part instanceof vscode.LanguageModelTextPart) {
-          hasText = true;
-          assistantMessage.content += part.value;
-          this._streamChunkToWebview(part.value);
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
-          toolCalls.push({
-            id: part.callId,
-            name: part.name,
-            input: part.input as Record<string, unknown>
-          });
-        }
-      }
-
-      // If no tool calls, we're done
-      if (toolCalls.length === 0) {
-        break;
-      }
-
-      // Process tool calls
-      this._logger.info(`Processing ${toolCalls.length} tool calls`);
-      
-      // Add assistant message with tool calls
-      vsMessages.push(vscode.LanguageModelChatMessage.Assistant(
-        toolCalls.map(tc => new vscode.LanguageModelToolCallPart(tc.id, tc.name, tc.input))
-      ));
-
-      // Execute each tool and collect results
-      const toolResults: vscode.LanguageModelToolResultPart[] = [];
-      
-      for (const toolCall of toolCalls) {
-        // Show tool call in UI
-        this._sendToolCallToWebview(toolCall);
-        assistantMessage.content += `\n\n🔧 **Calling tool:** ${toolCall.name}\n`;
-        this._streamChunkToWebview(`\n\n🔧 **Calling tool:** ${toolCall.name}\n`);
-
-        try {
-          const result = await vscode.lm.invokeTool(toolCall.name, {
-            input: toolCall.input,
-            toolInvocationToken: undefined
-          }, this._tokenSource!.token);
-
-          // Format result as text
-          const resultText = result.content
-            .filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart)
-            .map(p => p.value)
-            .join('');
-
-          toolResults.push(new vscode.LanguageModelToolResultPart(toolCall.id, result.content));
-          
-          // Show result in UI
-          this._sendToolResultToWebview(toolCall.id, resultText);
-          const truncatedResult = resultText.length > 200 ? resultText.substring(0, 200) + '...' : resultText;
-          assistantMessage.content += `\n✅ **Result:** ${truncatedResult}\n`;
-          this._streamChunkToWebview(`\n✅ **Result:** ${truncatedResult}\n`);
-
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          this._logger.error(`Tool ${toolCall.name} failed:`, error);
-          
-          toolResults.push(new vscode.LanguageModelToolResultPart(
-            toolCall.id,
-            [new vscode.LanguageModelTextPart(`Error: ${errorMsg}`)]
-          ));
-          
-          assistantMessage.content += `\n❌ **Error:** ${errorMsg}\n`;
-          this._streamChunkToWebview(`\n❌ **Error:** ${errorMsg}\n`);
-        }
-      }
-
-      // Add tool results to messages
-      vsMessages.push(vscode.LanguageModelChatMessage.User(toolResults));
-
-      // Continue the loop to get the model's response to tool results
-    }
-  }
-
-  /**
-   * Stream response using direct provider with tool orchestration
-   */
-  private async _streamWithToolsDirect(
-    selectedModel: ChatModel,
-    vsMessages: vscode.LanguageModelChatMessage[],
-    assistantMessage: ChatMessage,
-    tools?: Tool[]
-  ): Promise<void> {
-    const modelId = selectedModel.id.replace('direct:', '');
-    this._logger.info(`[ChatViewProvider._streamWithToolsDirect] Model ID: ${modelId}`);
-    this._logger.info(`[ChatViewProvider._streamWithToolsDirect] Selected model: ${JSON.stringify(selectedModel)}`);
     
-    const MAX_TOOL_ITERATIONS = 10;
-    let iteration = 0;
-
-    while (iteration < MAX_TOOL_ITERATIONS) {
-      iteration++;
-      
-      this._logger.info(`[ChatViewProvider._streamWithToolsDirect] Calling sendRequestWithTools (iteration ${iteration})...`);
-
-      const stream = await this._openLLMProvider.sendRequestWithTools(
-        modelId,
-        vsMessages,
-        { tools },
-        this._tokenSource!.token
-      );
-      
-      this._logger.info(`[ChatViewProvider._streamWithToolsDirect] Got stream, iterating...`);
-
-      const toolCalls: ToolCall[] = [];
-
-      for await (const chunk of stream) {
-        if (this._tokenSource!.token.isCancellationRequested) break;
-
-        if (chunk.type === 'text') {
-          assistantMessage.content += chunk.text;
-          this._streamChunkToWebview(chunk.text);
-        } else if (chunk.type === 'tool_call') {
-          toolCalls.push(chunk.toolCall);
+    // Get API key and base from the provider configuration
+    const providerConfig = await this._openLLMProvider.getProviderConfig(providerId);
+    
+    this._logger.info(`[ChatViewProvider] chat() - Provider: ${providerId}, Model: ${modelName}`);
+    
+    // Simple config - Rust handles everything else
+    const config = {
+      provider: providerId,
+      model: modelName,
+      apiKey: providerConfig?.apiKey,
+      apiBase: providerConfig?.apiBase,
+      maxToolIterations: 10,
+      enableTools: tools && tools.length > 0,
+    };
+    
+    // Stream the chat
+    return new Promise<void>((resolve, reject) => {
+      native.chat!(
+        messages,
+        config,
+        (chunk) => {
+          if (this._tokenSource?.token.isCancellationRequested) {
+            return;
+          }
+          
+          const chunkType = chunk.chunkType || chunk.type;
+          
+          switch (chunkType) {
+            case 'text':
+              if (chunk.text) {
+                assistantMessage.content += chunk.text;
+                this._streamChunkToWebview(chunk.text);
+              }
+              break;
+              
+            case 'tool_executing':
+              if (chunk.toolName) {
+                const toolCall: ToolCall = {
+                  id: chunk.toolId || chunk.toolCallId || '',
+                  name: chunk.toolName,
+                  input: chunk.toolArguments ? JSON.parse(chunk.toolArguments) : {},
+                };
+                this._sendToolCallToWebview(toolCall);
+                const msg = `\n\n🔧 **Calling tool:** ${chunk.toolName}\n`;
+                assistantMessage.content += msg;
+                this._streamChunkToWebview(msg);
+              }
+              break;
+              
+            case 'tool_result':
+              if (chunk.toolId || chunk.toolCallId) {
+                const resultText = chunk.toolResult || '';
+                this._sendToolResultToWebview(chunk.toolId || chunk.toolCallId || '', resultText);
+                
+                if (chunk.isError) {
+                  const msg = `\n❌ **Error:** ${resultText}\n`;
+                  assistantMessage.content += msg;
+                  this._streamChunkToWebview(msg);
+                } else {
+                  const truncatedResult = resultText.length > 200 
+                    ? resultText.substring(0, 200) + '...' 
+                    : resultText;
+                  const msg = `\n✅ **Result:** ${truncatedResult}\n`;
+                  assistantMessage.content += msg;
+                  this._streamChunkToWebview(msg);
+                }
+              }
+              break;
+              
+            case 'orchestration_status':
+              this._logger.info(
+                `[Orchestration] ${chunk.message || 'status update'}`
+              );
+              break;
+              
+            case 'done':
+              resolve();
+              break;
+              
+            case 'error':
+              if (chunk.recoverable) {
+                this._logger.warn(`[Orchestration] Recoverable error: ${chunk.message}`);
+              } else {
+                reject(new Error(chunk.message || 'Unknown error'));
+              }
+              break;
+          }
         }
-      }
-
-      // If no tool calls, we're done
-      if (toolCalls.length === 0) {
-        break;
-      }
-
-      // Process tool calls
-      this._logger.info(`Processing ${toolCalls.length} tool calls (direct)`);
-
-      // Add assistant message with tool calls
-      vsMessages.push(vscode.LanguageModelChatMessage.Assistant(
-        toolCalls.map(tc => new vscode.LanguageModelToolCallPart(tc.id, tc.name, tc.input))
-      ));
-
-      // Execute each tool
-      const toolResults: vscode.LanguageModelToolResultPart[] = [];
-
-      for (const toolCall of toolCalls) {
-        this._sendToolCallToWebview(toolCall);
-        assistantMessage.content += `\n\n🔧 **Calling tool:** ${toolCall.name}\n`;
-        this._streamChunkToWebview(`\n\n🔧 **Calling tool:** ${toolCall.name}\n`);
-
-        try {
-          const result = await vscode.lm.invokeTool(toolCall.name, {
-            input: toolCall.input,
-            toolInvocationToken: undefined
-          }, this._tokenSource!.token);
-
-          const resultText = result.content
-            .filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart)
-            .map(p => p.value)
-            .join('');
-
-          toolResults.push(new vscode.LanguageModelToolResultPart(toolCall.id, result.content));
-          
-          this._sendToolResultToWebview(toolCall.id, resultText);
-          const truncatedResult = resultText.length > 200 ? resultText.substring(0, 200) + '...' : resultText;
-          assistantMessage.content += `\n✅ **Result:** ${truncatedResult}\n`;
-          this._streamChunkToWebview(`\n✅ **Result:** ${truncatedResult}\n`);
-
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          this._logger.error(`Tool ${toolCall.name} failed:`, error);
-          
-          toolResults.push(new vscode.LanguageModelToolResultPart(
-            toolCall.id,
-            [new vscode.LanguageModelTextPart(`Error: ${errorMsg}`)]
-          ));
-          
-          assistantMessage.content += `\n❌ **Error:** ${errorMsg}\n`;
-          this._streamChunkToWebview(`\n❌ **Error:** ${errorMsg}\n`);
-        }
-      }
-
-      // Add tool results
-      vsMessages.push(vscode.LanguageModelChatMessage.User(toolResults));
-    }
+      ).catch(reject);
+    });
   }
 
   /**

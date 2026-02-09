@@ -11,16 +11,16 @@
 //!
 //! Source priority for initial load (later sources override earlier):
 //! 1. Native YAML user config (~/.config/openllm/config.yaml)
-//! 2. RPC user config (VS Code User Settings)
+//! 2. MCP user config (VS Code User Settings)
 //! 3. Native YAML workspace config (.config/openllm/config.yaml)
-//! 4. RPC workspace config (VS Code Workspace Settings)
+//! 4. MCP workspace config (VS Code Workspace Settings)
 
 use std::path::PathBuf;
 use std::collections::HashMap;
-use std::sync::{RwLock, OnceLock};
+use std::sync::{Arc, RwLock, OnceLock};
 use crate::config::{FileConfigProvider, ConfigProvider};
 use crate::types::{ProviderConfig, ConfigSource};
-use crate::rpc::{RpcConfigProvider, get_rpc_endpoint};
+use crate::mcp::{McpClient, McpConfigProvider};
 
 // Global in-memory provider state - shared across all resolver instances
 static GLOBAL_PROVIDERS: OnceLock<RwLock<HashMap<String, ResolvedProvider>>> = OnceLock::new();
@@ -83,13 +83,13 @@ impl ConfigSourcePreference {
 /// All resolver instances share the same global memory state, so changes
 /// made by one instance are immediately visible to all others.
 /// Memory is the source of truth during runtime. Changes update memory
-/// immediately, then persist to disk/RPC asynchronously.
+/// immediately, then persist to disk/MCP asynchronously.
 #[derive(Clone)]
 pub struct UnifiedConfigResolver {
     /// Workspace path for workspace-level config
     pub workspace_path: Option<PathBuf>,
-    /// RPC endpoint names to check
-    pub rpc_endpoints: Vec<String>,
+    /// MCP client for VS Code communication
+    pub mcp_client: Option<Arc<McpClient>>,
     /// User's preferred config source (set by host application)
     pub config_source: ConfigSourcePreference,
     // Note: providers are stored in GLOBAL_PROVIDERS, not per-instance
@@ -104,8 +104,17 @@ impl UnifiedConfigResolver {
     pub fn new() -> Self {
         Self {
             workspace_path: None,
-            rpc_endpoints: vec!["vscode".to_string()],
+            mcp_client: None,
             config_source: ConfigSourcePreference::default(),
+        }
+    }
+
+    /// Create with an MCP client for VS Code communication
+    pub fn with_mcp_client(mcp_client: Arc<McpClient>) -> Self {
+        Self {
+            workspace_path: None,
+            mcp_client: Some(mcp_client),
+            config_source: ConfigSourcePreference::VsCode, // Default to VS Code when MCP is available
         }
     }
 
@@ -117,9 +126,14 @@ impl UnifiedConfigResolver {
     pub fn with_workspace(workspace_path: impl Into<PathBuf>) -> Self {
         Self {
             workspace_path: Some(workspace_path.into()),
-            rpc_endpoints: vec!["vscode".to_string()],
+            mcp_client: None,
             config_source: ConfigSourcePreference::default(),
         }
+    }
+
+    /// Set the MCP client for VS Code communication
+    pub fn set_mcp_client(&mut self, client: Arc<McpClient>) {
+        self.mcp_client = Some(client);
     }
 
     /// Set the workspace path and reload from sources
@@ -177,47 +191,39 @@ impl UnifiedConfigResolver {
                 }
             }
             ConfigSourcePreference::VsCode => {
-                // VS Code mode: Load from RPC (VS Code settings)
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_config = RpcConfigProvider::new(&endpoint);
-                        
-                        // Skip RPC entirely if not reachable
-                        if !rpc_config.is_reachable() {
-                            continue;
-                        }
-                        
-                        // Get user settings
-                        if let Ok(providers) = rpc_config.get_providers("user", None) {
-                            for p in providers {
-                                providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
-                                    name: p.name,
-                                    enabled: p.enabled,
-                                    api_base: p.api_base,
-                                    models: p.models,
-                                    source: format!("rpc:{}:user", endpoint_name),
-                                    source_detail: format!("{} User Settings", endpoint_name),
-                                });
-                            }
-                        }
-                        
-                        // Get workspace settings (overrides user)
-                        if let Ok(providers) = rpc_config.get_providers(
-                            "workspace",
-                            self.workspace_path.as_deref(),
-                        ) {
-                            for p in providers {
-                                providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
-                                    name: p.name,
-                                    enabled: p.enabled,
-                                    api_base: p.api_base,
-                                    models: p.models,
-                                    source: format!("rpc:{}:workspace", endpoint_name),
-                                    source_detail: format!("{} Workspace Settings", endpoint_name),
-                                });
-                            }
+                // VS Code mode: Load from MCP (VS Code settings)
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
+                    
+                    // Get user settings
+                    if let Ok(providers) = mcp_config.get_providers("user") {
+                        for p in providers {
+                            providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:user".to_string(),
+                                source_detail: "VS Code User Settings".to_string(),
+                            });
                         }
                     }
+                    
+                    // Get workspace settings (overrides user)
+                    if let Ok(providers) = mcp_config.get_providers("workspace") {
+                        for p in providers {
+                            providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:workspace".to_string(),
+                                source_detail: "VS Code Workspace Settings".to_string(),
+                            });
+                        }
+                    }
+                } else {
+                    eprintln!("Warning: VS Code config source selected but no MCP client available");
                 }
             }
         }
@@ -272,44 +278,39 @@ impl UnifiedConfigResolver {
                 }
             }
             ConfigSourcePreference::VsCode => {
-                // VS Code mode: Load from RPC (VS Code settings)
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_config = RpcConfigProvider::new(&endpoint);
-                        
-                        if !rpc_config.is_reachable() {
-                            continue;
-                        }
-                        
-                        if let Ok(providers) = rpc_config.get_providers("user", None) {
-                            for p in providers {
-                                providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
-                                    name: p.name,
-                                    enabled: p.enabled,
-                                    api_base: p.api_base,
-                                    models: p.models,
-                                    source: format!("rpc:{}:user", endpoint_name),
-                                    source_detail: format!("{} User Settings", endpoint_name),
-                                });
-                            }
-                        }
-                        
-                        if let Ok(providers) = rpc_config.get_providers(
-                            "workspace",
-                            self.workspace_path.as_deref(),
-                        ) {
-                            for p in providers {
-                                providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
-                                    name: p.name,
-                                    enabled: p.enabled,
-                                    api_base: p.api_base,
-                                    models: p.models,
-                                    source: format!("rpc:{}:workspace", endpoint_name),
-                                    source_detail: format!("{} Workspace Settings", endpoint_name),
-                                });
-                            }
+                // VS Code mode: Load from MCP (VS Code settings)
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
+                    
+                    // Get user settings
+                    if let Ok(providers) = mcp_config.get_providers_async("user").await {
+                        for p in providers {
+                            providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:user".to_string(),
+                                source_detail: "VS Code User Settings".to_string(),
+                            });
                         }
                     }
+                    
+                    // Get workspace settings (overrides user)
+                    if let Ok(providers) = mcp_config.get_providers_async("workspace").await {
+                        for p in providers {
+                            providers_map.insert(p.name.to_lowercase(), ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:workspace".to_string(),
+                                source_detail: "VS Code Workspace Settings".to_string(),
+                            });
+                        }
+                    }
+                } else {
+                    eprintln!("Warning: VS Code config source selected but no MCP client available");
                 }
             }
         }
@@ -345,11 +346,6 @@ impl UnifiedConfigResolver {
     /// Get the current config source preference
     pub fn get_config_source(&self) -> &ConfigSourcePreference {
         &self.config_source
-    }
-
-    /// Add an RPC endpoint to check
-    pub fn add_rpc_endpoint(&mut self, name: impl Into<String>) {
-        self.rpc_endpoints.push(name.into());
     }
 
     /// Get all providers from in-memory state (instant, no I/O)
@@ -422,23 +418,19 @@ impl UnifiedConfigResolver {
                     }
                 }
 
-                // RPC user
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_config = RpcConfigProvider::new(&endpoint);
-                        if rpc_config.is_reachable() {
-                            if let Ok(ps) = rpc_config.get_providers("user", None) {
-                                for p in ps {
-                                    providers.push(ResolvedProvider {
-                                        name: p.name,
-                                        enabled: p.enabled,
-                                        api_base: p.api_base,
-                                        models: p.models,
-                                        source: format!("rpc:{}:user", endpoint_name),
-                                        source_detail: format!("{} User Settings", endpoint_name),
-                                    });
-                                }
-                            }
+                // MCP user (VS Code)
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
+                    if let Ok(ps) = mcp_config.get_providers("user") {
+                        for p in ps {
+                            providers.push(ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:user".to_string(),
+                                source_detail: "VS Code User Settings".to_string(),
+                            });
                         }
                     }
                 }
@@ -462,26 +454,19 @@ impl UnifiedConfigResolver {
                     }
                 }
 
-                // RPC workspace
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_config = RpcConfigProvider::new(&endpoint);
-                        if rpc_config.is_reachable() {
-                            if let Ok(ps) = rpc_config.get_providers(
-                                "workspace",
-                                self.workspace_path.as_deref(),
-                            ) {
-                                for p in ps {
-                                    providers.push(ResolvedProvider {
-                                        name: p.name,
-                                        enabled: p.enabled,
-                                        api_base: p.api_base,
-                                        models: p.models,
-                                        source: format!("rpc:{}:workspace", endpoint_name),
-                                        source_detail: format!("{} Workspace Settings", endpoint_name),
-                                    });
-                                }
-                            }
+                // MCP workspace (VS Code)
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
+                    if let Ok(ps) = mcp_config.get_providers("workspace") {
+                        for p in ps {
+                            providers.push(ResolvedProvider {
+                                name: p.name,
+                                enabled: p.enabled,
+                                api_base: p.api_base,
+                                models: p.models,
+                                source: "mcp:vscode:workspace".to_string(),
+                                source_detail: "VS Code Workspace Settings".to_string(),
+                            });
                         }
                     }
                 }
@@ -492,17 +477,15 @@ impl UnifiedConfigResolver {
         providers
     }
 
-    /// List all available config sources and their status
     /// List available config sources and their status
     /// 
-    /// Only lists sources relevant to the current config_source preference
-    /// to avoid unnecessary RPC calls.
+    /// Only lists sources relevant to the current config_source preference.
     pub fn list_sources(&self) -> Vec<(String, bool, String)> {
         let mut sources = Vec::new();
 
         match self.config_source {
             ConfigSourcePreference::Native => {
-                // Native mode: only list YAML file sources (no RPC checks)
+                // Native mode: only list YAML file sources
                 
                 // Native YAML user
                 let user_yaml = FileConfigProvider::user();
@@ -523,31 +506,20 @@ impl UnifiedConfigResolver {
                 }
             }
             ConfigSourcePreference::VsCode => {
-                // VsCode mode: only list RPC sources
+                // VS Code mode: list MCP sources
+                let available = self.mcp_client.is_some();
                 
-                // RPC user
-                for endpoint_name in &self.rpc_endpoints {
-                    let available = get_rpc_endpoint(endpoint_name)
-                        .map(|e| RpcConfigProvider::new(&e).is_reachable())
-                        .unwrap_or(false);
-                    sources.push((
-                        format!("rpc:{}:user", endpoint_name),
-                        available,
-                        format!("{} User Settings", endpoint_name),
-                    ));
-                }
+                sources.push((
+                    "mcp:vscode:user".to_string(),
+                    available,
+                    "VS Code User Settings".to_string(),
+                ));
 
-                // RPC workspace
-                for endpoint_name in &self.rpc_endpoints {
-                    let available = get_rpc_endpoint(endpoint_name)
-                        .map(|e| RpcConfigProvider::new(&e).is_reachable())
-                        .unwrap_or(false);
-                    sources.push((
-                        format!("rpc:{}:workspace", endpoint_name),
-                        available,
-                        format!("{} Workspace Settings", endpoint_name),
-                    ));
-                }
+                sources.push((
+                    "mcp:vscode:workspace".to_string(),
+                    available,
+                    "VS Code Workspace Settings".to_string(),
+                ));
             }
         }
 
@@ -557,30 +529,26 @@ impl UnifiedConfigResolver {
     // ========== WRITE OPERATIONS ==========
     //
     // The resolver intelligently routes writes based on what's available:
-    // - If RPC (VS Code) is available → use it (preferred for VS Code users)
+    // - If MCP (VS Code) is available → use it (preferred for VS Code users)
     // - Otherwise → fall back to native YAML files
 
     /// Determine the write destination based on user preference
     /// 
     /// This respects the user's config source setting rather than
-    /// automatically detecting RPC availability.
+    /// automatically detecting MCP availability.
     fn get_write_destination(&self, scope: &str) -> WriteDestination {
         match self.config_source {
             ConfigSourcePreference::Native => {
-                // User wants native YAML files - write directly, no RPC
+                // User wants native YAML files - write directly
                 WriteDestination::Native(scope.to_string())
             }
             ConfigSourcePreference::VsCode => {
-                // User wants VS Code settings - use RPC
-                // Find the first available RPC endpoint
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(_endpoint) = get_rpc_endpoint(endpoint_name) {
-                        return WriteDestination::Rpc(endpoint_name.clone(), scope.to_string());
-                    }
+                // User wants VS Code settings - use MCP
+                if self.mcp_client.is_some() {
+                    return WriteDestination::Mcp(scope.to_string());
                 }
-                // RPC requested but not available - fall back to native with warning
-                // This shouldn't happen if extension properly registered the endpoint
-                crate::logging::warn("config_resolver", "VS Code config source selected but no RPC endpoint available, falling back to native");
+                // MCP requested but not available - fall back to native with warning
+                crate::logging::warn("config_resolver", "VS Code config source selected but no MCP client available, falling back to native");
                 WriteDestination::Native(scope.to_string())
             }
         }
@@ -623,40 +591,38 @@ impl UnifiedConfigResolver {
                 providers.len(), key, providers.get(&key).map(|p| p.enabled).unwrap_or(false)));
         } // Write lock released here
         
-        // 2. PERSIST TO DISK/RPC (can be slow, but memory is already updated)
+        // 2. PERSIST TO DISK/MCP (can be slow, but memory is already updated)
         let destination = self.get_write_destination(scope);
         
         match destination {
-            WriteDestination::Rpc(endpoint_name, scope) => {
-                crate::logging::info("config_resolver", &format!("save_provider: Using RPC destination: endpoint={}, scope={}", endpoint_name, scope));
+            WriteDestination::Mcp(scope) => {
+                crate::logging::info("config_resolver", &format!("save_provider: Using MCP destination: scope={}", scope));
                 
-                if let Some(endpoint) = get_rpc_endpoint(&endpoint_name) {
-                    crate::logging::info("config_resolver", &format!("save_provider: RPC endpoint found: socket={}", endpoint.socket_path.display()));
-                    let rpc_config = RpcConfigProvider::new(&endpoint);
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
                     
-                    crate::logging::info("config_resolver", &format!("save_provider: Calling RPC set_provider: provider={}, scope={}, enabled={}, models_count={}",
+                    crate::logging::info("config_resolver", &format!("save_provider: Calling MCP set_provider: provider={}, scope={}, enabled={}, models_count={}",
                         provider.name, scope, provider.enabled, provider.models.len()));
                     
-                    match rpc_config.set_provider(
+                    match mcp_config.set_provider(
                         &provider.name,
                         &scope,
-                        self.workspace_path.as_deref(),
                         Some(provider.enabled),
                         Some(provider.models.clone()),
                         provider.api_base.clone(),
                     ) {
                         Ok(()) => {
-                            crate::logging::info("config_resolver", "save_provider: RPC set_provider succeeded");
-                            Ok(format!("{} {} Settings", endpoint_name, if scope == "user" { "User" } else { "Workspace" }))
+                            crate::logging::info("config_resolver", "save_provider: MCP set_provider succeeded");
+                            Ok(format!("VS Code {} Settings", if scope == "user" { "User" } else { "Workspace" }))
                         }
                         Err(e) => {
-                            crate::logging::error("config_resolver", &format!("save_provider: RPC set_provider FAILED: {:?}", e));
-                            Err(format!("RPC write failed: {}", e))
+                            crate::logging::error("config_resolver", &format!("save_provider: MCP set_provider FAILED: {:?}", e));
+                            Err(format!("MCP write failed: {}", e))
                         }
                     }
                 } else {
-                    crate::logging::error("config_resolver", &format!("save_provider: RPC endpoint '{}' NOT FOUND!", endpoint_name));
-                    Err(format!("RPC endpoint '{}' not found", endpoint_name))
+                    crate::logging::error("config_resolver", "save_provider: MCP client not available!");
+                    Err("MCP client not available".to_string())
                 }
             }
             WriteDestination::Native(scope) => {
@@ -777,23 +743,22 @@ impl UnifiedConfigResolver {
         let destination = self.get_write_destination(scope);
         
         match destination {
-            WriteDestination::Rpc(endpoint_name, scope) => {
+            WriteDestination::Mcp(scope) => {
                 // Set enabled to false and models to empty (effectively removes)
-                if let Some(endpoint) = get_rpc_endpoint(&endpoint_name) {
-                    let rpc_config = RpcConfigProvider::new(&endpoint);
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_config = McpConfigProvider::new("vscode", client.clone());
                     
-                    rpc_config.set_provider(
+                    mcp_config.set_provider(
                         provider_name,
                         &scope,
-                        self.workspace_path.as_deref(),
                         Some(false),
                         Some(vec![]),
                         None,
-                    ).map_err(|e| format!("RPC remove failed: {}", e))?;
+                    ).map_err(|e| format!("MCP remove failed: {}", e))?;
                     
-                    Ok(format!("{} {} Settings", endpoint_name, if scope == "user" { "User" } else { "Workspace" }))
+                    Ok(format!("VS Code {} Settings", if scope == "user" { "User" } else { "Workspace" }))
                 } else {
-                    Err(format!("RPC endpoint '{}' not found", endpoint_name))
+                    Err("MCP client not available".to_string())
                 }
             }
             WriteDestination::Native(scope) => {
@@ -824,9 +789,9 @@ impl UnifiedConfigResolver {
     /// Get information about where a write would go for a given scope
     pub fn get_write_destination_info(&self, scope: &str) -> (String, String) {
         match self.get_write_destination(scope) {
-            WriteDestination::Rpc(name, scope) => (
-                format!("rpc:{}:{}", name, scope),
-                format!("{} {} Settings", name, if scope == "user" { "User" } else { "Workspace" }),
+            WriteDestination::Mcp(scope) => (
+                format!("mcp:vscode:{}", scope),
+                format!("VS Code {} Settings", if scope == "user" { "User" } else { "Workspace" }),
             ),
             WriteDestination::Native(scope) => {
                 let path = if scope == "workspace" {
@@ -844,8 +809,8 @@ impl UnifiedConfigResolver {
 
 /// Where a write will be routed
 enum WriteDestination {
-    /// Write to RPC endpoint (endpoint_name, scope)
-    Rpc(String, String),
+    /// Write to MCP server (VS Code) - scope only
+    Mcp(String),
     /// Write to native YAML file (scope)
     Native(String),
 }

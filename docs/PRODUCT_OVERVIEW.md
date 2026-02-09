@@ -36,8 +36,11 @@ The project implements a **Rust core** with bindings for **Node.js**, **Python**
 | Azure OpenAI | Cloud/On-Prem | ✓ | ✓ | ✓ | ✓ (corporate) |
 | OpenRouter | Cloud | ✓ | ✓ | ✓ | ✗ |
 | Ollama | Local | ✗ | ✗ | ✓ | ✓ |
+| **VS Code LM** | MCP | ✓ | ✗ | ✓ | Depends on model |
 
-**Note:** Ollama supports any model that can run locally (Llama, Mistral, Qwen, DeepSeek, etc.)
+**Notes:** 
+- Ollama supports any model that can run locally (Llama, Mistral, Qwen, DeepSeek, etc.)
+- **VS Code LM** provider allows OpenLLM to access Copilot, GitHub Models, and any other `vscode.lm` models via MCP (Model Context Protocol). This enables unified orchestration—the same Rust code handles tool calling for both direct HTTP providers and VS Code LM models.
 
 ---
 
@@ -52,7 +55,7 @@ The project implements a **Rust core** with bindings for **Node.js**, **Python**
 │   VS Code Extension     Python Applications     Node.js / CLI   │
 │   (Ansible, etc.)       (scripts, notebooks)    (automation)    │
 │         │                      │                      │          │
-│    NAPI Bindings          PyO3 Bindings         NAPI Bindings   │
+│   NAPI + MCP Server       PyO3 Bindings         NAPI Bindings   │
 │         └──────────────────────┼──────────────────────┘          │
 └────────────────────────────────┼────────────────────────────────┘
                                  │
@@ -60,16 +63,23 @@ The project implements a **Rust core** with bindings for **Node.js**, **Python**
                     │     openllm-core        │
                     │       (Rust)            │
                     │                         │
-                    │   • 7 LLM Providers     │
+                    │   • 8+ LLM Providers    │
+                    │     (incl. VsCodeProvider)
+                    │   • Tool Orchestration  │
                     │   • Secret Management   │
                     │   • Config Management   │
                     │   • Streaming Support   │
                     └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │    LLM Provider APIs    │
-                    └─────────────────────────┘
+                       │                    │
+                       │ HTTP               │ MCP
+                       ▼                    ▼
+    ┌─────────────────────────┐  ┌─────────────────────────┐
+    │    LLM Provider APIs    │  │    VS Code Extension    │
+    │  OpenAI, Anthropic...   │  │  (vscode.lm, tools)     │
+    └─────────────────────────┘  └─────────────────────────┘
 ```
+
+**Key Architectural Feature:** The `VsCodeProvider` in Rust treats VS Code's language models (Copilot, GitHub Models) as just another provider. It uses MCP (Model Context Protocol) to communicate with the VS Code extension, which proxies requests to `vscode.lm`. This enables unified tool orchestration—the same Rust code handles the complete tool calling loop for all providers.
 
 ### Why Rust Core?
 
@@ -87,7 +97,7 @@ The project implements a **Rust core** with bindings for **Node.js**, **Python**
 | Role | Description | User Benefit |
 |------|-------------|--------------|
 | **Configuration UI** | Visual interface for managing providers, API keys, and model selection | No YAML editing required |
-| **RPC Server** | Bridge between Rust core and VS Code's secure storage | Keys stored securely in VS Code |
+| **MCP Server** | Bridge between Rust core and VS Code's secure storage/tools via Model Context Protocol | Keys stored securely in VS Code, tools accessible to LLM |
 | **LM Provider** | Implements VS Code's native `LanguageModelChatProvider` | Works with any VS Code AI extension |
 | **Test/Playground** | Built-in chat interface and model comparison tool | Test models before integration |
 

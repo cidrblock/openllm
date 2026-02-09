@@ -13,7 +13,7 @@ Open LLM is a multi-language LLM provider library with a Rust core and bindings 
 │  │   (TypeScript)  │  │                 │  │                         │  │
 │  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │
 │           │                    │                        │               │
-│   VS Code Adapter       PyO3 Bindings            NAPI-rs Bindings       │
+│   NAPI + MCP Server     PyO3 Bindings            NAPI-rs Bindings       │
 │           │                    │                        │               │
 └───────────┼────────────────────┼────────────────────────┼───────────────┘
             │                    │                        │
@@ -28,30 +28,34 @@ Open LLM is a multi-language LLM provider library with a Rust core and bindings 
                     │  │  OpenAI, Claude,  │  │
                     │  │  Gemini, Ollama,  │  │
                     │  │  Mistral, Azure,  │  │
-                    │  │  OpenRouter       │  │
+                    │  │  OpenRouter,      │  │
+                    │  │  **VsCodeProvider**│  │
                     │  └───────────────────┘  │
                     │                         │
                     │  ┌───────────────────┐  │
                     │  │  Secret Stores    │  │
                     │  │  Env, Memory,     │  │
-                    │  │  Keychain         │  │
+                    │  │  Keychain, MCP    │  │
                     │  └───────────────────┘  │
                     │                         │
                     │  ┌───────────────────┐  │
                     │  │  Config Providers │  │
-                    │  │  Memory, File     │  │
-                    │  │  (YAML)           │  │
+                    │  │  Memory, File,    │  │
+                    │  │  MCP (VS Code)    │  │
                     │  └───────────────────┘  │
                     └─────────────────────────┘
-                                 │
-                                 │ HTTP
-                                 ▼
-                    ┌─────────────────────────┐
-                    │     LLM Provider APIs   │
-                    │  OpenAI, Anthropic,     │
-                    │  Google, Mistral, etc.  │
-                    └─────────────────────────┘
+                       │                    │
+                       │ HTTP               │ MCP
+                       ▼                    ▼
+    ┌─────────────────────────┐  ┌─────────────────────────┐
+    │     LLM Provider APIs   │  │    VS Code Extension    │
+    │  OpenAI, Anthropic,     │  │      MCP Server         │
+    │  Google, Mistral, etc.  │  │  (vscode.lm, secrets,   │
+    └─────────────────────────┘  │   config, tools)        │
+                                 └─────────────────────────┘
 ```
+
+**Key architectural feature:** The `VsCodeProvider` in Rust treats VS Code's language models (Copilot, GitHub Models) as just another provider. It uses MCP to communicate with the VS Code extension, which proxies requests to `vscode.lm`. This allows unified orchestration - the same Rust code handles tool calling for both direct HTTP providers and VS Code LM models.
 
 ## Crate Structure
 
@@ -60,8 +64,15 @@ crates/
 ├── openllm-core/           # Pure Rust - core library
 │   └── src/
 │       ├── providers/      # LLM provider implementations
+│       │   ├── openai.rs   # OpenAI, Anthropic, etc. (via genai)
+│       │   └── vscode.rs   # VS Code LM provider (via MCP)
+│       ├── tools/          # Tool orchestration
+│       │   ├── registry.rs # Tool discovery and management
+│       │   └── orchestrator.rs # Tool calling loop
+│       ├── mcp/            # MCP client for VS Code communication
 │       ├── secrets/        # Secret store implementations
 │       ├── config/         # Config provider implementations
+│       ├── resolver/       # Unified secret & config resolvers
 │       ├── types/          # Shared types (messages, tools, etc.)
 │       └── logging/        # Logger implementations
 │
@@ -75,9 +86,15 @@ crates/
 
 ### Providers
 
-Each LLM provider implements the `Provider` trait:
+Each LLM provider is accessed through the unified `LlmProvider`:
 
 ```rust
+// Create any provider with a simple ID
+let provider = create_provider("openai", logger);
+let provider = create_provider("anthropic", logger);
+let provider = create_provider("mock", logger);  // For testing
+
+// All providers implement the same trait
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn metadata(&self) -> ProviderMetadata;
@@ -87,7 +104,7 @@ pub trait Provider: Send + Sync {
         messages: Vec<ChatMessage>,
         config: ProviderModelConfig,
         options: StreamOptions,
-        token: Arc<dyn CancellationToken>,
+        token: CancellationToken,
     ) -> Result<impl Stream<Item = StreamChunk>>;
 }
 ```
@@ -100,6 +117,8 @@ Supported providers:
 - **Ollama** - Local models (Llama, Qwen, etc.)
 - **Azure OpenAI** - Azure-hosted OpenAI
 - **OpenRouter** - Multi-provider router
+- **VS Code** - Access vscode.lm models (Copilot, GitHub Models) via MCP
+- **Mock** - Testing provider with configurable behavior
 
 ### Secret Stores
 
@@ -119,6 +138,7 @@ Available stores:
 - **EnvSecretStore** - Environment variables (read-only)
 - **MemorySecretStore** - In-memory (testing)
 - **KeychainSecretStore** - System keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- **McpSecretStore** - VS Code SecretStorage via MCP
 - **ChainSecretStore** - Fallback chain of multiple stores
 
 ### Config Providers
@@ -138,6 +158,7 @@ pub trait ConfigProvider: Send + Sync {
 Available providers:
 - **MemoryConfigProvider** - In-memory
 - **FileConfigProvider** - YAML files (`~/.openllm/config.yaml` or `.openllm/config.yaml`)
+- **McpConfigProvider** - VS Code settings via MCP
 
 ## VS Code Extension
 
@@ -148,7 +169,7 @@ The VS Code extension (`packages/vscode`) serves **four distinct roles**:
 | Role | Description | Key Files |
 |------|-------------|-----------|
 | **1. Configuration UI** | Visual interface for managing providers, API keys, and models | `ApiKeyPanel.ts`, `StatusPanel.ts` |
-| **2. RPC Server / MCP Tool Provider** | JSON-RPC server exposing VS Code's SecretStorage, settings, and tools to the Rust core | `RpcServer.ts` |
+| **2. MCP Server** | MCP server exposing VS Code's SecretStorage, settings, and tools to the Rust core | `McpToolServer.ts` |
 | **3. VS Code LM Provider** | Implements `LanguageModelChatProvider` to register LLM models with VS Code's AI features | `OpenLLMProvider.ts`, `ConfigManager.ts` |
 | **4. Test/Playground UIs** | Chat interface and playground for testing and comparing models | `ChatViewProvider.ts`, `PlaygroundPanel.ts` |
 
@@ -159,12 +180,13 @@ The VS Code extension (`packages/vscode`) serves **four distinct roles**:
 │                      VS Code Extension                           │
 │                                                                  │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
-│  │  Configuration   │  │   RPC Server     │  │  LM Provider  │  │
-│  │       UI         │  │  (JSON-RPC)      │  │  (Chat API)   │  │
+│  │  Configuration   │  │   MCP Server     │  │  LM Provider  │  │
+│  │       UI         │  │  (McpToolServer) │  │  (Chat API)   │  │
 │  │  ─────────────   │  │  ─────────────   │  │  ───────────  │  │
 │  │  ApiKeyPanel     │  │  Secrets API     │  │  OpenLLM      │  │
 │  │  StatusPanel     │  │  Config API      │  │  Provider     │  │
 │  │                  │  │  Workspace API   │  │               │  │
+│  │                  │  │  VS Code Tools   │  │               │  │
 │  └────────┬─────────┘  └────────▲─────────┘  └───────┬───────┘  │
 │           │                     │                    │          │
 │           │    ┌────────────────┴────────────────┐   │          │
@@ -176,6 +198,7 @@ The VS Code extension (`packages/vscode`) serves **four distinct roles**:
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                NAPI Bindings (in-process)                 │  │
 │  │         UnifiedSecretResolver, UnifiedConfigResolver      │  │
+│  │                      LlmProvider                          │  │
 │  └─────────────────────────────┬─────────────────────────────┘  │
 └────────────────────────────────┼────────────────────────────────┘
                                  │
@@ -184,9 +207,9 @@ The VS Code extension (`packages/vscode`) serves **four distinct roles**:
                    │     openllm-core (Rust)   │
                    │                           │
                    │  ┌─────────────────────┐  │
-                   │  │  Unified Resolvers  │──┼──► RPC Client
+                   │  │  Unified Resolvers  │──┼──► MCP Client
                    │  │  (secrets, config)  │  │    (calls back to
-                   │  └─────────────────────┘  │     VS Code RPC)
+                   │  └─────────────────────┘  │     VS Code MCP)
                    │                           │
                    │  ┌─────────────────────┐  │
                    │  │   LLM Providers     │  │
@@ -204,32 +227,46 @@ The extension provides a visual interface (`ApiKeyPanel`) for:
 - Configuring provider settings (base URLs, etc.)
 - Choosing between VS Code settings or native YAML config
 
-### Role 2: RPC Server (MCP-Compatible Tool Provider)
+### Role 2: MCP Server
 
-The extension runs a JSON-RPC server (`RpcServer.ts`) that exposes VS Code APIs to the Rust core using MCP-compatible endpoints:
+The extension runs an MCP server (`McpToolServer.ts`) that exposes VS Code APIs to the Rust core:
 
 ```
 Rust Core (openllm-core)
     │
-    │  JSON-RPC over Unix socket
+    │  MCP over HTTP/Unix socket
     ▼
-VS Code RPC Server
+VS Code MCP Server
     │
-    ├── Secrets & Config API:
-    │   ├── secrets/get    → context.secrets.get()
-    │   ├── secrets/store  → context.secrets.store()
-    │   ├── secrets/delete → context.secrets.delete()
-    │   ├── config/get     → workspace.getConfiguration()
-    │   └── config/set     → workspace.getConfiguration().update()
+    ├── Internal Tools (openllm_* prefix):
+    │   │
+    │   ├── Secrets API:
+    │   │   ├── openllm_secrets_get    → context.secrets.get()
+    │   │   ├── openllm_secrets_set    → context.secrets.store()
+    │   │   ├── openllm_secrets_delete → context.secrets.delete()
+    │   │   └── openllm_secrets_list   → list stored keys
+    │   │
+    │   ├── Config API:
+    │   │   ├── openllm_config_get     → workspace.getConfiguration()
+    │   │   ├── openllm_config_set     → workspace.getConfiguration().update()
+    │   │   └── openllm_workspace_root → get workspace path
+    │   │
+    │   └── LLM API (for unified orchestration):
+    │       ├── openllm_llm_list       → vscode.lm.selectChatModels()
+    │       │                            (filters out OpenLLM's own models)
+    │       └── openllm_llm_send       → model.sendRequest()
+    │                                    (sends chat to vscode.lm model)
     │
-    └── MCP Tools API:
-        ├── tools/list     → List all available tools
-        └── tools/call     → Execute a tool
+    └── User Tools (from vscode.lm.tools):
+        ├── cursor_read_file
+        ├── cursor_edit_file
+        └── ... (Copilot and extension tools)
 ```
 
 This allows the Rust core to:
 1. Access VS Code's SecretStorage and settings without direct coupling
 2. Discover and execute VS Code tools (vscode.lm.tools)
+3. Use vscode.lm models (Copilot, GitHub Models) as if they were regular providers
 
 **See [MCP_TOOLS_ARCHITECTURE.md](MCP_TOOLS_ARCHITECTURE.md) for details on tool handling.**
 
@@ -270,27 +307,83 @@ The extension supports bidirectional config migration:
 
 ## Data Flow
 
-### Chat Request
+### Unified Chat API
+
+All chat requests flow through a single `chat()` function that handles everything:
+
+```typescript
+// TypeScript - one simple call
+await native.chat(
+  messages,
+  { provider: 'openai', model: 'gpt-4o', apiKey: '...' },
+  (chunk) => console.log(chunk.text)
+);
+```
 
 ```
-1. User sends message in VS Code
-   ↓
-2. OpenLLMProvider.provideLanguageModelResponse()
-   ↓
-3. VSCodeProviderAdapter.streamChat()
-   ↓
-4. MessageConverter converts VS Code messages → Core messages
-   ↓
-5. @openllm/native (Rust via NAPI-rs)
-   ↓
-6. openllm-core Provider.stream_chat()
-   ↓
-7. HTTP request to LLM API
-   ↓
-8. SSE stream response
-   ↓
-9. Async stream back to VS Code
+┌─────────────────────────────────────────────────────────────────┐
+│                     ChatViewProvider (UI)                        │
+│                                                                  │
+│  User Message → native.chat() → UI Updates                      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ NAPI
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    chat() function (Rust)                        │
+│                                                                  │
+│  1. Creates provider based on config.provider                   │
+│  2. Connects to MCP for tools (if registered)                   │
+│  3. Handles tool calling loop (detect → execute → continue)     │
+│  4. Streams events back via callback                            │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ Direct HTTP   │  │ VsCodeProvider│  │ ToolRegistry  │
+│ Providers     │  │ (MCP-based)   │  │ (MCP tools)   │
+│               │  │               │  │               │
+│ OpenAI, etc.  │  │ openllm_llm_* │  │ tools/list    │
+│      ↓        │  │      ↓        │  │ tools/call    │
+│  HTTP APIs    │  │  vscode.lm    │  │      ↓        │
+└───────────────┘  └───────────────┘  │ vscode.lm     │
+                                      │ .invokeTool() │
+                                      └───────────────┘
 ```
+
+### Provider Routing
+
+The `ChatOrchestrator` routes requests based on provider ID:
+
+| Provider ID | Routing | Description |
+|-------------|---------|-------------|
+| `openai`, `anthropic`, `gemini`, etc. | Direct HTTP | Rust calls provider APIs directly |
+| `vscode` | MCP → vscode.lm | Rust calls `openllm_llm_send` MCP tool |
+| `mock` | In-memory | Testing/development |
+
+### Tool Orchestration Loop
+
+All tool orchestration runs in Rust, regardless of the model source:
+
+```
+1. Send request to LLM (direct HTTP or MCP to vscode.lm)
+   ↓
+2. Receive response stream
+   ↓
+3. Detect tool calls in response
+   ↓
+4. If tool calls found:
+   │ ├── Execute via MCP (ToolRegistry → VS Code MCP Server)
+   │ ├── Collect results
+   │ └── Continue to step 1 with results
+   ↓
+5. Stream final response back to caller
+```
+
+### Legacy Flow (removed)
+
+The previous architecture had separate TypeScript orchestration loops for vscode.lm and direct providers. This has been unified—ALL models now go through the Rust `ChatOrchestrator`.
 
 ### Secret Resolution (Unified Resolver)
 
@@ -304,8 +397,8 @@ The Rust core's `UnifiedSecretResolver` checks multiple sources in priority orde
    ├── 1. Environment variables (OPENAI_API_KEY)
    │       └── Direct env::var() call - highest priority
    │
-   ├── 2. RPC endpoint (VS Code)
-   │       └── JSON-RPC call to VS Code RPC Server
+   ├── 2. MCP endpoint (VS Code)
+   │       └── MCP call to VS Code MCP Server
    │           └── VS Code calls context.secrets.get()
    │
    └── 3. System keychain
@@ -326,8 +419,8 @@ The Rust core's `UnifiedConfigResolver` merges config from multiple sources:
    ├── Native YAML (user): ~/.config/openllm/config.yaml
    ├── Native YAML (workspace): .config/openllm/config.yaml
    │
-   └── RPC endpoint (VS Code)
-       └── JSON-RPC call to VS Code RPC Server
+   └── MCP endpoint (VS Code)
+       └── MCP call to VS Code MCP Server
            └── VS Code returns workspace.getConfiguration()
    ↓
 3. Merge and prioritize (workspace > user, native > vscode)
@@ -344,7 +437,7 @@ When writing config or secrets, the unified resolvers handle routing:
    ↓
 2. Rust determines best destination:
    │
-   ├── If RPC endpoint available → route to VS Code SecretStorage
+   ├── If MCP endpoint available → route to VS Code SecretStorage
    └── Else → route to system keychain
    ↓
 3. Return destination name for UI feedback

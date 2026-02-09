@@ -31,5 +31,13 @@
 //! ```
 
 mod registry;
+mod orchestrator;
 
 pub use registry::{ToolRegistry, ToolFilter, ToolInfo};
+pub use orchestrator::{
+    ChatOrchestrator,
+    OrchestratorConfig,
+    UserPromptResponse,
+    PromptResponseReceiver,
+    PromptResponseSender,
+};

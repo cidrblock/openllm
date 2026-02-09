@@ -89,15 +89,25 @@ Click the chat icon in the Activity Bar to open the built-in chat interface:
 
 ## Supported Providers
 
-| Provider | Tool Calling | Vision | Local |
+| Provider | Tool Calling | Vision | Notes |
 |----------|-------------|--------|-------|
-| OpenAI | ✓ | ✓ | ✗ |
-| Anthropic | ✓ | ✓ | ✗ |
-| Google Gemini | ✓ | ✓ | ✗ |
-| Mistral | ✓ | ✗ | ✗ |
-| Ollama | ✗ | ✗ | ✓ |
-| Azure OpenAI | ✓ | ✓ | ✗ |
-| OpenRouter | ✓ | ✓ | ✗ |
+| OpenAI | ✓ | ✓ | Direct HTTP |
+| Anthropic | ✓ | ✓ | Direct HTTP |
+| Google Gemini | ✓ | ✓ | Direct HTTP |
+| Mistral | ✓ | ✗ | Direct HTTP |
+| Ollama | ✗ | ✗ | Local models |
+| Azure OpenAI | ✓ | ✓ | Direct HTTP |
+| OpenRouter | ✓ | ✓ | Direct HTTP |
+| **VS Code LM** | ✓ | ✗ | **MCP to Copilot/GitHub Models** |
+
+### VS Code LM Provider
+
+OpenLLM can use Copilot and other `vscode.lm` models as if they were regular providers. This is enabled via MCP (Model Context Protocol)—the Rust core calls the extension's MCP server, which proxies to `vscode.lm`.
+
+This means:
+- Tool orchestration is handled in Rust for ALL models (including Copilot)
+- The same codebase works outside VS Code (direct HTTP providers) and inside VS Code (with vscode.lm access)
+- No separate code paths for different model types
 
 ## Configuration Options
 
@@ -177,14 +187,28 @@ The extension serves four distinct roles:
 | Role | Description |
 |------|-------------|
 | **Configuration UI** | Visual interface for managing providers, API keys, and models |
-| **RPC Server** | JSON-RPC server exposing VS Code's SecretStorage and settings to the Rust core |
-| **LM Provider** | Implements VS Code's Language Model API to register LLM models |
+| **MCP Server** | MCP server exposing VS Code APIs to the Rust core (secrets, config, tools, **vscode.lm models**) |
+| **LM Provider** | Implements VS Code's Language Model API to register OpenLLM models with VS Code |
 | **Test UIs** | Chat sidebar and playground for testing models |
+
+### MCP Server Capabilities
+
+The extension's MCP server exposes:
+
+| Category | MCP Tools | Purpose |
+|----------|-----------|---------|
+| Secrets | `openllm_secrets_*` | Access VS Code SecretStorage |
+| Config | `openllm_config_*` | Access VS Code settings |
+| **LLM** | `openllm_llm_list`, `openllm_llm_send` | **Access vscode.lm models (Copilot, etc.)** |
+| Tools | Proxied from `vscode.lm.tools` | VS Code tools for agent workflows |
+
+This allows the Rust core to use Copilot/GitHub Models through the same unified API as direct HTTP providers.
 
 The extension communicates with the Rust core (`openllm-core`) via NAPI bindings. The Rust core handles:
 - Unified secret resolution (env vars, VS Code, keychain)
 - Unified config resolution (VS Code settings, native YAML files)
-- LLM provider implementations (OpenAI, Anthropic, Gemini, etc.)
+- LLM provider implementations (OpenAI, Anthropic, Gemini, **VsCodeProvider**)
+- Tool orchestration for ALL providers
 - Intelligent write routing (decides where to store secrets/config)
 
 See [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for detailed documentation.

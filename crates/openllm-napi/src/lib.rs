@@ -3,7 +3,7 @@
 #![deny(clippy::all)]
 
 use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode, ErrorStrategy};
 use napi_derive::napi;
 use std::sync::Arc;
 use futures::StreamExt;
@@ -15,13 +15,8 @@ use openllm_core::secrets::{
     KeychainSecretStore as CoreKeychainSecretStore,
     list_secret_stores as core_list_secret_stores,
 };
-use openllm_core::rpc::{
-    RpcEndpoint as CoreRpcEndpoint,
-    register_rpc_endpoint as core_register_rpc_endpoint,
-    get_rpc_endpoint as core_get_rpc_endpoint,
-    RpcSecretStore as CoreRpcSecretStore,
-    RpcConfigProvider as CoreRpcConfigProvider,
-};
+// MCP is now used instead of RPC for VS Code communication
+// RPC types have been removed - see mcp module in openllm-core
 use openllm_core::resolver::{
     UnifiedSecretResolver as CoreUnifiedSecretResolver,
     UnifiedConfigResolver as CoreUnifiedConfigResolver,
@@ -33,12 +28,8 @@ use openllm_core::config::{
 };
 use openllm_core::logging::{NoOpLogger, Logger};
 use openllm_core::providers::{
-    Provider,
     ProviderModelConfig as CoreProviderModelConfig,
     StreamChatOptions as CoreStreamChatOptions,
-    MockProvider as CoreMockProvider,
-    MockConfig as CoreMockConfig,
-    MockMode as CoreMockMode,
     create_provider as core_create_provider,
     supported_providers as core_supported_providers,
 };
@@ -49,6 +40,160 @@ use openllm_core::types::{
     CancellationToken as CoreCancellationToken,
     StreamChunk as CoreStreamChunk,
 };
+use openllm_core::mcp::McpClient as CoreMcpClient;
+
+use parking_lot::RwLock;
+use once_cell::sync::Lazy;
+
+// ============================================================================
+// Global MCP Endpoint Registry
+// ============================================================================
+
+/// Registered MCP endpoint information
+#[derive(Clone)]
+struct McpEndpointInfo {
+    #[allow(dead_code)]
+    name: String,
+    socket_path: String,
+    #[allow(dead_code)]
+    http_url: Option<String>,
+}
+
+/// Global registry of MCP endpoints
+/// In practice, there's usually just one (the VS Code extension)
+static MCP_ENDPOINTS: Lazy<RwLock<Vec<McpEndpointInfo>>> = Lazy::new(|| RwLock::new(Vec::new()));
+
+/// Global MCP client (lazily created when first needed)
+static MCP_CLIENT: Lazy<RwLock<Option<Arc<CoreMcpClient>>>> = Lazy::new(|| RwLock::new(None));
+
+/// MCP endpoint configuration for registration
+#[napi(object)]
+pub struct McpEndpoint {
+    /// Name identifier for this endpoint (e.g., "vscode")
+    pub name: String,
+    /// Unix socket path (or Windows named pipe path)
+    pub socket_path: String,
+    /// Optional HTTP URL format (e.g., "http+unix://...")
+    pub http_url: Option<String>,
+}
+
+/// Register an MCP endpoint that the Rust core can connect to
+/// 
+/// This should be called by the VS Code extension (or other host) after starting
+/// its MCP server, so that the Rust ToolRegistry can discover and execute tools.
+/// 
+/// ## Example (TypeScript)
+/// ```typescript
+/// const mcpInfo = await mcpToolServer.start();
+/// native.registerMcpEndpoint({
+///   name: 'vscode',
+///   socketPath: mcpInfo.socketPath,
+///   httpUrl: mcpInfo.httpUrl,
+/// });
+/// ```
+#[napi]
+pub fn register_mcp_endpoint(endpoint: McpEndpoint) -> Result<()> {
+    let info = McpEndpointInfo {
+        name: endpoint.name.clone(),
+        socket_path: endpoint.socket_path.clone(),
+        http_url: endpoint.http_url,
+    };
+    
+    // Store the endpoint
+    {
+        let mut endpoints = MCP_ENDPOINTS.write();
+        // Replace existing endpoint with same name
+        endpoints.retain(|e| e.name != endpoint.name);
+        endpoints.push(info);
+    }
+    
+    // Clear existing client so it will be recreated with new endpoint
+    {
+        let mut client = MCP_CLIENT.write();
+        *client = None;
+    }
+    
+    Ok(())
+}
+
+/// Unregister an MCP endpoint
+#[napi]
+pub fn unregister_mcp_endpoint(name: String) -> bool {
+    let mut endpoints = MCP_ENDPOINTS.write();
+    let len_before = endpoints.len();
+    endpoints.retain(|e| e.name != name);
+    
+    if endpoints.len() < len_before {
+        // Clear client cache
+        let mut client = MCP_CLIENT.write();
+        *client = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// Check if an MCP endpoint is registered
+#[napi]
+pub fn has_mcp_endpoint(name: String) -> bool {
+    MCP_ENDPOINTS.read().iter().any(|e| e.name == name)
+}
+
+/// Get the socket path for a registered MCP endpoint
+#[napi]
+pub fn get_mcp_socket_path(name: String) -> Option<String> {
+    MCP_ENDPOINTS.read()
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.socket_path.clone())
+}
+
+/// Get the socket path for the first registered MCP endpoint
+fn get_first_mcp_socket_path() -> Result<String> {
+    let endpoints = MCP_ENDPOINTS.read();
+    endpoints.first()
+        .map(|e| e.socket_path.clone())
+        .ok_or_else(|| Error::from_reason("No MCP endpoint registered. Call registerMcpEndpoint first."))
+}
+
+/// Get or create the global MCP client (async version)
+/// 
+/// This connects to the first registered endpoint (typically "vscode")
+async fn get_or_create_mcp_client_async() -> Result<Arc<CoreMcpClient>> {
+    // Check if we already have a client
+    {
+        let client = MCP_CLIENT.read();
+        if let Some(ref c) = *client {
+            return Ok(c.clone());
+        }
+    }
+    
+    // Get the socket path
+    let socket_path = get_first_mcp_socket_path()?;
+    
+    // Create a new client (async connect)
+    let logger: Arc<dyn Logger> = Arc::new(NoOpLogger);
+    
+    #[cfg(unix)]
+    let client = CoreMcpClient::connect_unix(&socket_path, logger)
+        .await
+        .map_err(|e| Error::from_reason(format!("Failed to connect to MCP server: {}", e)))?;
+    
+    #[cfg(windows)]
+    let client = CoreMcpClient::connect_named_pipe(&socket_path, logger)
+        .await
+        .map_err(|e| Error::from_reason(format!("Failed to connect to MCP server: {}", e)))?;
+    
+    let client = Arc::new(client);
+    
+    // Store it
+    {
+        let mut stored = MCP_CLIENT.write();
+        *stored = Some(client.clone());
+    }
+    
+    Ok(client)
+}
 
 // ============================================================================
 // Secret Store Types
@@ -420,23 +565,8 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[napi]
-pub fn create_system_message(content: String) -> ChatMessage {
-    ChatMessage { role: MessageRole::System, content }
-}
-
-#[napi]
-pub fn create_user_message(content: String) -> ChatMessage {
-    ChatMessage { role: MessageRole::User, content }
-}
-
-#[napi]
-pub fn create_assistant_message(content: String) -> ChatMessage {
-    ChatMessage { role: MessageRole::Assistant, content }
-}
-
 // ============================================================================
-// Tool Types
+// Tool Types (used internally for orchestrator)
 // ============================================================================
 
 #[napi(object)]
@@ -458,16 +588,6 @@ pub struct ToolResult {
     pub call_id: String,
     pub content: String,
     pub is_error: bool,
-}
-
-#[napi]
-pub fn create_tool_result(call_id: String, content: String) -> ToolResult {
-    ToolResult { call_id, content, is_error: false }
-}
-
-#[napi]
-pub fn create_tool_error(call_id: String, content: String) -> ToolResult {
-    ToolResult { call_id, content, is_error: true }
 }
 
 // ============================================================================
@@ -563,53 +683,167 @@ pub fn list_providers() -> Vec<ProviderMetadata> {
 // Streaming Types
 // ============================================================================
 
-/// A chunk from a streaming response
+/// Option for a user prompt response
+#[napi(object)]
+pub struct PromptOption {
+    /// Unique ID for this option
+    pub id: String,
+    /// Display label for the option
+    pub label: String,
+    /// Whether this is the default/recommended option
+    pub is_default: bool,
+}
+
+/// A chunk from a streaming response or orchestration event
 #[napi(object)]
 pub struct StreamChunk {
-    /// Chunk type: "text", "tool_call", or "tool_call_delta"
+    /// Chunk type: "text", "tool_call", "tool_call_delta", "tool_executing",
+    /// "tool_result", "orchestration_status", "user_prompt", "done", "error"
     pub chunk_type: String,
+    
+    // -- Text chunk fields --
     /// Text content (for text chunks)
     pub text: Option<String>,
+    
+    // -- Tool call chunk fields --
     /// Tool call (for tool_call chunks)
     pub tool_call: Option<ToolCall>,
-    /// Tool call ID (for tool_call_delta chunks)
+    
+    // -- Tool call delta chunk fields --
+    /// Tool call ID (for tool_call_delta, tool_executing, tool_result chunks)
     pub tool_call_id: Option<String>,
-    /// Tool name (for tool_call_delta chunks)
+    /// Tool name (for tool_call_delta, tool_executing, tool_result chunks)
     pub tool_name: Option<String>,
     /// Tool input delta (for tool_call_delta chunks)
     pub tool_input_delta: Option<String>,
+    /// Tool arguments (for tool_executing chunks)
+    pub tool_arguments: Option<String>,
+    /// Tool result content (for tool_result chunks)
+    pub tool_result: Option<String>,
+    /// Whether the tool result is an error (for tool_result chunks)
+    pub is_error: Option<bool>,
+    
+    // -- Orchestration status chunk fields --
+    /// Current iteration number (for orchestration_status chunks)
+    pub iteration: Option<u32>,
+    /// Maximum iterations allowed (for orchestration_status chunks)
+    pub max_iterations: Option<u32>,
+    
+    // -- User prompt chunk fields --
+    /// Unique ID for this prompt (for user_prompt chunks)
+    pub prompt_id: Option<String>,
+    /// Type of prompt (for user_prompt chunks)
+    pub prompt_type: Option<String>,
+    /// Title for the prompt (for user_prompt chunks)
+    pub title: Option<String>,
+    /// Message for the prompt (for user_prompt chunks, also used for status messages)
+    pub message: Option<String>,
+    /// Available options (for user_prompt chunks)
+    pub options: Option<Vec<PromptOption>>,
+    /// Context data as JSON string (for user_prompt chunks)
+    pub context: Option<String>,
+    
+    // -- Done chunk fields --
+    /// Summary (for done chunks)
+    pub summary: Option<String>,
+    
+    // -- Error chunk fields --
+    /// Whether the error is recoverable (for error chunks)
+    pub recoverable: Option<bool>,
 }
 
 impl From<CoreStreamChunk> for StreamChunk {
     fn from(chunk: CoreStreamChunk) -> Self {
+        let default = Self {
+            chunk_type: String::new(),
+            text: None,
+            tool_call: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_input_delta: None,
+            tool_arguments: None,
+            tool_result: None,
+            is_error: None,
+            iteration: None,
+            max_iterations: None,
+            prompt_id: None,
+            prompt_type: None,
+            title: None,
+            message: None,
+            options: None,
+            context: None,
+            summary: None,
+            recoverable: None,
+        };
+        
         match chunk {
             CoreStreamChunk::Text { text } => Self {
                 chunk_type: "text".to_string(),
                 text: Some(text),
-                tool_call: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_input_delta: None,
+                ..default
             },
             CoreStreamChunk::ToolCall { tool_call } => Self {
                 chunk_type: "tool_call".to_string(),
-                text: None,
                 tool_call: Some(ToolCall {
                     id: tool_call.id,
                     name: tool_call.name,
                     input: tool_call.input.to_string(),
                 }),
-                tool_call_id: None,
-                tool_name: None,
-                tool_input_delta: None,
+                ..default
             },
             CoreStreamChunk::ToolCallDelta { id, name, input_delta } => Self {
                 chunk_type: "tool_call_delta".to_string(),
-                text: None,
-                tool_call: None,
                 tool_call_id: Some(id),
                 tool_name: name,
                 tool_input_delta: input_delta,
+                ..default
+            },
+            CoreStreamChunk::ToolExecuting { id, name, arguments } => Self {
+                chunk_type: "tool_executing".to_string(),
+                tool_call_id: Some(id),
+                tool_name: Some(name),
+                tool_arguments: Some(arguments),
+                ..default
+            },
+            CoreStreamChunk::ToolResult { id, name, result, is_error } => Self {
+                chunk_type: "tool_result".to_string(),
+                tool_call_id: Some(id),
+                tool_name: Some(name),
+                tool_result: Some(result),
+                is_error: Some(is_error),
+                ..default
+            },
+            CoreStreamChunk::OrchestrationStatus { iteration, max_iterations, message } => Self {
+                chunk_type: "orchestration_status".to_string(),
+                iteration: Some(iteration),
+                max_iterations: Some(max_iterations),
+                message: Some(message),
+                ..default
+            },
+            CoreStreamChunk::UserPrompt { prompt_id, prompt_type, title, message, options, context } => Self {
+                chunk_type: "user_prompt".to_string(),
+                prompt_id: Some(prompt_id),
+                prompt_type: Some(prompt_type),
+                title: Some(title),
+                message: Some(message),
+                options: Some(options.into_iter().map(|o| PromptOption {
+                    id: o.id,
+                    label: o.label,
+                    is_default: o.is_default,
+                }).collect()),
+                context: context.map(|c| c.to_string()),
+                ..default
+            },
+            CoreStreamChunk::Done { summary } => Self {
+                chunk_type: "done".to_string(),
+                summary,
+                ..default
+            },
+            CoreStreamChunk::Error { message, recoverable } => Self {
+                chunk_type: "error".to_string(),
+                message: Some(message),
+                recoverable: Some(recoverable),
+                ..default
             },
         }
     }
@@ -689,6 +923,12 @@ fn convert_options_to_core(options: Option<StreamChatOptions>) -> CoreStreamChat
 /// 
 /// Supported providers: openai, anthropic, gemini, ollama, groq, xai, deepseek,
 /// cohere, fireworks, together, azure, openrouter, mistral, redhat, mock
+/// 
+/// For mock provider, the model parameter in streamChat configures the behavior:
+/// - "echo" or "mock-echo": Echoes back the user's message
+/// - "fixed" or "fixed:response text": Returns a fixed response
+/// - "error" or "error:message": Simulates an error
+/// - "empty": Returns an empty response
 #[napi]
 pub struct LlmProvider {
     inner: Box<dyn openllm_core::providers::Provider>,
@@ -795,417 +1035,20 @@ pub fn get_supported_providers() -> Vec<String> {
     core_supported_providers().iter().map(|s| s.to_string()).collect()
 }
 
-// ============================================================================
-// Legacy Provider Aliases (for backwards compatibility)
-// These are thin wrappers around LlmProvider for existing code
-// ============================================================================
-
-/// OpenAI provider (alias for LlmProvider("openai"))
-#[napi]
-pub struct OpenAIProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl OpenAIProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("openai".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// Anthropic provider (alias for LlmProvider("anthropic"))
-#[napi]
-pub struct AnthropicProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl AnthropicProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("anthropic".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// Gemini provider (alias for LlmProvider("gemini"))
-#[napi]
-pub struct GeminiProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl GeminiProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("gemini".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// Ollama provider (alias for LlmProvider("ollama"))
-#[napi]
-pub struct OllamaProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl OllamaProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("ollama".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// Mistral provider (alias for LlmProvider("mistral"))
-#[napi]
-pub struct MistralProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl MistralProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("mistral".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// Azure OpenAI provider (alias for LlmProvider("azure"))
-#[napi]
-pub struct AzureOpenAIProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl AzureOpenAIProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("azure".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-/// OpenRouter provider (alias for LlmProvider("openrouter"))
-#[napi]
-pub struct OpenRouterProvider {
-    inner: LlmProvider,
-}
-
-#[napi]
-impl OpenRouterProvider {
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        Self { inner: LlmProvider::new("openrouter".to_string()) }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String { self.inner.name() }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata { self.inner.metadata() }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        self.inner.stream_chat(messages, config, options, callback).await
-    }
-}
-
-// ============================================================================
-// Mock Provider (for testing)
-// ============================================================================
-
-/// Mock mode for testing
-#[napi(string_enum)]
-pub enum MockModeEnum {
-    /// Echo back the last user message
-    Echo,
-    /// Return a fixed response (set via fixed_response)
-    Fixed,
-    /// Return nothing
-    Empty,
-    /// Return an error (set via error_message)
-    Error,
-}
-
-/// Configuration for mock provider
-#[napi(object)]
-pub struct MockProviderConfig {
-    /// Response mode
-    pub mode: MockModeEnum,
-    /// Delay between chunks in milliseconds
-    pub chunk_delay_ms: Option<u32>,
-    /// Size of each chunk
-    pub chunk_size: Option<u32>,
-    /// Fixed response (for Fixed mode)
-    pub fixed_response: Option<String>,
-    /// Error message (for Error mode)
-    pub error_message: Option<String>,
-    /// Custom chunks (for explicit chunk control)
-    pub chunks: Option<Vec<String>>,
-}
-
-/// Mock provider for testing streaming without network calls
-#[napi]
-pub struct MockProvider {
-    inner: CoreMockProvider,
-}
-
-#[napi]
-impl MockProvider {
-    /// Create a new mock provider with default echo mode
-    #[napi(constructor)]
-    pub fn new() -> Self {
-        let logger = Arc::new(NoOpLogger::new());
-        Self {
-            inner: CoreMockProvider::echo(logger),
-        }
-    }
-
-    /// Create with configuration
-    #[napi(factory)]
-    pub fn with_config(config: MockProviderConfig) -> Self {
-        let logger: Arc<dyn Logger> = Arc::new(NoOpLogger::new());
-        
-        let mode = match config.mode {
-            MockModeEnum::Echo => CoreMockMode::Echo,
-            MockModeEnum::Fixed => {
-                CoreMockMode::Fixed(config.fixed_response.unwrap_or_else(|| "Mock response".to_string()))
-            }
-            MockModeEnum::Empty => CoreMockMode::Empty,
-            MockModeEnum::Error => CoreMockMode::Error {
-                message: config.error_message.unwrap_or_else(|| "Mock error".to_string()),
-                delay_chunks: 0,
-            },
-        };
-        
-        let core_config = CoreMockConfig {
-            mode,
-            chunk_delay_ms: config.chunk_delay_ms.unwrap_or(0) as u64,
-            chunk_size: config.chunk_size.unwrap_or(10) as usize,
-        };
-        
-        Self {
-            inner: CoreMockProvider::with_config(core_config, logger),
-        }
-    }
-
-    /// Create an echo provider
-    #[napi(factory)]
-    pub fn echo() -> Self {
-        let logger = Arc::new(NoOpLogger::new());
-        Self {
-            inner: CoreMockProvider::echo(logger),
-        }
-    }
-
-    /// Create a fixed response provider
-    #[napi(factory)]
-    pub fn fixed(response: String) -> Self {
-        let logger = Arc::new(NoOpLogger::new());
-        Self {
-            inner: CoreMockProvider::fixed(response, logger),
-        }
-    }
-
-    /// Create a chunked response provider
-    #[napi(factory)]
-    pub fn chunked(chunks: Vec<String>, delay_ms: u32) -> Self {
-        let logger = Arc::new(NoOpLogger::new());
-        Self {
-            inner: CoreMockProvider::chunked(chunks, delay_ms as u64, logger),
-        }
-    }
-
-    /// Create an error provider
-    #[napi(factory)]
-    pub fn error(message: String) -> Self {
-        let logger = Arc::new(NoOpLogger::new());
-        Self {
-            inner: CoreMockProvider::error(message, logger),
-        }
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String {
-        self.inner.name().to_string()
-    }
-
-    #[napi]
-    pub fn metadata(&self) -> ProviderMetadata {
-        self.inner.metadata().into()
-    }
-
-    #[napi]
-    pub async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderRequestConfig,
-        options: Option<StreamChatOptions>,
-        #[napi(ts_arg_type = "(err: Error | null, chunk: StreamChunk | null) => void")]
-        callback: ThreadsafeFunction<StreamChunk>,
-    ) -> Result<()> {
-        openllm_core::logging::info("napi", "MockProvider.stream_chat called");
-        
-        let core_messages = convert_messages_to_core(messages);
-        let core_config = CoreProviderModelConfig {
-            model: config.model,
-            api_key: config.api_key,
-            api_base: config.api_base,
-        };
-        let core_options = convert_options_to_core(options);
-        let cancel_token = CoreCancellationToken::new();
-
-        openllm_core::logging::info("napi", "MockProvider: calling inner.stream_chat");
-        
-        let stream_result = self.inner
-            .stream_chat(core_messages, core_config, core_options, cancel_token)
-            .await
-            .map_err(|e| {
-                openllm_core::logging::error("napi", &format!("MockProvider: stream_chat error: {}", e));
-                Error::from_reason(e.to_string())
-            })?;
-
-        openllm_core::logging::info("napi", "MockProvider: got stream, iterating chunks");
-        
-        let mut stream = stream_result;
-        let mut chunk_count = 0;
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
-                    chunk_count += 1;
-                    openllm_core::logging::debug("napi", &format!("MockProvider: chunk {}", chunk_count));
-                    let js_chunk: StreamChunk = chunk.into();
-                    callback.call(Ok(js_chunk), ThreadsafeFunctionCallMode::Blocking);
-                }
-                Err(e) => {
-                    openllm_core::logging::error("napi", &format!("MockProvider: chunk error: {}", e));
-                    callback.call(
-                        Err(Error::from_reason(e.to_string())),
-                        ThreadsafeFunctionCallMode::Blocking,
-                    );
-                    break;
-                }
-            }
-        }
-
-        openllm_core::logging::info("napi", &format!("MockProvider: stream complete, {} chunks", chunk_count));
-        Ok(())
-    }
-}
+// Note: Provider-specific classes (OpenAIProvider, AnthropicProvider, MockProvider, etc.)
+// have been removed. Use the generic LlmProvider class with a provider ID string instead:
+//   new LlmProvider("openai")
+//   new LlmProvider("anthropic")
+//   new LlmProvider("gemini")
+//   new LlmProvider("mock")
+//   etc.
+// This provides a normalized interface where callers don't need to know about provider-specific classes.
+// 
+// For mock provider, configure behavior via the model parameter:
+//   streamChat(messages, { model: "echo" }, ...)   // echoes user message
+//   streamChat(messages, { model: "fixed:Hello" }, ...)  // returns "Hello"
+//   streamChat(messages, { model: "error:Oops" }, ...)   // simulates error
+//   streamChat(messages, { model: "empty" }, ...)  // returns empty response
 
 // ============================================================================
 // Factory Function for Dynamic Provider Creation
@@ -1277,197 +1120,16 @@ pub async fn stream_chat_with_provider(
 }
 
 // ============================================================================
-// RPC Endpoint Registration
+// MCP Endpoint Registration
 // ============================================================================
-
-/// Configuration for registering an RPC endpoint
-#[napi(object)]
-pub struct RpcEndpointConfig {
-    /// Name of the endpoint (e.g., "vscode")
-    pub name: String,
-    /// Path to the Unix socket or named pipe
-    pub socket_path: String,
-    /// Authentication token
-    pub auth_token: String,
-    /// Capabilities this endpoint supports (e.g., ["secrets", "config"])
-    pub capabilities: Vec<String>,
-}
-
-/// Register an RPC endpoint for external secret/config access
-/// 
-/// This is called by VS Code or other IDEs to register their JSON-RPC server
-/// so that openllm-core can access their secrets and config.
-#[napi]
-pub fn register_rpc_endpoint(config: RpcEndpointConfig) -> Result<()> {
-    let endpoint = CoreRpcEndpoint::new(
-        config.name,
-        config.socket_path,
-        config.auth_token,
-        config.capabilities,
-    );
-    core_register_rpc_endpoint(endpoint);
-    Ok(())
-}
-
-/// Unregister an RPC endpoint by name
-#[napi]
-pub fn unregister_rpc_endpoint(name: String) -> Result<bool> {
-    use openllm_core::rpc::endpoint::unregister_rpc_endpoint;
-    Ok(unregister_rpc_endpoint(&name).is_some())
-}
-
-/// List all registered RPC endpoints
-#[napi]
-pub fn list_rpc_endpoints() -> Vec<String> {
-    use openllm_core::rpc::endpoint::list_rpc_endpoints;
-    list_rpc_endpoints()
-}
-
-/// Check if an RPC endpoint is registered and reachable
-#[napi]
-pub fn is_rpc_endpoint_available(name: String) -> bool {
-    if let Some(endpoint) = core_get_rpc_endpoint(&name) {
-        let store = CoreRpcSecretStore::new(&endpoint);
-        store.is_reachable()
-    } else {
-        false
-    }
-}
-
-/// RPC-backed secret store for accessing secrets from external providers
-#[napi]
-pub struct RpcSecretStore {
-    inner: Arc<CoreRpcSecretStore>,
-}
-
-#[napi]
-impl RpcSecretStore {
-    /// Create an RPC secret store from a registered endpoint
-    #[napi(factory)]
-    pub fn from_endpoint(endpoint_name: String) -> Result<Self> {
-        let endpoint = core_get_rpc_endpoint(&endpoint_name)
-            .ok_or_else(|| Error::from_reason(format!("Endpoint '{}' not registered", endpoint_name)))?;
-        Ok(Self {
-            inner: Arc::new(CoreRpcSecretStore::new(&endpoint)),
-        })
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String {
-        self.inner.name().to_string()
-    }
-
-    #[napi]
-    pub fn is_available(&self) -> bool {
-        self.inner.is_reachable()
-    }
-
-    #[napi]
-    pub async fn get(&self, key: String) -> Option<String> {
-        self.inner.get(&key)
-    }
-
-    #[napi]
-    pub async fn store(&self, key: String, value: String) -> Result<()> {
-        self.inner.store(&key, &value).map_err(|e| Error::from_reason(e.to_string()))
-    }
-
-    #[napi]
-    pub async fn delete(&self, key: String) -> Result<()> {
-        self.inner.delete(&key).map_err(|e| Error::from_reason(e.to_string()))
-    }
-
-    #[napi]
-    pub async fn has(&self, key: String) -> bool {
-        self.inner.has(&key)
-    }
-
-    #[napi]
-    pub async fn get_info(&self, key: String) -> SecretInfo {
-        self.inner.get_info(&key).into()
-    }
-
-    #[napi]
-    pub fn list_keys(&self) -> Result<Vec<String>> {
-        self.inner.list_keys().map_err(|e| Error::from_reason(e.to_string()))
-    }
-}
-
-/// RPC config provider result
-#[napi(object)]
-pub struct RpcProviderConfig {
-    pub name: String,
-    pub enabled: bool,
-    pub models: Vec<String>,
-    pub api_base: Option<String>,
-    pub source: String,
-    pub source_detail: String,
-}
-
-/// RPC-backed config provider for accessing config from external providers
-#[napi]
-pub struct RpcConfigProvider {
-    inner: CoreRpcConfigProvider,
-}
-
-#[napi]
-impl RpcConfigProvider {
-    /// Create an RPC config provider from a registered endpoint
-    #[napi(factory)]
-    pub fn from_endpoint(endpoint_name: String) -> Result<Self> {
-        let endpoint = core_get_rpc_endpoint(&endpoint_name)
-            .ok_or_else(|| Error::from_reason(format!("Endpoint '{}' not registered", endpoint_name)))?;
-        Ok(Self {
-            inner: CoreRpcConfigProvider::new(&endpoint),
-        })
-    }
-
-    #[napi(getter)]
-    pub fn name(&self) -> String {
-        self.inner.name().to_string()
-    }
-
-    #[napi]
-    pub fn is_available(&self) -> bool {
-        self.inner.is_reachable()
-    }
-
-    #[napi]
-    pub fn get_providers(&self, scope: String, workspace_path: Option<String>) -> Result<Vec<RpcProviderConfig>> {
-        let path = workspace_path.map(std::path::PathBuf::from);
-        let providers = self.inner.get_providers(&scope, path.as_deref())
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        Ok(providers.into_iter().map(|p| RpcProviderConfig {
-            name: p.name,
-            enabled: p.enabled,
-            models: p.models,
-            api_base: p.api_base,
-            source: p.source,
-            source_detail: p.source_detail,
-        }).collect())
-    }
-
-    #[napi]
-    pub fn get_provider(&self, provider: String, scope: String, workspace_path: Option<String>) -> Result<Option<RpcProviderConfig>> {
-        let path = workspace_path.map(std::path::PathBuf::from);
-        let provider_config = self.inner.get_provider(&provider, &scope, path.as_deref())
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        Ok(provider_config.map(|p| RpcProviderConfig {
-            name: p.name,
-            enabled: p.enabled,
-            models: p.models,
-            api_base: p.api_base,
-            source: p.source,
-            source_detail: p.source_detail,
-        }))
-    }
-
-    #[napi]
-    pub fn get_workspace_root(&self) -> Result<Option<String>> {
-        self.inner.get_workspace_root()
-            .map_err(|e| Error::from_reason(e.to_string()))
-    }
-}
+// 
+// RPC has been replaced with MCP (Model Context Protocol) for VS Code communication.
+// The MCP client in openllm-core connects to the VS Code MCP server for:
+// - Secret management (API keys)
+// - Configuration (provider settings)
+// - Tool orchestration
+//
+// See the mcp module in openllm-core for the implementation.
 
 // ============================================================================
 // Unified Resolvers
@@ -2030,4 +1692,512 @@ pub fn clear_debug_log() {
 #[napi]
 pub fn debug_log(module: String, message: String) {
     openllm_core::logging::info(&module, &message);
+}
+
+// ============================================================================
+// Unified Chat Function (Simple API)
+// ============================================================================
+
+/// Configuration for the chat() function
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct ChatConfig {
+    /// Provider ID (e.g., "openai", "anthropic", "vscode")
+    pub provider: String,
+    /// Model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+    pub model: String,
+    /// API key for authentication (optional for some providers)
+    pub api_key: Option<String>,
+    /// Custom API base URL (optional)
+    pub api_base: Option<String>,
+    /// Maximum tool calling iterations (default: 10)
+    pub max_tool_iterations: Option<u32>,
+    /// Whether to include tools from MCP (default: true if MCP is registered)
+    pub enable_tools: Option<bool>,
+}
+
+/// Unified chat function - the simplest way to chat with any LLM
+/// 
+/// This function handles everything:
+/// 1. Creates the appropriate provider based on config.provider
+/// 2. Connects to MCP for tools (if registered)
+/// 3. Runs the tool orchestration loop
+/// 4. Streams all events back via the callback
+/// 
+/// ## Example
+/// 
+/// ```typescript
+/// import { chat } from '@openllm/native';
+/// 
+/// await chat(
+///   [{ role: 'user', content: 'Hello!' }],
+///   { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-...' },
+///   (chunk) => {
+///     if (chunk.chunkType === 'text') {
+///       process.stdout.write(chunk.text);
+///     }
+///   }
+/// );
+/// ```
+#[napi]
+pub async fn chat(
+    messages: Vec<ChatMessage>,
+    config: ChatConfig,
+    #[napi(ts_arg_type = "(chunk: StreamChunk) => void")]
+    callback: ThreadsafeFunction<StreamChunk, ErrorStrategy::CalleeHandled>,
+) -> Result<()> {
+    openllm_core::logging::info("napi", &format!(
+        "chat: provider={}, model={}", config.provider, config.model
+    ));
+    
+    let logger: Arc<dyn Logger> = Arc::new(NoOpLogger::new());
+    
+    // Create the provider
+    let provider = core_create_provider(&config.provider, Arc::clone(&logger));
+    let provider_arc: Arc<dyn openllm_core::providers::Provider> = Arc::from(provider);
+    
+    // Convert messages
+    let core_messages: Vec<CoreChatMessage> = messages.iter()
+        .map(|m| {
+            let role = match m.role {
+                MessageRole::System => CoreMessageRole::System,
+                MessageRole::User => CoreMessageRole::User,
+                MessageRole::Assistant => CoreMessageRole::Assistant,
+            };
+            CoreChatMessage {
+                role,
+                content: CoreMessageContent::Text(m.content.clone()),
+            }
+        })
+        .collect();
+    
+    // Build model config
+    let mut core_model = CoreProviderModelConfig::new(&config.model);
+    if let Some(ref api_key) = config.api_key {
+        core_model = core_model.with_api_key(api_key.clone());
+    }
+    if let Some(ref api_base) = config.api_base {
+        core_model = core_model.with_api_base(api_base.clone());
+    }
+    
+    // Build options
+    let core_options = CoreStreamChatOptions::new();
+    
+    // Check if we should use MCP for tools
+    let enable_tools = config.enable_tools.unwrap_or(true);
+    let mcp_available = has_mcp_endpoint("vscode".to_string());
+    
+    if enable_tools && mcp_available {
+        // Use orchestrator with tools
+        openllm_core::logging::info("napi", "chat: using orchestrator with MCP tools");
+        
+        // Get MCP client
+        let mcp_client = get_or_create_mcp_client_async().await
+            .map_err(|e| Error::from_reason(format!("Failed to connect to MCP: {}", e)))?;
+        
+        // Create tool registry
+        let mut tool_registry = openllm_core::ToolRegistry::new(Arc::clone(&logger));
+        tool_registry.set_client(mcp_client);
+        tool_registry.refresh().await
+            .map_err(|e| Error::from_reason(format!("Failed to refresh tools: {}", e)))?;
+        
+        openllm_core::logging::info("napi", &format!(
+            "chat: found {} tools", tool_registry.tool_count()
+        ));
+        
+        // Create orchestrator
+        let max_iterations = config.max_tool_iterations.unwrap_or(10);
+        let orchestrator_config = openllm_core::OrchestratorConfig::default()
+            .with_max_iterations(max_iterations)
+            .with_continue_on_error(true)
+            .with_emit_status(true);
+        
+        let orchestrator = Arc::new(openllm_core::ChatOrchestrator::new(
+            Arc::new(tool_registry),
+            Arc::clone(&logger),
+            orchestrator_config,
+        ));
+        
+        // Stream with orchestration
+        let cancel_token = CoreCancellationToken::new();
+        let mut stream = orchestrator.stream_chat(
+            provider_arc,
+            core_messages,
+            core_model,
+            core_options,
+            cancel_token,
+        );
+        
+        while let Some(chunk) = stream.next().await {
+            // chunk is already CoreStreamChunk
+            let napi_chunk: StreamChunk = chunk.into();
+            callback.call(Ok(napi_chunk), ThreadsafeFunctionCallMode::NonBlocking);
+        }
+    } else {
+        // Simple streaming without tools
+        openllm_core::logging::info("napi", "chat: using simple streaming (no tools)");
+        
+        let cancel_token = CoreCancellationToken::new();
+        let stream_result = provider_arc
+            .stream_chat(core_messages, core_model, core_options, cancel_token)
+            .await;
+        
+        let mut stream = stream_result.map_err(|e| Error::from_reason(e.to_string()))?;
+        
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    let napi_chunk: StreamChunk = chunk.into();
+                    callback.call(Ok(napi_chunk), ThreadsafeFunctionCallMode::NonBlocking);
+                }
+                Err(e) => {
+                    callback.call(
+                        Err(Error::from_reason(e.to_string())),
+                        ThreadsafeFunctionCallMode::NonBlocking,
+                    );
+                    break;
+                }
+            }
+        }
+    }
+    
+    openllm_core::logging::info("napi", "chat: complete");
+    Ok(())
+}
+
+// ============================================================================
+// Chat Orchestrator (Advanced API - kept for flexibility)
+// ============================================================================
+
+/// Configuration for the chat orchestrator
+#[napi(object)]
+pub struct OrchestratorConfig {
+    /// Maximum number of tool calling iterations (default: 10)
+    pub max_iterations: Option<u32>,
+    /// Whether to continue on tool errors (default: true)
+    pub continue_on_error: Option<bool>,
+    /// Whether to emit orchestration status chunks (default: true)
+    pub emit_status: Option<bool>,
+}
+
+impl Default for OrchestratorConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: None,
+            continue_on_error: None,
+            emit_status: None,
+        }
+    }
+}
+
+impl From<OrchestratorConfig> for openllm_core::OrchestratorConfig {
+    fn from(config: OrchestratorConfig) -> Self {
+        let mut core_config = openllm_core::OrchestratorConfig::default();
+        if let Some(max) = config.max_iterations {
+            core_config = core_config.with_max_iterations(max);
+        }
+        if let Some(continue_on_error) = config.continue_on_error {
+            core_config = core_config.with_continue_on_error(continue_on_error);
+        }
+        if let Some(emit_status) = config.emit_status {
+            core_config = core_config.with_emit_status(emit_status);
+        }
+        core_config
+    }
+}
+
+/// User response to a prompt
+#[napi(object)]
+pub struct UserPromptResponse {
+    /// The prompt ID this is responding to
+    pub prompt_id: String,
+    /// The selected option ID
+    pub selected_option: String,
+}
+
+/// Chat orchestrator that manages the complete tool calling flow
+/// 
+/// The orchestrator handles:
+/// - Streaming responses from the LLM
+/// - Detecting and executing tool calls
+/// - Adding tool results to the conversation
+/// - Continuing until no more tool calls or max iterations
+/// 
+/// ## Example
+/// 
+/// ```typescript
+/// const orchestrator = new ChatOrchestrator(toolRegistry, logger, {
+///   maxIterations: 10,
+///   continueOnError: true,
+///   emitStatus: true,
+/// });
+/// 
+/// const stream = await orchestrator.streamChat(
+///   provider,
+///   messages,
+///   { model: "gpt-4" },
+///   {},
+///   (chunk) => {
+///     switch (chunk.chunkType) {
+///       case "text":
+///         console.log(chunk.text);
+///         break;
+///       case "tool_executing":
+///         console.log(`Running tool: ${chunk.toolName}`);
+///         break;
+///       case "tool_result":
+///         console.log(`Tool result: ${chunk.toolResult}`);
+///         break;
+///       case "user_prompt":
+///         // Handle user approval request
+///         break;
+///     }
+///   }
+/// );
+/// ```
+#[napi]
+pub struct ChatOrchestrator {
+    inner: Arc<openllm_core::ChatOrchestrator>,
+}
+
+#[napi]
+impl ChatOrchestrator {
+    /// Create a new chat orchestrator
+    /// 
+    /// @param config - Optional configuration for the orchestrator
+    #[napi(constructor)]
+    pub fn new(config: Option<OrchestratorConfig>) -> Result<Self> {
+        let core_config: openllm_core::OrchestratorConfig = config.unwrap_or_default().into();
+        let logger: Arc<dyn Logger> = Arc::new(NoOpLogger);
+        
+        // Create a tool registry - in practice, this would be shared
+        let tool_registry = Arc::new(openllm_core::ToolRegistry::new(logger.clone()));
+        
+        let orchestrator = openllm_core::ChatOrchestrator::new(
+            tool_registry,
+            logger,
+            core_config,
+        );
+        
+        Ok(Self {
+            inner: Arc::new(orchestrator),
+        })
+    }
+    
+    /// Create a new chat orchestrator with a shared tool registry
+    #[napi(factory)]
+    pub fn with_tool_registry(
+        tool_registry: &ToolRegistry,
+        config: Option<OrchestratorConfig>,
+    ) -> Result<Self> {
+        let core_config: openllm_core::OrchestratorConfig = config.unwrap_or_default().into();
+        let logger: Arc<dyn Logger> = Arc::new(NoOpLogger);
+        
+        let orchestrator = openllm_core::ChatOrchestrator::new(
+            tool_registry.inner.clone(),
+            logger,
+            core_config,
+        );
+        
+        Ok(Self {
+            inner: Arc::new(orchestrator),
+        })
+    }
+    
+    /// Stream chat with full tool orchestration
+    /// 
+    /// This method handles the complete tool calling loop:
+    /// 1. Send messages to the LLM
+    /// 2. Stream the response
+    /// 3. If tool calls are detected, execute them
+    /// 4. Add tool results to the conversation
+    /// 5. Continue until no more tool calls
+    /// 
+    /// Stream chat with provider specified by config
+    /// 
+    /// This is the main entry point for TypeScript callers. It creates the provider
+    /// based on config.provider and handles the orchestration loop.
+    /// 
+    /// @param messages - The conversation messages
+    /// @param config - Configuration including provider ID, model, API key, etc.
+    /// @param options - Streaming options (tools, temperature, etc.)
+    /// @param callback - Callback function called for each stream chunk
+    #[napi]
+    pub async fn stream_chat(
+        &self,
+        messages: Vec<ChatMessage>,
+        config: ChatRequestConfig,
+        options: Option<StreamChatOptions>,
+        #[napi(ts_arg_type = "(chunk: StreamChunk) => void")]
+        callback: ThreadsafeFunction<StreamChunk, ErrorStrategy::CalleeHandled>,
+    ) -> Result<()> {
+        use futures::StreamExt;
+        
+        // Create provider from config
+        let logger: Arc<dyn Logger> = Arc::new(NoOpLogger::new());
+        let provider = openllm_core::providers::create_provider(&config.provider, logger);
+        
+        // Convert messages
+        let core_messages: Vec<CoreChatMessage> = messages.iter()
+            .map(|m| {
+                let role = match m.role {
+                    MessageRole::System => CoreMessageRole::System,
+                    MessageRole::User => CoreMessageRole::User,
+                    MessageRole::Assistant => CoreMessageRole::Assistant,
+                };
+                CoreChatMessage {
+                    role,
+                    content: CoreMessageContent::Text(m.content.clone()),
+                }
+            })
+            .collect();
+        
+        // Build model config
+        let mut core_model = CoreProviderModelConfig::new(&config.model);
+        if let Some(ref api_key) = config.api_key {
+            core_model = core_model.with_api_key(api_key.clone());
+        }
+        if let Some(ref api_base) = config.api_base {
+            core_model = core_model.with_api_base(api_base.clone());
+        }
+        
+        // Build options
+        let opts = options.unwrap_or_default();
+        let mut core_options = CoreStreamChatOptions::new();
+        if let Some(temp) = opts.temperature {
+            core_options = core_options.with_temperature(temp as f32);
+        }
+        if let Some(max) = opts.max_tokens {
+            core_options = core_options.with_max_tokens(max);
+        }
+        if let Some(stop) = opts.stop {
+            core_options = core_options.with_stop(stop);
+        }
+        
+        // Create cancel token
+        let cancel_token = CoreCancellationToken::new();
+        
+        // Create provider Arc
+        let provider_arc: Arc<dyn openllm_core::providers::Provider> = Arc::from(provider);
+        
+        // Stream with orchestration
+        let mut stream = self.inner.clone().stream_chat(
+            provider_arc,
+            core_messages,
+            core_model,
+            core_options,
+            cancel_token,
+        );
+        
+        while let Some(chunk) = stream.next().await {
+            let napi_chunk: StreamChunk = chunk.into();
+            callback.call(Ok(napi_chunk), ThreadsafeFunctionCallMode::NonBlocking);
+        }
+        
+        Ok(())
+    }
+}
+
+/// Configuration for ChatOrchestrator.streamChat - specifies provider and model
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct ChatRequestConfig {
+    /// Provider ID (e.g., "openai", "anthropic", "vscode")
+    pub provider: String,
+    /// Model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+    pub model: String,
+    /// API key for authentication (optional for some providers)
+    pub api_key: Option<String>,
+    /// Custom API base URL (optional)
+    pub api_base: Option<String>,
+}
+
+// ============================================================================
+// Tool Registry (exposed for orchestrator)
+// ============================================================================
+
+/// Tool registry for managing available tools from MCP servers
+/// 
+/// The registry connects to registered MCP endpoints to discover and execute tools.
+/// Call `registerMcpEndpoint()` before creating a ToolRegistry to enable tool discovery.
+/// 
+/// ## Example
+/// ```typescript
+/// // First, register the MCP endpoint (done by extension on startup)
+/// native.registerMcpEndpoint({
+///   name: 'vscode',
+///   socketPath: mcpInfo.socketPath,
+/// });
+/// 
+/// // Create registry and refresh tools
+/// const registry = new ToolRegistry();
+/// await registry.connectToMcp(); // Connect to registered endpoint
+/// await registry.refresh();      // Discover tools
+/// 
+/// console.log(`Found ${registry.toolCount} tools`);
+/// ```
+#[napi]
+pub struct ToolRegistry {
+    inner: Arc<openllm_core::ToolRegistry>,
+}
+
+#[napi]
+impl ToolRegistry {
+    /// Create a new tool registry
+    /// 
+    /// The registry is created without an MCP connection. Call `connectToMcp()`
+    /// to connect to a registered MCP endpoint for tool discovery.
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        let logger: Arc<dyn Logger> = Arc::new(NoOpLogger);
+        Self {
+            inner: Arc::new(openllm_core::ToolRegistry::new(logger)),
+        }
+    }
+    
+    /// Connect to a registered MCP endpoint for tool discovery and execution
+    /// 
+    /// This must be called after `registerMcpEndpoint()` has been called.
+    /// Returns an error if no MCP endpoint is registered.
+    #[napi]
+    pub async fn connect_to_mcp(&self) -> Result<()> {
+        let client = get_or_create_mcp_client_async().await?;
+        self.inner.set_client(client);
+        Ok(())
+    }
+    
+    /// Check if connected to an MCP endpoint
+    #[napi(getter)]
+    pub fn is_connected(&self) -> bool {
+        // The inner registry has a client if we've called set_client
+        self.inner.tool_count() > 0 || self.inner.enabled_tool_count() >= 0
+    }
+    
+    /// Refresh the tool list from all MCP sources
+    /// 
+    /// Requires `connectToMcp()` to have been called first.
+    #[napi]
+    pub async fn refresh(&self) -> Result<()> {
+        self.inner.refresh()
+            .await
+            .map_err(|e| Error::from_reason(e))
+    }
+    
+    /// Get count of available tools (including internal and disabled)
+    #[napi(getter)]
+    pub fn tool_count(&self) -> u32 {
+        self.inner.tool_count() as u32
+    }
+    
+    /// Get count of enabled, user-visible tools
+    #[napi(getter)]
+    pub fn enabled_tool_count(&self) -> u32 {
+        self.inner.enabled_tool_count() as u32
+    }
+    
+    /// Enable or disable a tool by name
+    #[napi]
+    pub fn set_tool_enabled(&self, name: String, enabled: bool) {
+        self.inner.set_tool_enabled(&name, enabled);
+    }
 }

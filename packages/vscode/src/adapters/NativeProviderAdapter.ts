@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { ModelConfig, Tool, StreamChunk } from '../types';
-import { MessageConverter } from './MessageConverter';
 import { getNative } from '../utils/nativeLoader';
 import { getLogger } from '../utils/logger';
 
@@ -287,42 +286,27 @@ export class NativeProviderAdapter {
 
 /**
  * Factory function to create native providers
+ * 
+ * Uses the unified LlmProvider interface - no need for provider-specific classes.
+ * The native module handles provider selection internally based on the provider name.
  */
 export function createNativeProvider(providerName: string): NativeProviderAdapter | null {
   try {
     // Try to load the native module
     const native = getNative();
     
-    let provider: NativeProvider | null = null;
-    
-    switch (providerName.toLowerCase()) {
-      case 'openai':
-        provider = new native.OpenAiProvider();
-        break;
-      case 'anthropic':
-        provider = new native.AnthropicProvider();
-        break;
-      case 'gemini':
-      case 'google':
-        provider = new native.GeminiProvider();
-        break;
-      case 'ollama':
-        provider = new native.OllamaProvider();
-        break;
-      case 'mistral':
-        provider = new native.MistralProvider();
-        break;
-      case 'azure':
-      case 'azure-openai':
-        provider = new native.AzureOpenAiProvider();
-        break;
-      case 'openrouter':
-        provider = new native.OpenRouterProvider();
-        break;
-      default:
-        return null;
+    // Normalize provider name for common aliases
+    let normalizedName = providerName.toLowerCase();
+    if (normalizedName === 'google') {
+      normalizedName = 'gemini';
+    } else if (normalizedName === 'azure-openai') {
+      normalizedName = 'azure';
     }
-
+    
+    // Use the unified LlmProvider interface
+    // This creates any supported provider without needing provider-specific classes
+    const provider = new native.LlmProvider(normalizedName);
+    
     if (provider) {
       return new NativeProviderAdapter(provider);
     }

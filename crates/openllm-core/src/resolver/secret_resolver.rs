@@ -2,13 +2,13 @@
 //!
 //! Checks sources in priority order:
 //! 1. Environment variables
-//! 2. RPC endpoints (VS Code, etc.)
+//! 2. MCP endpoints (VS Code, etc.)
 //! 3. System keychain
 //! 4. .env files
 
 use std::sync::Arc;
 use crate::secrets::{SecretStore, EnvSecretStore, KeychainSecretStore};
-use crate::rpc::{RpcSecretStore, get_rpc_endpoint};
+use crate::mcp::{McpClient, McpSecretStore};
 use crate::logging::file_logger as log;
 
 /// Result of resolving a secret
@@ -50,8 +50,8 @@ impl SecretsStore {
 pub struct UnifiedSecretResolver {
     /// Priority-ordered list of sources to check (legacy, will be removed)
     sources: Vec<Arc<dyn SecretStore>>,
-    /// RPC endpoint names to check
-    rpc_endpoints: Vec<String>,
+    /// MCP client for VS Code communication (optional)
+    mcp_client: Option<Arc<McpClient>>,
     /// User's preferred secrets store (set by host application)
     secrets_store: SecretsStore,
     /// Whether to check environment variables for secrets
@@ -68,18 +68,32 @@ impl UnifiedSecretResolver {
                 Arc::new(EnvSecretStore::new()),
                 Arc::new(KeychainSecretStore::new()),
             ],
-            rpc_endpoints: vec!["vscode".to_string()],
+            mcp_client: None,
             secrets_store: SecretsStore::default(),
             check_environment: true,  // Default to checking env vars
             check_dotenv: false,      // Default to not checking .env
         }
     }
 
-    /// Create with custom configuration (legacy - prefer using setters)
+    /// Create with an MCP client for VS Code communication
+    pub fn with_mcp_client(mcp_client: Arc<McpClient>) -> Self {
+        Self {
+            sources: vec![
+                Arc::new(EnvSecretStore::new()),
+                Arc::new(KeychainSecretStore::new()),
+            ],
+            mcp_client: Some(mcp_client),
+            secrets_store: SecretsStore::VsCode, // Default to VS Code when MCP is available
+            check_environment: true,
+            check_dotenv: false,
+        }
+    }
+
+    /// Create with custom configuration
     pub fn with_config(
         include_env: bool,
         include_keychain: bool,
-        rpc_endpoints: Vec<String>,
+        mcp_client: Option<Arc<McpClient>>,
     ) -> Self {
         let mut sources: Vec<Arc<dyn SecretStore>> = Vec::new();
         
@@ -92,11 +106,16 @@ impl UnifiedSecretResolver {
         
         Self {
             sources,
-            rpc_endpoints,
+            mcp_client,
             secrets_store: SecretsStore::default(),
             check_environment: include_env,
             check_dotenv: false,
         }
+    }
+
+    /// Set the MCP client for VS Code communication
+    pub fn set_mcp_client(&mut self, client: Arc<McpClient>) {
+        self.mcp_client = Some(client);
     }
 
     /// Set the secrets store preference
@@ -137,18 +156,13 @@ impl UnifiedSecretResolver {
         self.check_dotenv
     }
 
-    /// Add an RPC endpoint to check
-    pub fn add_rpc_endpoint(&mut self, name: impl Into<String>) {
-        self.rpc_endpoints.push(name.into());
-    }
-
-    /// Resolve a secret by key
+    /// Resolve a secret by key (sync version - for keychain only, use resolve_async for VS Code)
     ///
     /// Checks sources based on user preferences set by host application.
     /// Priority order:
     /// 1. Environment variables (if check_environment is true)
     /// 2. .env files (if check_dotenv is true)
-    /// 3. Primary store (VS Code RPC or system keychain based on secrets_store)
+    /// 3. Primary store (system keychain - VS Code requires async)
     pub fn resolve(&self, key: &str) -> Option<ResolvedSecret> {
         // Check environment variables if enabled
         if self.check_environment {
@@ -178,17 +192,15 @@ impl UnifiedSecretResolver {
         // Check primary store based on user preference
         match self.secrets_store {
             SecretsStore::VsCode => {
-                // Check VS Code RPC endpoints
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_store = RpcSecretStore::new(&endpoint);
-                        if let Some(value) = rpc_store.get(key) {
-                            return Some(ResolvedSecret {
-                                value,
-                                source: format!("rpc:{}", endpoint_name),
-                                source_detail: format!("{} SecretStorage", endpoint_name),
-                            });
-                        }
+                // VS Code requires async - check via MCP if we have a client
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_store = McpSecretStore::new("vscode", client.clone());
+                    if let Some(value) = mcp_store.get(key) {
+                        return Some(ResolvedSecret {
+                            value,
+                            source: "mcp:vscode".to_string(),
+                            source_detail: "VS Code SecretStorage".to_string(),
+                        });
                     }
                 }
             }
@@ -207,7 +219,7 @@ impl UnifiedSecretResolver {
             }
         }
 
-        // Legacy: check other registered sources (will be removed)
+        // Fallback: check other registered sources
         for store in &self.sources {
             // Skip env and keychain since we handle them above
             if store.name() == "environment" || store.name() == "keychain" {
@@ -228,7 +240,7 @@ impl UnifiedSecretResolver {
     /// Async resolve a secret by key (non-blocking for Node.js)
     /// 
     /// Respects the user's secrets_store preference:
-    /// - VsCode: Check RPC (VS Code SecretStorage)
+    /// - VsCode: Check MCP (VS Code SecretStorage)
     /// - Keychain: Check system keychain
     pub async fn resolve_async(&self, key: &str) -> Option<ResolvedSecret> {
         log::info("SecretResolver", &format!("resolve_async key='{}', secrets_store={:?}, check_env={}, check_dotenv={}", 
@@ -264,27 +276,25 @@ impl UnifiedSecretResolver {
         // Check primary store based on user preference
         match self.secrets_store {
             SecretsStore::VsCode => {
-                log::debug("SecretResolver", "Checking VsCode RPC...");
-                // Check VS Code RPC endpoints
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_store = RpcSecretStore::new(&endpoint);
-                        if rpc_store.is_reachable_async().await {
-                            if let Some(value) = rpc_store.get_async(key).await {
-                                log::info("SecretResolver", "Found in RPC");
-                                return Some(ResolvedSecret {
-                                    value,
-                                    source: format!("rpc:{}", endpoint_name),
-                                    source_detail: format!("{} SecretStorage", endpoint_name),
-                                });
-                            }
-                        }
+                log::debug("SecretResolver", "Checking VsCode via MCP...");
+                // Check VS Code via MCP
+                if let Some(ref client) = self.mcp_client {
+                    let mcp_store = McpSecretStore::new("vscode", client.clone());
+                    if let Some(value) = mcp_store.get_async(key).await {
+                        log::info("SecretResolver", "Found in MCP (VS Code)");
+                        return Some(ResolvedSecret {
+                            value,
+                            source: "mcp:vscode".to_string(),
+                            source_detail: "VS Code SecretStorage".to_string(),
+                        });
                     }
+                } else {
+                    log::warn("SecretResolver", "VS Code store selected but no MCP client available");
                 }
             }
             SecretsStore::Keychain => {
                 log::debug("SecretResolver", "Checking keychain...");
-                // Check system keychain only - NO RPC calls
+                // Check system keychain only - NO MCP calls
                 let keychain_store = KeychainSecretStore::new();
                 let available = keychain_store.is_available();
                 log::debug("SecretResolver", &format!("Keychain available: {}", available));
@@ -358,14 +368,12 @@ impl UnifiedSecretResolver {
     fn get_write_destination(&self) -> SecretWriteDestination {
         match self.secrets_store {
             SecretsStore::VsCode => {
-                // User wants VS Code SecretStorage - find an RPC endpoint
-                for endpoint_name in &self.rpc_endpoints {
-                    if get_rpc_endpoint(endpoint_name).is_some() {
-                        return SecretWriteDestination::Rpc(endpoint_name.clone());
-                    }
+                // User wants VS Code SecretStorage - check if MCP client available
+                if self.mcp_client.is_some() {
+                    return SecretWriteDestination::Mcp;
                 }
-                // VS Code selected but no RPC endpoint - shouldn't happen
-                eprintln!("Warning: VS Code secrets store selected but no RPC endpoint available");
+                // VS Code selected but no MCP client - shouldn't happen
+                eprintln!("Warning: VS Code secrets store selected but no MCP client available");
                 SecretWriteDestination::None
             }
             SecretsStore::Keychain => {
@@ -383,13 +391,12 @@ impl UnifiedSecretResolver {
     /// Store a secret, automatically routing to the best destination
     ///
     /// If `preferred_store` is "auto", routes to:
-    /// - RPC (VS Code) if available
+    /// - MCP (VS Code) if available
     /// - System keychain otherwise
     ///
     /// Otherwise, routes to the specified store:
-    /// - "rpc:vscode" → Store via RPC to VS Code
+    /// - "mcp:vscode" or "vscode" → Store via MCP to VS Code
     /// - "keychain" → Store in system keychain
-    /// - "rpc:<name>" → Store via any registered RPC endpoint
     pub fn store(&self, key: &str, value: &str, preferred_store: &str) -> Result<String, String> {
         log::info("SecretResolver", &format!("store() key='{}', preferred_store='{}', secrets_store={:?}", 
                   key, preferred_store, self.secrets_store));
@@ -399,22 +406,22 @@ impl UnifiedSecretResolver {
             let dest = self.get_write_destination();
             log::debug("SecretResolver", &format!("auto routing -> {:?}", dest));
             match dest {
-                SecretWriteDestination::Rpc(name) => {
-                    return self.store(key, value, &format!("rpc:{}", name));
+                SecretWriteDestination::Mcp => {
+                    return self.store(key, value, "mcp:vscode");
                 }
                 SecretWriteDestination::Keychain => {
                     return self.store(key, value, "keychain");
                 }
                 SecretWriteDestination::None => {
                     log::error("SecretResolver", "No secret store available");
-                    return Err("No secret store available (no RPC endpoint and keychain unavailable)".to_string());
+                    return Err("No secret store available (no MCP client and keychain unavailable)".to_string());
                 }
             }
         }
 
-        // Handle "vscode" as shorthand for "rpc:vscode"
+        // Handle "vscode" as shorthand for "mcp:vscode"
         if preferred_store == "vscode" {
-            return self.store(key, value, "rpc:vscode");
+            return self.store(key, value, "mcp:vscode");
         }
 
         if preferred_store == "keychain" {
@@ -436,21 +443,16 @@ impl UnifiedSecretResolver {
             }
         }
 
-        if let Some(endpoint_name) = preferred_store.strip_prefix("rpc:") {
-            if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                let rpc_store = RpcSecretStore::new(&endpoint);
-                if rpc_store.is_reachable() {
-                    rpc_store.store(key, value)
-                        .map_err(|e| e.to_string())?;
-                    log::info("SecretResolver", &format!("Stored via RPC: {}", endpoint_name));
-                    return Ok(format!("{} SecretStorage", endpoint_name));
-                } else {
-                    log::error("SecretResolver", &format!("RPC endpoint '{}' not reachable", endpoint_name));
-                    return Err(format!("RPC endpoint '{}' not reachable", endpoint_name));
-                }
+        if preferred_store.starts_with("mcp:") || preferred_store == "mcp" {
+            if let Some(ref client) = self.mcp_client {
+                let mcp_store = McpSecretStore::new("vscode", client.clone());
+                mcp_store.store(key, value)
+                    .map_err(|e| e.to_string())?;
+                log::info("SecretResolver", "Stored via MCP (VS Code)");
+                return Ok("VS Code SecretStorage".to_string());
             } else {
-                log::error("SecretResolver", &format!("RPC endpoint '{}' not registered", endpoint_name));
-                return Err(format!("RPC endpoint '{}' not registered", endpoint_name));
+                log::error("SecretResolver", "MCP client not available");
+                return Err("MCP client not available".to_string());
             }
         }
 
@@ -463,8 +465,8 @@ impl UnifiedSecretResolver {
         // Handle "auto" routing
         if preferred_store == "auto" {
             match self.get_write_destination() {
-                SecretWriteDestination::Rpc(name) => {
-                    return self.delete(key, &format!("rpc:{}", name));
+                SecretWriteDestination::Mcp => {
+                    return self.delete(key, "mcp:vscode");
                 }
                 SecretWriteDestination::Keychain => {
                     return self.delete(key, "keychain");
@@ -477,7 +479,7 @@ impl UnifiedSecretResolver {
 
         // Handle "vscode" as shorthand
         if preferred_store == "vscode" {
-            return self.delete(key, "rpc:vscode");
+            return self.delete(key, "mcp:vscode");
         }
 
         if preferred_store == "keychain" {
@@ -486,13 +488,13 @@ impl UnifiedSecretResolver {
             return Ok("System Keychain".to_string());
         }
 
-        if let Some(endpoint_name) = preferred_store.strip_prefix("rpc:") {
-            if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                let rpc_store = RpcSecretStore::new(&endpoint);
-                rpc_store.delete(key).map_err(|e| e.to_string())?;
-                return Ok(format!("{} SecretStorage", endpoint_name));
+        if preferred_store.starts_with("mcp:") || preferred_store == "mcp" {
+            if let Some(ref client) = self.mcp_client {
+                let mcp_store = McpSecretStore::new("vscode", client.clone());
+                mcp_store.delete(key).map_err(|e| e.to_string())?;
+                return Ok("VS Code SecretStorage".to_string());
             } else {
-                return Err(format!("RPC endpoint '{}' not registered", endpoint_name));
+                return Err("MCP client not available".to_string());
             }
         }
 
@@ -502,9 +504,9 @@ impl UnifiedSecretResolver {
     /// Get information about where a secret write would go
     pub fn get_write_destination_info(&self) -> (String, String) {
         match self.get_write_destination() {
-            SecretWriteDestination::Rpc(name) => (
-                format!("rpc:{}", name),
-                format!("{} SecretStorage", name),
+            SecretWriteDestination::Mcp => (
+                "mcp:vscode".to_string(),
+                "VS Code SecretStorage".to_string(),
             ),
             SecretWriteDestination::Keychain => (
                 "keychain".to_string(),
@@ -534,21 +536,11 @@ impl UnifiedSecretResolver {
     pub fn get_all_source_info(&self, keys: &[&str]) -> std::collections::HashMap<String, Option<(String, String, String)>> {
         let mut results = std::collections::HashMap::new();
         
-        // Pre-check store availability once based on preference
-        let rpc_available_endpoint: Option<(String, RpcSecretStore)> = if matches!(self.secrets_store, SecretsStore::VsCode) {
-            // Only check RPC when VsCode is selected
-            self.rpc_endpoints.iter().find_map(|name| {
-                get_rpc_endpoint(name).and_then(|ep| {
-                    let rpc_store = RpcSecretStore::new(&ep);
-                    if rpc_store.is_reachable() {
-                        Some((name.clone(), rpc_store))
-                    } else {
-                        None
-                    }
-                })
-            })
+        // Pre-check MCP store availability once based on preference
+        let mcp_store: Option<McpSecretStore> = if matches!(self.secrets_store, SecretsStore::VsCode) {
+            self.mcp_client.as_ref().map(|c| McpSecretStore::new("vscode", c.clone()))
         } else {
-            None // Don't check RPC at all for Keychain mode
+            None
         };
         
         // Check keychain availability once (only if Keychain mode)
@@ -586,12 +578,12 @@ impl UnifiedSecretResolver {
             // Try the configured store based on preference
             match self.secrets_store {
                 SecretsStore::VsCode => {
-                    // Try RPC if available
-                    if let Some((ref endpoint_name, ref rpc_store)) = rpc_available_endpoint {
-                        if rpc_store.get(key).is_some() {
+                    // Try MCP if available
+                    if let Some(ref store) = mcp_store {
+                        if store.get(key).is_some() {
                             results.insert(key.to_string(), Some((
                                 "secretStorage".to_string(),
-                                format!("{} SecretStorage", endpoint_name),
+                                "VS Code SecretStorage".to_string(),
                                 String::new(),
                             )));
                             continue;
@@ -626,8 +618,7 @@ impl UnifiedSecretResolver {
 
     /// List all available secret sources and their status
     /// 
-    /// Only checks sources relevant to the current secrets_store preference
-    /// to avoid unnecessary RPC calls.
+    /// Only checks sources relevant to the current secrets_store preference.
     pub fn list_sources(&self) -> Vec<(String, bool)> {
         let mut sources = Vec::new();
         
@@ -641,24 +632,14 @@ impl UnifiedSecretResolver {
             sources.push(("dotenv".to_string(), true));
         }
         
-        // Only check the configured store type - no unnecessary RPC calls
+        // Only check the configured store type
         match self.secrets_store {
             SecretsStore::VsCode => {
-                // Check RPC endpoints only when VsCode is the selected store
-                for endpoint_name in &self.rpc_endpoints {
-                    if let Some(endpoint) = get_rpc_endpoint(endpoint_name) {
-                        let rpc_store = RpcSecretStore::new(&endpoint);
-                        sources.push((
-                            format!("rpc:{}", endpoint_name),
-                            rpc_store.is_reachable(),
-                        ));
-                    } else {
-                        sources.push((
-                            format!("rpc:{}", endpoint_name),
-                            false,
-                        ));
-                    }
-                }
+                // Check MCP availability
+                sources.push((
+                    "mcp:vscode".to_string(),
+                    self.mcp_client.is_some(),
+                ));
             }
             SecretsStore::Keychain => {
                 // Check keychain only when it's the selected store
@@ -680,8 +661,8 @@ impl Default for UnifiedSecretResolver {
 /// Where a secret write will be routed
 #[derive(Debug)]
 enum SecretWriteDestination {
-    /// Write to RPC endpoint (endpoint_name)
-    Rpc(String),
+    /// Write to MCP (VS Code SecretStorage)
+    Mcp,
     /// Write to system keychain
     Keychain,
     /// No store available

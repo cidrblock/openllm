@@ -46,38 +46,25 @@ print(f"Configured providers: {[p.name for p in providers]}")
 ### Node.js
 
 ```javascript
-const { 
-    EnvSecretStore, 
-    MemorySecretStore,
-    KeychainSecretStore,
-    FileConfigProvider,
-    listProviders 
-} = require('@openllm/native');
+const { chat, listProviders, KeychainSecretStore } = require('@openllm/native');
 
-// List available providers
+// Simple chat - the unified API handles everything
+await chat(
+  [{ role: 'user', content: 'Hello!' }],
+  { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-...' },
+  (chunk) => {
+    if (chunk.type === 'text') process.stdout.write(chunk.text);
+  }
+);
+
+// List available providers (including 'vscode' for Copilot access)
 const providers = listProviders();
 providers.forEach(p => console.log(`${p.id}: ${p.displayName}`));
 
-// Use environment variables
-const envStore = new EnvSecretStore();
-const key = await envStore.get('openai');
-
-// Use system keychain
+// Use system keychain for API keys
 const keychain = new KeychainSecretStore();
 await keychain.store('openai', 'sk-...');
 const key = await keychain.get('openai');
-
-// Use file-based config
-const config = FileConfigProvider.user();
-await config.addProvider({
-    name: 'openai',
-    enabled: true,
-    apiBase: undefined,
-    models: ['gpt-4o', 'gpt-4o-mini']
-});
-
-const configs = await config.getProviders();
-console.log('Configured:', configs.map(p => p.name));
 ```
 
 ### VS Code Extension

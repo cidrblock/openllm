@@ -448,6 +448,29 @@ export class OpenLLMProvider implements vscode.LanguageModelChatProvider {
   }
 
   /**
+   * Get provider configuration for direct API calls
+   * 
+   * Returns the API key and base URL for a given provider.
+   * Used by the Rust orchestrator to make direct LLM calls.
+   */
+  async getProviderConfig(providerId: string): Promise<{ apiKey?: string; apiBase?: string } | null> {
+    // Find a model configured with this provider to get its API key
+    const models = this.configManager.getModels();
+    const modelWithProvider = models.find(m => 
+      m.provider.toLowerCase() === providerId.toLowerCase()
+    );
+
+    if (modelWithProvider) {
+      return {
+        apiKey: modelWithProvider.apiKey,
+        apiBase: modelWithProvider.apiBase,
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Dispose of resources
    */
   dispose(): void {
