@@ -30,7 +30,7 @@ This VS Code extension connects to the OpenLLM daemon and registers configured L
                               │ gRPC (Unix socket)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  OpenLLM Daemon (Rust)                                          │
+│  OpenLLM Daemon (TypeScript/Node.js)                             │
 │                                                                 │
 │  • Handles all LLM provider communication                      │
 │  • Manages configuration and secrets                           │
@@ -54,11 +54,13 @@ code --install-extension open-llm-provider-0.1.0.vsix
 The OpenLLM daemon must be running:
 
 ```bash
-# Build the daemon
-cargo build --release
+# From the repository root
+cd packages/daemon
+npm install
+npm run build
 
 # Start the daemon
-./target/release/openllm daemon
+node dist/index.js daemon
 ```
 
 ## Configuration
@@ -68,7 +70,11 @@ Configuration is managed through the **web dashboard**, not VS Code settings.
 ### Start the Web Dashboard
 
 ```bash
-./target/release/openllm web
+# If daemon is already running:
+node dist/index.js web
+
+# Or start both daemon and web server:
+node dist/index.js web
 ```
 
 Open http://localhost:8787 to:
@@ -200,9 +206,9 @@ npm run package
 
 3. Restart daemon:
    ```bash
-   pkill -9 openllm
+   pkill -f "node.*openllm"
    rm -f /run/user/$(id -u)/openllm/daemon.sock
-   ./target/release/openllm daemon
+   cd packages/daemon && node dist/index.js daemon
    ```
 
 4. Check Output panel: View → Output → "Open LLM Provider"

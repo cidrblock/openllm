@@ -1,5 +1,5 @@
-# Rust
-target/
+# Build output
+dist/
 
 # Node.js
 node_modules/
@@ -10,6 +10,9 @@ out/
 *.vsix
 .vscode-test/
 packages/vscode/bin/
+
+# Daemon
+packages/daemon/dist/
 
 # OS
 .DS_Store
@@ -26,3 +29,4 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+.pytest_cache/

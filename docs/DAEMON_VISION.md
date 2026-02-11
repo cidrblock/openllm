@@ -9,24 +9,26 @@
 > **Note:** This is the original design document. For current architecture, see `ARCHITECTURE.md`.
 > 
 > **Implemented:**
-> - Rust gRPC daemon on Unix socket
-> - Web dashboard with RHDS styling
+> - TypeScript daemon (migrated from Rust) with gRPC on Unix socket
+> - Web dashboard with RHDS styling (embedded in daemon via Express)
 > - VS Code extension (gRPC client + Language Model API registration)
-> - Session management (create, list, resume)
-> - Provider support via genai crate (15+ providers)
-> - Keychain secret storage
+> - Provider support via multi-llm-ts (15+ providers)
+> - Mock provider for testing (echo, fixed, error, empty, slow modes)
+> - Keychain secret storage (via keytar)
 > - YAML configuration (user/workspace levels)
+> - Dynamic model discovery from provider APIs
 > 
 > **Changed from original design:**
-> - VS Code extension is a pure gRPC client (no embedded MCP server)
-> - Secrets stored in system keychain, not VS Code SecretStorage
-> - Config uses explicit `api_key_keychain_name` or `api_key_env_var_name` fields (no implicit env var searching)
-> - Web dashboard is a separate `openllm web` process (gRPC client to daemon)
+> - Daemon rewritten in TypeScript (originally Rust)
+> - Web dashboard embedded in daemon (not separate process)
+> - Providers via multi-llm-ts (not genai crate)
+> - Sessions deferred to future phase
 > 
 > **Deferred:**
+> - Session management (create, list, resume, fork, export/import)
 > - MCP shim for Claude Desktop
-> - VsCodeProvider for accessing Copilot models through daemon
-> - Some CLI subcommands (session attach/detach, import/export)
+> - VsCodeProvider for accessing Copilot models
+> - SEA (Single Executable Application) packaging
 
 ---
 

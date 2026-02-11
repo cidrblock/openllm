@@ -2,7 +2,7 @@
  * Mock LLM provider for testing
  * 
  * Provides deterministic, configurable responses without network dependencies.
- * Ported from the Rust implementation (crates/openllm/src/providers/mock.rs).
+ * Mock LLM provider for testing without API keys.
  * 
  * Mode is driven by the model name:
  *   - "echo" / "mock-echo"       → Echo back the last user message

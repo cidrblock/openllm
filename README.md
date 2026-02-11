@@ -4,61 +4,52 @@ A unified AI daemon for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and m
 
 ## Features
 
-- **Unified daemon**: Single Rust binary serves all clients via gRPC
-- **Multi-provider**: 15+ LLM providers with consistent API
-- **Web dashboard**: Configure providers, API keys, and models via browser UI
-- **Session continuity**: Start a chat in VS Code, continue in CLI, share with teammates
+- **Unified daemon**: TypeScript/Node.js daemon serves all clients via gRPC
+- **Multi-provider**: 15+ LLM providers via multi-llm-ts with consistent API
+- **Web dashboard**: Configure providers, API keys, and models via browser UI (Red Hat Design System)
 - **VS Code integration**: Models appear in VS Code's Language Model picker
 - **Dynamic model discovery**: Fetches available models from provider APIs
+- **Mock provider**: Built-in mock provider for testing without API keys
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Clients                                                             │
-│  ├── VS Code Extension (gRPC + backchannel)                         │
-│  ├── Web Dashboard (HTTP → gRPC proxy)                              │
-│  ├── Python scripts (gRPC)                                          │
-│  ├── Node.js apps (gRPC)                                            │
-│  └── CLI (gRPC)                                                     │
+│  ├── VS Code Extension                                               │
+│  ├── Web Dashboard                                                   │
+│  ├── Python scripts                                                  │
+│  ├── Node.js apps                                                    │
+│  └── CLI                                                             │
 └─────────────────────────────────────────────────────────────────────┘
                               │ gRPC (Unix socket)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  openllm daemon (Rust)                                               │
-│  ├── OpenLLM Service: chat, sessions, models, config                │
-│  ├── Providers: OpenAI, Anthropic, Gemini, Ollama, etc.             │
-│  ├── Sessions: persistence, replay, sharing                         │
-│  └── Secrets: keychain storage, env var references                  │
+│  openllm daemon (TypeScript/Node.js)                                 │
+│  ├── @grpc/grpc-js      # gRPC server                                │
+│  ├── multi-llm-ts       # LLM providers                              │
+│  ├── keytar             # Secrets (keychain)                         │
+│  └── Express            # Embedded web server                        │
 └─────────────────────────────────────────────────────────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         ▼                    ▼                    ▼
-    LLM APIs           Web Dashboard         VS Code
-  (HTTP direct)       (localhost:8787)    (backchannel)
 ```
 
 ## Quick Start
 
-### 1. Build and Run
+### 1. Install and run
 
 ```bash
-# Build
-cargo build --release
-
-# Start the daemon
-./target/release/openllm daemon
-
-# Start the web server (in another terminal)
-./target/release/openllm web
+cd packages/daemon
+npm install
+npm run build
+node dist/index.js daemon
 ```
 
-### 2. Configure via Web Dashboard
+### 2. Start web dashboard
 
-Open http://localhost:8787 to:
-- Add API keys for providers (stored in system keychain)
-- Or reference environment variables for keys
-- Enable/disable models per provider
+```bash
+node dist/index.js web
+# Opens http://localhost:8787
+```
 
 ### 3. Install VS Code Extension
 
@@ -68,11 +59,6 @@ npm install
 npm run package
 code --install-extension open-llm-provider-0.1.0.vsix
 ```
-
-The extension:
-- Connects to the daemon automatically
-- Registers configured models with VS Code's Language Model API
-- Provides workspace path info to the daemon for workspace-level config
 
 ## Supported Providers
 
@@ -87,9 +73,13 @@ The extension:
 | OpenRouter | ✓ | ✓ | ✓ |
 | DeepSeek | ✓ | ✗ | ✓ |
 | Groq | ✓ | ✗ | ✓ |
-| Together | ✓ | ✗ | ✓ |
-| Cohere | ✓ | ✗ | ✓ |
 | xAI (Grok) | ✓ | ✗ | ✓ |
+| Cerebras | ✓ | ✗ | ✓ |
+| LM Studio | ✓ | ✗ | ✓ |
+| Meta | ✓ | ✗ | ✓ |
+| Mock | ✓ | ✓ | ✓ |
+
+*Mock provider is for testing without API keys.*
 
 ## Configuration
 
@@ -123,55 +113,55 @@ providers:
 
 ```
 openllm/
-├── crates/
-│   └── openllm/              # Rust daemon + web server
-│       ├── src/
-│       │   ├── main.rs       # CLI entrypoint
-│       │   ├── server/       # gRPC services
-│       │   ├── providers/    # LLM providers (via genai)
-│       │   ├── session/      # Session management
-│       │   ├── secrets/      # Keychain integration
-│       │   ├── resolver/     # Config & secret resolution
-│       │   └── web/          # Web dashboard (axum + embedded assets)
-│       └── Cargo.toml
-├── proto/
-│   └── openllm/v1/service.proto  # gRPC service definition
 ├── packages/
-│   ├── python/               # Python gRPC client
-│   ├── proto-ts/             # TypeScript proto definitions
-│   └── vscode/               # VS Code extension
-└── docs/
+│   ├── daemon/              # TypeScript daemon (gRPC + web server)
+│   │   ├── src/
+│   │   │   ├── index.ts     # CLI entrypoint (commander.js)
+│   │   │   ├── daemon.ts    # Daemon lifecycle
+│   │   │   ├── state.ts     # Central DaemonState
+│   │   │   ├── transport.ts # Socket/PID management
+│   │   │   ├── server/      # gRPC service handlers
+│   │   │   ├── providers/   # LLM providers (via multi-llm-ts)
+│   │   │   ├── secrets/     # Keychain + env var secrets
+│   │   │   ├── config/      # YAML config loader
+│   │   │   └── web/         # Embedded Express web server
+│   │   ├── static/          # Web dashboard HTML
+│   │   └── tests/           # Integration tests
+│   ├── python/              # Python gRPC client
+│   └── vscode/              # VS Code extension
+├── proto/
+│   └── openllm/v1/service.proto
+├── tests/                   # Test documentation
+└── docs/                    # Documentation
 ```
 
 ## gRPC Services
 
 The daemon exposes the `OpenLLM` service:
 
-- `Chat` / `SessionChat` - Streaming chat
-- `CreateSession` / `ListSessions` / `ForkSession` - Session management
-- `ExportSession` / `ImportSession` - Session sharing
-- `ListModels` / `ListProviders` - Discovery
-- `GetSecret` / `SetSecret` / `DeleteSecret` - Secrets management
-- `VSCodeStream` - Bidirectional backchannel for VS Code extension
+- **Chat** – Streaming chat
+- **ListModels** / **ListProviders** – Discovery
+- **GetSecret** / **SetSecret** / **DeleteSecret** – Secrets management
+- **Register** / **Unregister** – Client lifecycle
+- **VSCodeStream** – Bidirectional backchannel for VS Code extension
+- **StartWebServer** / **StopWebServer** – Web dashboard control
+- **HealthCheck** – Liveness probe
+- **GetStatus** – Daemon status
+- **GetConfig** / **UpdateConfig** – Configuration
 
 ## Development
 
 ```bash
-# Build
-cargo build --release
-
-# Run daemon
-./target/release/openllm daemon
-
-# Run web server
-./target/release/openllm web
-
-# Generate TypeScript proto stubs
-./scripts/generate-clients.sh typescript
-
-# Build VS Code extension
-cd packages/vscode && npm run compile
+cd packages/daemon
+npm run build && node dist/index.js daemon
+npm test  # runs vitest (53 tests)
 ```
+
+## Testing
+
+- Unit tests co-located with source (`src/**/*.test.ts`)
+- Integration tests in `tests/integration/`
+- Mock provider for testing without API keys
 
 ## Documentation
 

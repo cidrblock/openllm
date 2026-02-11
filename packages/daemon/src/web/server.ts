@@ -22,8 +22,8 @@ import { getSupportedProviders, getDefaultEnvVar } from '../providers/adapter.js
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Static files path (the Rust web dashboard files)
-const STATIC_PATH = path.resolve(__dirname, '../../../../crates/openllm/src/web/static');
+// Static files path (dashboard HTML)
+const STATIC_PATH = path.resolve(__dirname, '../../static');
 
 /**
  * Create the Express application with direct DaemonState access.

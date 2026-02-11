@@ -163,7 +163,12 @@ export class DaemonClient {
     }
 
     /**
-     * Start the daemon process
+     * Start the daemon process.
+     * 
+     * The daemon is a TypeScript/Node.js application.
+     * Priority: 1) `openllm` in PATH (global install or SEA binary)
+     *           2) Bundled daemon JS in extension's bin/ directory
+     *           3) Direct node execution of packages/daemon
      */
     private async startDaemon(): Promise<void> {
         const { spawn } = await import('child_process');
@@ -173,12 +178,10 @@ export class DaemonClient {
             fs.mkdirSync(OPENLLM_DIR, { recursive: true, mode: 0o700 });
         }
 
-        // Try to find the daemon binary
-        // Priority: 1) openllm in PATH, 2) bundled binary
-        const daemonCmd = await this.findDaemonBinary();
+        const { cmd, args } = await this.findDaemonCommand();
         
-        // Start daemon in background with --daemon flag
-        const daemon = spawn(daemonCmd, ['--daemon'], {
+        // Start daemon in background
+        const daemon = spawn(cmd, [...args, 'daemon'], {
             detached: true,
             stdio: 'ignore',
             env: {
@@ -192,75 +195,39 @@ export class DaemonClient {
     }
 
     /**
-     * Find the daemon binary
-     * Priority: 1) User-installed openllm in PATH, 2) Bundled binary in extension
+     * Find the daemon command and arguments.
+     * Returns { cmd, args } where the daemon subcommand should be appended.
+     * 
+     * Priority:
+     *   1) `openllm` in PATH (global install or SEA binary)
+     *   2) Bundled daemon JS in extension's bin/daemon/ directory
      */
-    private async findDaemonBinary(): Promise<string> {
+    private async findDaemonCommand(): Promise<{ cmd: string; args: string[] }> {
         const { execSync } = await import('child_process');
-        const path = await import('path');
         
-        // Try to find openllm in PATH first (user may have installed it)
+        // 1) Try to find openllm in PATH (global npm install or SEA binary)
         try {
             const cmd = process.platform === 'win32' ? 'where openllm' : 'which openllm';
             const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
             if (result && fs.existsSync(result)) {
-                return result;
+                return { cmd: result, args: [] };
             }
         } catch {
-            // Not in PATH, fall through to bundled
+            // Not in PATH
         }
 
-        // Look for bundled binary in extension
-        const bundledPath = this.getBundledBinaryPath();
-        if (bundledPath && fs.existsSync(bundledPath)) {
-            // Ensure it's executable on Unix
-            if (process.platform !== 'win32') {
-                try {
-                    fs.chmodSync(bundledPath, 0o755);
-                } catch {
-                    // Ignore chmod errors
-                }
+        // 2) Look for bundled daemon JS in extension
+        if (extensionPath) {
+            const bundledEntry = path.join(extensionPath, 'bin', 'daemon', 'index.js');
+            if (fs.existsSync(bundledEntry)) {
+                return { cmd: process.execPath, args: [bundledEntry] };
             }
-            return bundledPath;
         }
 
         throw new Error(
-            `OpenLLM daemon binary not found. ` +
-            `Install it with: cargo install openllm, or ensure the extension is properly installed.`
+            `OpenLLM daemon not found. ` +
+            `Install it with: npm install -g @openllm/daemon, or ensure the extension is properly installed.`
         );
-    }
-
-    /**
-     * Get path to bundled binary for current platform
-     */
-    private getBundledBinaryPath(): string | null {
-        if (!extensionPath) {
-            console.warn('Extension path not set - cannot find bundled binary');
-            return null;
-        }
-        
-        const platform = process.platform;
-        const arch = process.arch;
-        
-        // Map to our binary naming convention
-        let binaryName: string;
-        switch (platform) {
-            case 'linux':
-                binaryName = arch === 'arm64' ? 'openllm-linux-arm64' : 'openllm-linux-x64';
-                break;
-            case 'darwin':
-                binaryName = arch === 'arm64' ? 'openllm-darwin-arm64' : 'openllm-darwin-x64';
-                break;
-            case 'win32':
-                binaryName = arch === 'arm64' ? 'openllm-win32-arm64.exe' : 'openllm-win32-x64.exe';
-                break;
-            default:
-                return null;
-        }
-        
-        const binaryPath = path.join(extensionPath, 'bin', binaryName);
-        console.log(`Looking for bundled daemon at: ${binaryPath}`);
-        return binaryPath;
     }
 
     /**

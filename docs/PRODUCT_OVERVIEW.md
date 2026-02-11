@@ -10,7 +10,7 @@
 
 OpenLLM is a unified AI daemon that provides consistent access to multiple LLM providers through a single interface. It enables the "Bring Your Own Model" (BYOM) vision by supporting both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama).
 
-The project implements a **Rust daemon** with **gRPC API**, a **web dashboard** for configuration, and a **VS Code extension** that registers models with VS Code's Language Model API.
+The project implements a **TypeScript daemon** with **gRPC API**, a **web dashboard** for configuration, and a **VS Code extension** that registers models with VS Code's Language Model API.
 
 ---
 
@@ -18,7 +18,7 @@ The project implements a **Rust daemon** with **gRPC API**, a **web dashboard** 
 
 | Goal | Status | Implementation |
 |------|--------|----------------|
-| Decouple Provider Logic | ✅ Complete | Rust daemon handles all provider communication; clients use gRPC |
+| Decouple Provider Logic | ✅ Complete | TypeScript daemon handles all provider communication; clients use gRPC |
 | Enable BYOM | ✅ Complete | 15+ providers supported including local (Ollama) and custom endpoints |
 | Centralize Configuration | ✅ Complete | YAML config files at user/workspace level; web dashboard for easy editing |
 | Accelerate AI Infusion | ✅ Complete | Ready-made gRPC API; VS Code integration via Language Model API |
@@ -64,16 +64,16 @@ The project implements a **Rust daemon** with **gRPC API**, a **web dashboard** 
                                  │ gRPC over Unix Socket
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     openllm daemon (Rust)                        │
+│                     openllm daemon (TypeScript)                  │
 │                                                                  │
 │   ┌─────────────────┐  ┌─────────────────┐  ┌────────────────┐  │
 │   │  gRPC Server    │  │  Web Server     │  │  Session Mgmt  │  │
-│   │  (tonic)        │  │  (axum)         │  │                │  │
+│   │  (@grpc/grpc-js)│  │  (Express)       │  │                │  │
 │   └────────┬────────┘  └────────┬────────┘  └────────────────┘  │
 │            │                    │                                │
 │   ┌────────▼────────┐  ┌────────▼────────┐  ┌────────────────┐  │
 │   │  LLM Providers  │  │  Unified Config │  │  Secret Store  │  │
-│   │  (genai crate)  │  │  Resolver       │  │  (keychain)    │  │
+│   │  (multi-llm-ts) │  │  Resolver       │  │  (keychain)    │  │
 │   └─────────────────┘  └─────────────────┘  └────────────────┘  │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ HTTP
@@ -84,18 +84,18 @@ The project implements a **Rust daemon** with **gRPC API**, a **web dashboard** 
                     └─────────────────────────┘
 ```
 
-### Why Rust Daemon?
+### Why TypeScript Daemon?
 
 1. **Single source of truth** - Configuration and secrets managed centrally
 2. **Session continuity** - Start a chat in VS Code, continue from CLI
-3. **Performance** - Native async streaming with minimal overhead
+3. **Performance** - Async streaming with minimal overhead
 4. **Simplicity** - Clients are thin gRPC wrappers, not embedded native code
 
 ---
 
 ## Components
 
-### 1. Rust Daemon (`openllm daemon`)
+### 1. TypeScript Daemon (`openllm daemon`)
 
 The core service that runs as a background process:
 - Listens on Unix socket for gRPC requests
@@ -245,10 +245,10 @@ Sessions are JSON files - searchable, diffable, version-controllable.
 
 | Component | Distribution |
 |-----------|--------------|
-| Rust Daemon | Single binary (Linux/macOS/Windows) |
+| TypeScript Daemon | Node.js package (Linux/macOS/Windows) |
 | VS Code Extension | VSIX package → Marketplace |
 | Python Client | pip package |
-| Web Dashboard | Embedded in daemon binary |
+| Web Dashboard | Served by daemon (embedded in process) |
 
 ---
 

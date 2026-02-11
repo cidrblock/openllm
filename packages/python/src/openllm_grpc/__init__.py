@@ -4,8 +4,8 @@ This module provides a Python client for communicating with the OpenLLM daemon
 via gRPC over Unix Domain Sockets.
 
 Daemon paths:
-    Socket: ~/.openllm/openllm.sock
-    PID file: ~/.openllm/openllm.pid
+    Socket: $XDG_RUNTIME_DIR/openllm/daemon.sock (or ~/.openllm/daemon.sock)
+    PID file: $XDG_RUNTIME_DIR/openllm/openllm.pid (or ~/.openllm/openllm.pid)
 
 Example usage:
 
@@ -13,7 +13,7 @@ Example usage:
 
     # Check if daemon is running
     if not OpenLLMClient.is_daemon_running():
-        print("Start the daemon: openllm daemon start")
+        print("Start the daemon: openllm daemon")
     
     async with OpenLLMClient() as client:
         # Chat with a model

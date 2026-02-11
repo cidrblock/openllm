@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenLLM is a unified AI daemon written in Rust that provides:
+OpenLLM is a unified AI daemon written in TypeScript/Node.js that provides:
 - A gRPC API for chat, sessions, and configuration
 - A web dashboard for provider/model management
 - A VS Code extension that registers models with VS Code's Language Model API
@@ -13,40 +13,44 @@ OpenLLM is a unified AI daemon written in Rust that provides:
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
 │  │   VS Code Ext   │  │   Python Apps   │  │   Web Dashboard         │  │
-│  │   (gRPC)        │  │   (gRPC)        │  │   (HTTP → gRPC)         │  │
+│  │   (gRPC)        │  │   (gRPC)        │  │   (HTTP → DaemonState)   │  │
 │  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │
 │           │                    │                        │               │
 │           └────────────────────┼────────────────────────┘               │
 │                                │                                         │
 └────────────────────────────────┼─────────────────────────────────────────┘
-                                 │ gRPC over Unix Socket
+                                 │ gRPC over Unix Socket (or named pipe)
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        openllm daemon (Rust)                             │
+│                     openllm daemon (TypeScript)                          │
 │                                                                          │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  gRPC Server (tonic)                                               │  │
+│  │  gRPC Server (@grpc/grpc-js + proto-loader)                        │  │
 │  │  └── OpenLLM Service: chat, sessions, models, secrets             │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │  DaemonState    │  │  Providers      │  │  Session Manager        │  │
-│  │  (Central Hub)  │  │  (via genai)    │  │  (Persistence)          │  │
+│  │  DaemonState    │  │  Providers      │  │  Session Manager          │  │
+│  │  (Central Hub)  │  │  (multi-llm-ts) │  │  (Deferred / Stub)       │  │
 │  └────────┬────────┘  └────────┬────────┘  └─────────────────────────┘  │
 │           │                    │                                         │
 │  ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────────────────────┐  │
-│  │ UnifiedSecret   │  │ UnifiedConfig   │  │  VS Code Backchannel    │  │
-│  │ Resolver        │  │ Resolver        │  │  (workspace paths)      │  │
+│  │  keytar + env   │  │  Config Loader   │  │  VS Code Backchannel    │  │
+│  │  (Secrets)      │  │  (YAML)         │  │  (workspace paths)      │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
 │                                                                          │
-└────────────────────────────────────────────┬─────────────────────────────┘
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  Web Dashboard (Express) - Embedded, direct DaemonState access     │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+└────────────────────────────────────────────┬────────────────────────────┘
                                              │
          ┌───────────────────────────────────┼───────────────────┐
          │                                   │                   │
          ▼                                   ▼                   ▼
 ┌─────────────────┐              ┌─────────────────┐    ┌───────────────┐
-│   LLM APIs      │              │  System Keychain│    │  Config Files │
-│   (HTTP)        │              │  (secrets)      │    │  (YAML)       │
+│   LLM APIs      │              │  keytar         │    │  Config Files│
+│   (HTTP)        │              │  (keychain)     │    │  (YAML)      │
 └─────────────────┘              └─────────────────┘    └───────────────┘
 ```
 
@@ -54,22 +58,30 @@ OpenLLM is a unified AI daemon written in Rust that provides:
 
 ### openllm daemon
 
-The core Rust binary that runs as a background process.
+The core TypeScript/Node.js process that runs as a background daemon.
 
 **Subcommands:**
-- `openllm daemon` - Start the gRPC server on Unix socket
-- `openllm web` - Start the web dashboard (connects to daemon via gRPC)
+- `openllm daemon` - Start the gRPC server on Unix socket (or named pipe on Windows)
+- `openllm web` - Start the web dashboard (embedded in daemon or started via gRPC if daemon already running)
+- `openllm status` - Check if daemon is running
+- `openllm stop` - Stop the running daemon
 
-**Socket location:** `/run/user/{uid}/openllm/daemon.sock`
+**Socket location:**
+- Linux/macOS: `$XDG_RUNTIME_DIR/openllm/daemon.sock` or `/run/user/{uid}/openllm/daemon.sock`
+- Windows: `\\.\pipe\openllm-daemon`
 
-### Web Dashboard (`openllm web`)
+### Web Dashboard (Embedded)
 
-A separate process that serves the web UI and proxies HTTP requests to gRPC:
+The web dashboard runs inside the daemon process via Express:
 
-- **Port**: `localhost:8787`
-- **Static assets**: Embedded in binary via `rust-embed`
-- **API routes**: `/api/*` → gRPC calls to daemon
-- **Chat SSE**: `/api/chat` → streaming responses
+- **Port**: `localhost:8787` (configurable)
+- **Static assets**: Served from `packages/daemon/static/`
+- **API routes**: `/api/*` → Direct calls to `DaemonState` (no gRPC in the loop)
+- **Chat SSE**: `POST /api/chat` → Streaming responses via Server-Sent Events
+
+The web server is started either:
+1. In-process when `openllm web` runs and no daemon is running
+2. Via gRPC `StartWebServer` when a daemon is already running and `openllm web` is invoked
 
 ### VS Code Extension
 
@@ -77,7 +89,7 @@ The extension acts as a **thin gRPC client** to the daemon:
 
 1. On activation: Connects to daemon (starts if not running)
 2. Registers as a `LanguageModelChatProvider` with VS Code
-3. Provides workspace paths via gRPC backchannel
+3. Provides workspace paths via gRPC backchannel (`VSCodeStream`)
 4. Opens web dashboard on command
 
 **Key files:**
@@ -88,60 +100,65 @@ The extension acts as a **thin gRPC client** to the daemon:
 
 ## Provider Architecture
 
-All LLM providers are implemented via the `genai` crate with a unified `Provider` trait:
+All LLM providers are implemented via the `multi-llm-ts` library with a unified adapter:
 
-```rust
-#[async_trait]
-pub trait Provider: Send + Sync {
-    fn metadata(&self) -> ProviderMetadata;
-    
-    async fn list_models(&self, api_key: Option<&str>) 
-        -> ProviderResult<Option<Vec<DynamicModelInfo>>>;
-    
-    async fn stream_chat(
-        &self,
-        messages: Vec<Message>,
-        config: ProviderModelConfig,
-        options: StreamOptions,
-        token: CancellationToken,
-    ) -> ProviderResult<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>>;
-}
+```typescript
+// Provider adapter maps OpenLLM provider IDs to multi-llm-ts engine names
+const PROVIDER_ENGINE_MAP: Record<string, string> = {
+  mock: 'mock',
+  openai: 'openai',
+  anthropic: 'anthropic',
+  gemini: 'google',
+  mistral: 'mistralai',
+  ollama: 'ollama',
+  azure: 'azure',
+  openrouter: 'openrouter',
+  deepseek: 'deepseek',
+  groq: 'groq',
+  xai: 'xai',
+  cerebras: 'cerebras',
+  lmstudio: 'lmstudio',
+  meta: 'meta',
+};
+
+// fetchModels() uses loadModels(engineName, config)
+// streamChat() uses igniteEngine(engineName, config).generate(modelId, thread)
 ```
 
 **Supported providers:**
 - OpenAI, Anthropic, Google Gemini, Mistral, Ollama
 - Azure OpenAI, OpenRouter, DeepSeek, Groq
-- Together, Cohere, xAI (Grok), Fireworks, Nebius
+- xAI (Grok), Cerebras, LM Studio, Meta (Llama)
 
 ## Secret Management
 
 Secrets are managed explicitly per-provider with two options:
 
-### Option 1: Keychain Storage
-- Key stored in system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+### Option 1: Keychain Storage (keytar)
+- Uses keytar for cross-platform keychain access:
+  - macOS: Keychain
+  - Linux: libsecret (GNOME Keyring / KDE Wallet)
+  - Windows: Credential Vault
 - Config references key by name: `api_key_keychain_name: "OPENAI_API_KEY"`
 
 ### Option 2: Environment Variable Reference
 - Config specifies env var name: `api_key_env_var_name: "OPENAI_API_KEY"`
-- Value read from environment at runtime
+- Value read from `process.env` at runtime
 
 **Important:** These options are mutually exclusive per provider. The web UI provides a toggle to choose between them.
 
-### UnifiedSecretResolver
+### SecretStore interface
 
-```rust
-pub struct UnifiedSecretResolver {
-    // MCP client for VS Code backchannel (optional)
-    mcp_client: Option<Arc<McpClient>>,
-}
-
-impl UnifiedSecretResolver {
-    pub fn resolve_from_keychain(&self, key_name: &str) -> Option<ResolvedSecret>;
-    pub fn resolve_from_env(&self, env_var_name: &str) -> Option<ResolvedSecret>;
-    pub fn store_in_keychain(&self, key_name: &str, value: &str) -> Result<(), String>;
-    pub fn delete_from_keychain(&self, key_name: &str) -> Result<(), String>;
+```typescript
+interface SecretStore {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  has(key: string): Promise<boolean>;
 }
 ```
+
+`DaemonState` uses `KeychainSecretStore` (keytar-backed) by default. If keytar is unavailable, keychain storage is disabled and only env vars work.
 
 ## Configuration
 
@@ -163,32 +180,46 @@ providers:
       - claude-3-5-sonnet-20241022
 ```
 
-### UnifiedConfigResolver
+### Config Loader
 
-Loads and merges config from user and workspace files:
+User and workspace configs are merged (workspace overrides user):
 
-```rust
-pub struct UnifiedConfigResolver {
-    user_path: PathBuf,          // ~/.openllm/config.yaml
-    workspace_path: Option<PathBuf>,  // Set via VS Code backchannel
-}
+```typescript
+// loadConfig(), loadWorkspaceConfig(), mergeConfigs()
+// Provider config: api_key_keychain_name | api_key_env_var_name, api_base, enabled_models
 ```
 
 ## gRPC Protocol
 
-Defined in `proto/openllm/v1/service.proto`:
+Defined in `proto/openllm/v1/service.proto`. The daemon loads protos dynamically via `@grpc/proto-loader` (no code generation for the daemon).
 
-### Core RPCs
+### Core RPCs (Implemented)
 
 | RPC | Description |
 |-----|-------------|
 | `Chat` | Streaming chat with a model |
-| `SessionChat` | Chat within a persistent session |
 | `ListModels` | List available models from providers |
 | `ListProviders` | List configured providers |
-| `GetSecret` / `SetSecret` / `DeleteSecret` | Keychain management |
+| `GetSecret` / `SetSecret` / `DeleteSecret` / `ListSecrets` | Secret management |
 | `Register` / `Unregister` | Client registration |
 | `VSCodeStream` | Bidirectional backchannel |
+| `GetStatus` / `HealthCheck` | Daemon status |
+| `GetConfig` / `UpdateConfig` | Configuration |
+| `GetProviderStatus` | Provider status |
+| `GetConnectedWorkspaces` | Workspace paths from VS Code |
+| `StartWebServer` / `StopWebServer` | Embedded web dashboard lifecycle |
+| `Shutdown` | Daemon shutdown |
+
+### Stub RPCs (Deferred)
+
+| RPC | Description |
+|-----|-------------|
+| `SessionChat` | Chat within a persistent session |
+| `CreateSession` / `GetSession` / `ListSessions` / `DeleteSession` | Session CRUD |
+| `WatchSessions` / `ReplaySession` / `SummarizeSession` | Session features |
+| `ForkSession` / `ExportSession` / `ImportSession` | Session branching |
+| `ListTools` / `ExecuteTool` | Tool execution (future MCP) |
+| `RegisterMcpServer` / `UnregisterMcpServer` | MCP server registration |
 
 ### VS Code Backchannel
 
@@ -206,39 +237,20 @@ The `VSCodeStream` RPC enables bidirectional communication:
 
 ## Session Management
 
-Sessions persist chat history for continuity across clients:
-
-```rust
-pub struct Session {
-    pub id: String,
-    pub model: String,
-    pub messages: Vec<Message>,
-    pub created_by: ClientType,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub metadata: HashMap<String, String>,
-}
-```
-
-**Storage:** `~/.openllm/sessions/`
-
-**Features:**
-- Fork sessions to try different approaches
-- Export/import as JSON for sharing
-- Replay sessions in different tools
+Session management is **deferred**. Stub RPCs exist in the proto and service handlers return `UNIMPLEMENTED` or empty results. Full session persistence (create, fork, export, replay) will be implemented in a future release.
 
 ## Data Flow
 
 ### Chat Request Flow
 
 ```
-1. Client sends ChatRequest via gRPC
+1. Client sends ChatRequest via gRPC (or POST /api/chat for web)
    ↓
-2. DaemonState.get_provider() finds provider instance
+2. DaemonState.chat() parses provider/model from model ID
    ↓
-3. UnifiedSecretResolver gets API key (keychain or env var based on config)
+3. DaemonState.resolveApiKey() gets API key (keytar or env var based on config)
    ↓
-4. Provider.stream_chat() calls LLM API
+4. Provider adapter streamChat() uses multi-llm-ts to call LLM API
    ↓
 5. Response chunks streamed back to client
 ```
@@ -246,14 +258,14 @@ pub struct Session {
 ### Model Discovery Flow
 
 ```
-1. Client calls ListModels
+1. Client calls ListModels (gRPC or GET /api/models)
    ↓
-2. DaemonState.list_models_dynamic() iterates providers
+2. DaemonState.listModels() iterates providers
    ↓
 3. For each configured provider:
    - Load API key from config (keychain name or env var name)
-   - Resolve key value
-   - Call provider.list_models(api_key)
+   - Resolve key value via secretStore or process.env
+   - Call fetchModels(providerId, apiKey) → multi-llm-ts loadModels()
    ↓
 4. Aggregate and return all models
 ```
@@ -263,30 +275,34 @@ pub struct Session {
 ```
 1. Browser loads http://localhost:8787
    ↓
-2. Static HTML/JS served from embedded assets
+2. Express serves static HTML/JS from packages/daemon/static/
    ↓
-3. Alpine.js frontend makes API calls:
-   - GET /api/providers → gRPC ListProviders
-   - GET /api/models → gRPC ListModels
-   - POST /api/config → Save to YAML file
-   - POST /api/secrets/{key} → gRPC SetSecret (keychain)
+3. Frontend makes API calls to Express routes:
+   - GET /api/providers → state.listProviders()
+   - GET /api/models → state.listModels()
+   - GET /api/config → loadConfig()
+   - POST /api/config → saveConfig()
+   - POST /api/secrets → state.secretStore.set()
+   - POST /api/chat → state.chat() (SSE stream)
    ↓
-4. UI updates reactively
+4. Web server has direct DaemonState access (no gRPC in the loop)
 ```
 
 ## File Locations
 
 | File | Path | Purpose |
 |------|------|---------|
-| Socket | `/run/user/{uid}/openllm/daemon.sock` | gRPC server socket |
+| Socket (Linux/macOS) | `$XDG_RUNTIME_DIR/openllm/daemon.sock` | gRPC server socket |
+| Socket (Windows) | `\\.\pipe\openllm-daemon` | gRPC named pipe |
+| PID file | `~/.openllm/openllm.pid` | Daemon process ID |
 | User Config | `~/.openllm/config.yaml` | User-level provider config |
 | Workspace Config | `<ws>/.openllm/config.yaml` | Workspace-level config |
-| Sessions | `~/.openllm/sessions/*.json` | Persisted sessions |
-| Logs | Stdout/stderr | Daemon logs (tracing) |
+| Logs | Stdout/stderr | Daemon logs |
 
 ## Security
 
-- **Secrets**: Stored in system keychain, never in config files
-- **Socket**: Unix socket with user-only permissions
+- **Secrets**: Stored in system keychain via keytar when available; never in config files
+- **Socket**: Unix socket (or named pipe) with user-only permissions
 - **Web dashboard**: Listens on localhost only
 - **No remote access**: Daemon designed for local use only
+- **Config files**: Created with mode `0o600` (user read/write only)

@@ -21,7 +21,7 @@ VS Code Extension (packages/vscode)
     ├── VSCodeCancellationTokenAdapter.ts
     └── VSCodeLoggerAdapter.ts
 
-openllm daemon (Rust)
+openllm daemon (TypeScript)
 └── gRPC server on Unix socket
 ```
 

@@ -2,344 +2,169 @@
 
 ## Prerequisites
 
-- **Rust** (stable, 1.75+)
-- **Node.js** (20+) - For VS Code extension and proto generation
-- **protoc** - Protocol buffer compiler
+- **Node.js** (20+)
+- **npm**
+- **protoc** - Protocol buffer compiler (for client generation)
 - **VS Code** (for extension development)
 
 ## Repository Structure
 
 ```
 openllm/
-├── Cargo.toml              # Rust workspace root
-├── crates/
-│   └── openllm/            # Main Rust daemon crate
-│       ├── src/
-│       │   ├── main.rs     # CLI entrypoint (daemon, web subcommands)
-│       │   ├── server/     # gRPC server (tonic)
-│       │   ├── providers/  # LLM providers (via genai crate)
-│       │   ├── session/    # Session management
-│       │   ├── secrets/    # Keychain integration
-│       │   ├── resolver/   # Config & secret resolvers
-│       │   └── web/        # Web dashboard (axum, embedded assets)
-│       └── Cargo.toml
-├── proto/
-│   └── openllm/v1/
-│       └── service.proto   # gRPC service definition
 ├── packages/
-│   ├── grpc-client/        # Generated TypeScript gRPC stubs
-│   ├── proto-ts/           # TypeScript proto types
-│   ├── python/             # Python gRPC client
-│   └── vscode/             # VS Code extension
-├── scripts/
-│   └── generate-clients.sh # Proto stub generation
-└── docs/                   # Documentation
+│   ├── daemon/              # TypeScript daemon
+│   │   ├── src/             # Source code
+│   │   ├── static/          # Web dashboard HTML
+│   │   ├── tests/           # Integration tests
+│   │   └── vitest.config.ts
+│   ├── python/              # Python gRPC client
+│   └── vscode/              # VS Code extension
+├── proto/                   # gRPC service definition
+├── tests/                   # Test docs
+└── docs/
 ```
 
 ## Building
 
-### Rust Daemon
-
 ```bash
-# Build all Rust code
-cargo build --release
-
-# Run tests
-cargo test
-
-# Build only the daemon crate
-cargo build --release -p openllm
-
-# The binary is at target/release/openllm
-```
-
-### Running the Daemon
-
-```bash
-# Start the daemon (foreground)
-./target/release/openllm daemon
-
-# Start the web server (requires daemon running)
-./target/release/openllm web
-
-# Or run from cargo
-cargo run --release -- daemon
-cargo run --release -- web
-```
-
-### Proto Generation
-
-```bash
-# Generate TypeScript stubs
-./scripts/generate-clients.sh typescript
-
-# The stubs are output to packages/grpc-client/src/generated/
-```
-
-### VS Code Extension
-
-```bash
-cd packages/vscode
-
-# Install dependencies
+cd packages/daemon
 npm install
+npm run build   # TypeScript compilation
+npm test        # vitest (53 tests)
+```
 
-# Build TypeScript
-npm run compile
+## Running
 
-# Package to VSIX
-npm run package
-
-# Install in VS Code
-code --install-extension open-llm-provider-0.1.0.vsix
+```bash
+node dist/index.js daemon         # Start daemon
+node dist/index.js web            # Start web dashboard
+node dist/index.js status         # Check status
+node dist/index.js stop           # Stop daemon
 ```
 
 ## Development Workflow
 
 ### 1. Making Daemon Changes
 
+Edit `src/`, rebuild, restart:
+
 ```bash
-# Edit Rust code in crates/openllm/src/
-
-# Build and test
-cargo build --release && cargo test
-
+cd packages/daemon
+npm run build
 # Kill any running daemon
-pkill -9 openllm
-
-# Remove stale socket
-rm -f /run/user/$(id -u)/openllm/daemon.sock
-
-# Restart daemon
-./target/release/openllm daemon
+pkill -f "node dist/index.js daemon"
+# Restart
+node dist/index.js daemon
 ```
 
 ### 2. Making Proto Changes
 
-```bash
-# Edit proto/openllm/v1/service.proto
+1. Edit `proto/openllm/v1/service.proto`
+2. Regenerate TypeScript stubs for VS Code:
+   ```bash
+   cd proto
+   ./generate.sh
+   # Or manually with protoc (see proto/README.md)
+   ```
+3. The daemon uses `@grpc/proto-loader` for dynamic loading and does not need stub regeneration
 
-# Regenerate TypeScript stubs
-./scripts/generate-clients.sh typescript
-
-# Copy to packages that need them
-cp packages/grpc-client/src/generated/openllm/v1/service.ts packages/vscode/src/proto/openllm/v1/
-cp packages/grpc-client/src/generated/openllm/v1/service.ts packages/proto-ts/src/openllm/v1/
-
-# Rebuild the daemon (it generates Rust code from proto)
-cargo build --release
-```
-
-### 3. VS Code Extension Development
+### 3. VS Code Extension
 
 1. Open `packages/vscode` in VS Code
 2. Press **F5** to launch Extension Development Host
-3. Make changes and reload window to test
-4. Check Output panel → "Open LLM Provider" for logs
+3. Check Output panel → "Open LLM Provider" for logs
 
-### 4. Web Dashboard Development
+### 4. Web Dashboard
 
-```bash
-# Start daemon
-./target/release/openllm daemon &
-
-# Start web server
-./target/release/openllm web
-
-# Open http://localhost:8787
-
-# Edit crates/openllm/src/web/static/index.html
-# Rebuild and restart web server to see changes
-cargo build --release
-./target/release/openllm web
-```
+1. Edit `packages/daemon/static/index.html`
+2. Restart the web server to see changes
+3. Start daemon + web: `node dist/index.js web` (or start daemon first, then web)
 
 ## Adding a New Provider
 
-Providers are implemented using the `genai` crate. To add a new provider:
+Edit `packages/daemon/src/providers/adapter.ts`:
 
-### 1. Check if genai supports it
+- Add to **PROVIDER_ENGINE_MAP** – maps OpenLLM provider ID to multi-llm-ts engine name
+- Add to **PROVIDER_DISPLAY_NAMES** – human-readable name
+- Add to **NO_KEY_PROVIDERS** (as a `Set`) if the provider does not require an API key
+- Add to **DEFAULT_ENV_VARS** – default environment variable name for the API key
 
-The `genai` crate already supports many providers. Check if your provider is available.
+Example:
 
-### 2. Add to provider registry
+```typescript
+const PROVIDER_ENGINE_MAP: Record<string, string> = {
+  // ... existing
+  newprovider: 'newprovider',
+};
 
-Edit `crates/openllm/src/providers/mod.rs`:
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  // ... existing
+  newprovider: 'New Provider',
+};
 
-```rust
-// Add to BUILTIN_PROVIDERS list
-static BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
-    // ... existing providers
-    BuiltinProvider {
-        id: "newprovider",
-        display_name: "New Provider",
-        default_api_base: "https://api.newprovider.com/v1",
-        requires_api_key: true,
-        default_key_env: "NEWPROVIDER_API_KEY",
-    },
-];
+const NO_KEY_PROVIDERS = new Set(['mock', 'ollama', 'lmstudio']);  // add if no key needed
+
+const DEFAULT_ENV_VARS: Record<string, string> = {
+  // ... existing
+  newprovider: 'NEWPROVIDER_API_KEY',
+};
 ```
-
-### 3. Add genai adapter type
-
-If the provider needs a specific genai `AdapterKind`:
-
-```rust
-// In create_provider_client function
-match provider_id {
-    // ... existing cases
-    "newprovider" => AdapterKind::NewProvider,  // if genai has it
-    _ => AdapterKind::OpenAI,  // or use OpenAI-compatible if it works
-}
-```
-
-### 4. Update web UI
-
-Add any provider-specific hints or UI in `crates/openllm/src/web/static/index.html`.
 
 ## Adding a New gRPC RPC
 
-### 1. Define in proto
+1. **Define in proto** – Edit `proto/openllm/v1/service.proto`:
+   ```protobuf
+   rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);
+   message NewMethodRequest { string field = 1; }
+   message NewMethodResponse { string result = 1; }
+   ```
 
-Edit `proto/openllm/v1/service.proto`:
+2. **Regenerate stubs** – Run `proto/generate.sh` (or equivalent) for the VS Code extension
 
-```protobuf
-service OpenLLM {
-    // ... existing RPCs
-    
-    rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);
-}
-
-message NewMethodRequest {
-    string field = 1;
-}
-
-message NewMethodResponse {
-    string result = 1;
-}
-```
-
-### 2. Regenerate stubs
-
-```bash
-./scripts/generate-clients.sh typescript
-cargo build --release  # Regenerates Rust code
-```
-
-### 3. Implement in Rust
-
-Edit `crates/openllm/src/server/grpc.rs`:
-
-```rust
-async fn new_method(
-    &self,
-    request: Request<NewMethodRequest>,
-) -> Result<Response<NewMethodResponse>, Status> {
-    let req = request.into_inner();
-    
-    // Implementation
-    
-    Ok(Response::new(NewMethodResponse {
-        result: "done".to_string(),
-    }))
-}
-```
+3. **Implement handler** – Edit `packages/daemon/src/server/openllm-service.ts`:
+   ```typescript
+   NewMethod(
+     call: grpc.ServerUnaryCall<any, any>,
+     callback: grpc.sendUnaryData<any>
+   ): void {
+     const req = call.request;
+     callback(null, { result: 'done' });
+   }
+   ```
 
 ## Testing
 
-### Rust Tests
+- **Unit tests** – vitest, co-located with source (`src/**/*.test.ts`)
+- **Integration tests** – `tests/integration/*.test.ts`
+- **Mock provider** – Use `mock/echo`, `mock/fixed`, `mock/error` for testing without network or API keys
 
 ```bash
-# All tests
-cargo test
-
-# Specific test
-cargo test test_name
-
-# With output
-cargo test -- --nocapture
+cd packages/daemon
+npm test                    # All tests
+npx vitest run src/         # Unit tests only
+npx vitest run tests/       # Integration tests only
 ```
-
-### VS Code Extension
-
-Use F5 to launch the extension in development mode. Check:
-- Output panel → "Open LLM Provider"
-- Developer Tools Console (Help → Toggle Developer Tools)
-
-### Web Dashboard
-
-Open browser dev tools to check:
-- Network tab for API calls
-- Console for Alpine.js errors
 
 ## Debugging
 
-### Daemon Logs
-
-The daemon uses `tracing` for logging:
-
-```bash
-# Set log level
-RUST_LOG=debug ./target/release/openllm daemon
-
-# Or more specific
-RUST_LOG=openllm=debug,tonic=info ./target/release/openllm daemon
-```
-
-### Check Daemon Socket
-
-```bash
-# See if socket exists
-ls -la /run/user/$(id -u)/openllm/
-
-# Check if daemon is listening
-ss -xl | grep openllm
-```
-
-### VS Code Extension Logs
-
-1. Open Output panel (View → Output)
-2. Select "Open LLM Provider" from dropdown
-3. Set `openLLM.logLevel` to `debug` in settings
-
-### Web Server Issues
-
-```bash
-# Check if port is in use
-lsof -i :8787
-
-# Check daemon is running
-pgrep -f "openllm daemon"
-```
+- **Daemon logs** – Console output from the daemon process
+- **Socket check** – `ls -la /run/user/$(id -u)/openllm/`
+- **VS Code logs** – Output panel → "Open LLM Provider"
 
 ## Common Issues
 
 ### Socket Permission Denied
 
 ```bash
-# Check socket permissions
 ls -la /run/user/$(id -u)/openllm/daemon.sock
-
-# Should be owned by your user with 0600 permissions
-```
-
-### Proto Mismatch
-
-If TypeScript and Rust disagree on proto format:
-
-```bash
-# Clean and regenerate everything
-rm -rf packages/grpc-client/src/generated/*
-./scripts/generate-clients.sh typescript
-cargo clean
-cargo build --release
+# Should be owned by your user with appropriate permissions
 ```
 
 ### Daemon Won't Start
 
 ```bash
 # Kill any stale processes
-pkill -9 openllm
+pkill -f "node dist/index.js daemon"
 
 # Remove stale socket
 rm -f /run/user/$(id -u)/openllm/daemon.sock
@@ -348,34 +173,24 @@ rm -f /run/user/$(id -u)/openllm/daemon.sock
 lsof -i :8787
 
 # Restart
-./target/release/openllm daemon
+node dist/index.js daemon
+```
+
+### Proto Mismatch
+
+If TypeScript clients and daemon disagree on proto format:
+
+```bash
+# Regenerate VS Code stubs
+cd proto && ./generate.sh
+
+# Rebuild daemon (uses dynamic loading, no regeneration needed)
+cd packages/daemon && npm run build
 ```
 
 ### Extension Not Connecting
 
-1. Ensure daemon is running
+1. Ensure daemon is running: `node dist/index.js status`
 2. Check Output panel for connection errors
 3. Reload VS Code window
-4. Check socket path matches expected location
-
-## Release Process
-
-1. Update version in:
-   - `crates/openllm/Cargo.toml`
-   - `packages/vscode/package.json`
-
-2. Build release binary:
-   ```bash
-   cargo build --release
-   ```
-
-3. Package VS Code extension:
-   ```bash
-   cd packages/vscode
-   npm run package
-   ```
-
-4. Test the release:
-   - Install VSIX
-   - Start daemon
-   - Verify all features work
+4. Verify socket path matches expected location

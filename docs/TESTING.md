@@ -74,7 +74,7 @@ curl -X POST http://localhost:8787/api/chat \
   -d '{"model":"mock/echo","messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
-## Legacy Tests
+## Adding Tests
 
-The `legacy-rust-napi/` folder contains tests from the original Rust NAPI architecture.
-These are preserved for reference but are not runnable against the TypeScript daemon.
+New unit tests should be co-located with their source files (e.g., `src/foo.test.ts`).
+New integration tests should go in `packages/daemon/tests/integration/`.

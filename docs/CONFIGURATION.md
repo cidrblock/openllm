@@ -70,17 +70,18 @@ providers:
 |----------|-----|-----------------|
 | OpenAI | `openai` | `OPENAI_API_KEY` |
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` |
-| Google Gemini | `gemini` | `GEMINI_API_KEY` |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` |
 | Mistral | `mistral` | `MISTRAL_API_KEY` |
 | Ollama | `ollama` | *(none needed)* |
 | Azure OpenAI | `azure` | `AZURE_OPENAI_API_KEY` |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
 | Groq | `groq` | `GROQ_API_KEY` |
-| Together | `together` | `TOGETHER_API_KEY` |
-| Cohere | `cohere` | `COHERE_API_KEY` |
 | xAI (Grok) | `xai` | `XAI_API_KEY` |
-| Fireworks | `fireworks` | `FIREWORKS_API_KEY` |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` |
+| LM Studio | `lmstudio` | *(none needed)* |
+| Meta (Llama) | `meta` | `META_API_KEY` |
+| Mock (Testing) | `mock` | *(none needed)* |
 
 ## Web Dashboard Configuration
 
@@ -119,16 +120,27 @@ No configuration is stored in the extension itself.
 ### View Config
 ```bash
 # Check daemon status
-./target/release/openllm daemon --status
+openllm status
+```
+
+For development (from `packages/daemon`):
+```bash
+node dist/index.js status
 ```
 
 ### Start Services
 ```bash
 # Start daemon (background)
-./target/release/openllm daemon &
+openllm daemon &
 
 # Start web server
-./target/release/openllm web
+openllm web
+```
+
+For development (from `packages/daemon`):
+```bash
+node dist/index.js daemon &
+node dist/index.js web
 ```
 
 ## Example Configurations

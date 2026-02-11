@@ -13,15 +13,22 @@ proto/
 
 ## Generating Clients
 
-### Rust (automatic)
+### TypeScript/Node.js (VS Code extension)
 
-The Rust server/client code is generated automatically by `tonic-build` when building the `openllm` crate:
+The VS Code extension uses `ts-proto` + `nice-grpc`:
 
 ```bash
-cargo build -p openllm
+protoc \
+  --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+  --ts_proto_out=packages/vscode/src/proto \
+  --ts_proto_opt=outputServices=nice-grpc,outputServices=generic-definitions,useExactTypes=false \
+  -I proto \
+  proto/openllm/v1/service.proto
 ```
 
-Generated code is placed in `target/` and included via `tonic::include_proto!`.
+### TypeScript Daemon
+
+The daemon uses `@grpc/proto-loader` for dynamic proto loading (no code generation needed).
 
 ### Python
 
@@ -36,52 +43,23 @@ Generate Python client:
 ```bash
 python -m grpc_tools.protoc \
   -I proto \
-  --python_out=packages/python/src/openllm \
-  --grpc_python_out=packages/python/src/openllm \
+  --python_out=packages/python/src/openllm_grpc \
+  --pyi_out=packages/python/src/openllm_grpc \
+  --grpc_python_out=packages/python/src/openllm_grpc \
   proto/openllm/v1/service.proto
-```
-
-Or use the generation script:
-
-```bash
-./proto/generate.sh python
-```
-
-### TypeScript/Node.js
-
-Install ts-proto:
-
-```bash
-npm install -g ts-proto
-```
-
-Generate TypeScript client:
-
-```bash
-protoc \
-  --plugin=./node_modules/.bin/protoc-gen-ts_proto \
-  --ts_proto_out=packages/node/src/proto \
-  --ts_proto_opt=outputServices=nice-grpc,outputServices=generic-definitions,useExactTypes=false \
-  -I proto \
-  proto/openllm/v1/service.proto
-```
-
-Or use the generation script:
-
-```bash
-./proto/generate.sh typescript
 ```
 
 ## Service Overview
 
 The `OpenLLM` service provides:
 
-- **Chat**: Stateless and session-based chat with LLM providers
-- **Sessions**: Create, list, replay, fork, export/import sessions
+- **Chat**: Stateless streaming chat with LLM providers
 - **Models & Providers**: List available models and provider status
 - **Tools**: List and execute MCP tools
 - **Configuration**: Get/update daemon configuration
 - **Secrets**: Manage API keys and secrets
-- **Lifecycle**: Register/unregister clients, shutdown daemon
+- **Lifecycle**: Register/unregister clients, health check, shutdown
+- **VS Code Backchannel**: Bidirectional stream for workspace queries
+- **Web Server Control**: Start/stop the embedded web dashboard
 
 See `service.proto` for the full API definition.

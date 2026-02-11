@@ -78,7 +78,6 @@
     "build": "npm run bundle",
     "bundle": "node esbuild.js --production",
     "bundle:daemon": "node scripts/bundle-daemon.js",
-    "bundle:daemon:all": "node scripts/bundle-daemon.js --all",
     "compile": "tsc -p ./",
     "compile:check": "tsc -p ./ --noEmit",
     "clean": "rm -rf out bin",
