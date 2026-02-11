@@ -2,9 +2,9 @@
 
 ## Prerequisites
 
-- **Rust** (stable, 1.70+)
-- **Node.js** (20+)
-- **Python** (3.9+) with virtual environment
+- **Rust** (stable, 1.75+)
+- **Node.js** (20+) - For VS Code extension and proto generation
+- **protoc** - Protocol buffer compiler
 - **VS Code** (for extension development)
 
 ## Repository Structure
@@ -13,68 +13,67 @@
 openllm/
 ├── Cargo.toml              # Rust workspace root
 ├── crates/
-│   ├── openllm-core/       # Rust core library
-│   │   ├── providers/      # LLM providers (OpenAI, Anthropic, VsCodeProvider, etc.)
-│   │   ├── tools/          # Tool orchestration (ToolRegistry, ChatOrchestrator)
-│   │   ├── mcp/            # MCP client for VS Code communication
-│   │   ├── secrets/        # Secret stores
-│   │   └── config/         # Config providers
-│   ├── openllm-napi/       # Node.js bindings (NAPI-rs)
-│   └── openllm-python/     # Python bindings (PyO3)
+│   └── openllm/            # Main Rust daemon crate
+│       ├── src/
+│       │   ├── main.rs     # CLI entrypoint (daemon, web subcommands)
+│       │   ├── server/     # gRPC server (tonic)
+│       │   ├── providers/  # LLM providers (via genai crate)
+│       │   ├── session/    # Session management
+│       │   ├── secrets/    # Keychain integration
+│       │   ├── resolver/   # Config & secret resolvers
+│       │   └── web/        # Web dashboard (axum, embedded assets)
+│       └── Cargo.toml
+├── proto/
+│   └── openllm/v1/
+│       └── service.proto   # gRPC service definition
 ├── packages/
-│   ├── core/               # TypeScript types (legacy, being deprecated)
-│   └── vscode/             # VS Code extension (MCP server + UI)
-├── tests/
-│   ├── node/               # Node.js integration tests
-│   └── python/             # Python integration tests
+│   ├── grpc-client/        # Generated TypeScript gRPC stubs
+│   ├── proto-ts/           # TypeScript proto types
+│   ├── python/             # Python gRPC client
+│   └── vscode/             # VS Code extension
+├── scripts/
+│   └── generate-clients.sh # Proto stub generation
 └── docs/                   # Documentation
 ```
 
 ## Building
 
-### Rust Core
+### Rust Daemon
 
 ```bash
-# Build all Rust crates
+# Build all Rust code
 cargo build --release
 
-# Run Rust tests
+# Run tests
 cargo test
 
-# Build with all warnings
-cargo build --release 2>&1 | head -50
+# Build only the daemon crate
+cargo build --release -p openllm
+
+# The binary is at target/release/openllm
 ```
 
-### Node.js Bindings
+### Running the Daemon
 
 ```bash
-# Build NAPI bindings
-cargo build --release -p openllm-napi
+# Start the daemon (foreground)
+./target/release/openllm daemon
 
-# Copy to npm package
-cp target/release/libopenllm_napi.so crates/openllm-napi/npm/openllm.linux-x64-gnu.node
+# Start the web server (requires daemon running)
+./target/release/openllm web
 
-# Test from Node.js
-cd tests/node && node test_secret_stores.js
+# Or run from cargo
+cargo run --release -- daemon
+cargo run --release -- web
 ```
 
-### Python Bindings
+### Proto Generation
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+# Generate TypeScript stubs
+./scripts/generate-clients.sh typescript
 
-# Install maturin (build tool for PyO3)
-pip install maturin
-
-# Build and install Python package
-cd crates/openllm-python
-maturin develop --release
-
-# Test from Python
-cd ../../tests/python
-pytest test_secret_stores.py -v
+# The stubs are output to packages/grpc-client/src/generated/
 ```
 
 ### VS Code Extension
@@ -88,327 +87,295 @@ npm install
 # Build TypeScript
 npm run compile
 
-# Package to VSIX (requires Node 20+)
-npx vsce package --allow-missing-repository
+# Package to VSIX
+npm run package
+
+# Install in VS Code
+code --install-extension open-llm-provider-0.1.0.vsix
 ```
 
 ## Development Workflow
 
-### 1. Making Rust Changes
+### 1. Making Daemon Changes
 
 ```bash
-# Edit Rust code in crates/openllm-core/src/
+# Edit Rust code in crates/openllm/src/
 
 # Build and test
 cargo build --release && cargo test
 
-# Rebuild bindings
-cargo build --release -p openllm-napi -p openllm-python
+# Kill any running daemon
+pkill -9 openllm
 
-# Copy Node.js binary
-cp target/release/libopenllm_napi.so crates/openllm-napi/npm/openllm.linux-x64-gnu.node
+# Remove stale socket
+rm -f /run/user/$(id -u)/openllm/daemon.sock
 
-# Rebuild Python
-source .venv/bin/activate
-cd crates/openllm-python && maturin develop --release
+# Restart daemon
+./target/release/openllm daemon
 ```
 
-### 2. Testing Node.js
+### 2. Making Proto Changes
 
 ```bash
-cd tests/node
-node test_secret_stores.js
+# Edit proto/openllm/v1/service.proto
+
+# Regenerate TypeScript stubs
+./scripts/generate-clients.sh typescript
+
+# Copy to packages that need them
+cp packages/grpc-client/src/generated/openllm/v1/service.ts packages/vscode/src/proto/openllm/v1/
+cp packages/grpc-client/src/generated/openllm/v1/service.ts packages/proto-ts/src/openllm/v1/
+
+# Rebuild the daemon (it generates Rust code from proto)
+cargo build --release
 ```
 
-### 3. Testing Python
-
-```bash
-source .venv/bin/activate
-cd tests/python
-pytest -v
-```
-
-### 4. VS Code Extension Development
+### 3. VS Code Extension Development
 
 1. Open `packages/vscode` in VS Code
 2. Press **F5** to launch Extension Development Host
 3. Make changes and reload window to test
+4. Check Output panel → "Open LLM Provider" for logs
+
+### 4. Web Dashboard Development
+
+```bash
+# Start daemon
+./target/release/openllm daemon &
+
+# Start web server
+./target/release/openllm web
+
+# Open http://localhost:8787
+
+# Edit crates/openllm/src/web/static/index.html
+# Rebuild and restart web server to see changes
+cargo build --release
+./target/release/openllm web
+```
 
 ## Adding a New Provider
 
-### 1. Implement in Rust Core
+Providers are implemented using the `genai` crate. To add a new provider:
 
-Create `crates/openllm-core/src/providers/newprovider.rs`:
+### 1. Check if genai supports it
+
+The `genai` crate already supports many providers. Check if your provider is available.
+
+### 2. Add to provider registry
+
+Edit `crates/openllm/src/providers/mod.rs`:
 
 ```rust
-use super::traits::{Provider, ProviderMetadata};
-use crate::types::*;
+// Add to BUILTIN_PROVIDERS list
+static BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
+    // ... existing providers
+    BuiltinProvider {
+        id: "newprovider",
+        display_name: "New Provider",
+        default_api_base: "https://api.newprovider.com/v1",
+        requires_api_key: true,
+        default_key_env: "NEWPROVIDER_API_KEY",
+    },
+];
+```
 
-pub struct NewProvider {
-    logger: Arc<dyn Logger>,
-}
+### 3. Add genai adapter type
 
-impl NewProvider {
-    pub fn new(logger: Arc<dyn Logger>) -> Self {
-        Self { logger }
-    }
-}
+If the provider needs a specific genai `AdapterKind`:
 
-impl Provider for NewProvider {
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
-            id: "newprovider".to_string(),
-            display_name: "New Provider".to_string(),
-            default_api_base: "https://api.newprovider.com".to_string(),
-            requires_api_key: true,
-        }
-    }
-
-    async fn stream_chat(
-        &self,
-        messages: Vec<ChatMessage>,
-        config: ProviderModelConfig,
-        options: StreamOptions,
-        token: Arc<dyn CancellationToken>,
-    ) -> Result<BoxStream<'static, StreamChunk>, ProviderError> {
-        // Implementation
-    }
+```rust
+// In create_provider_client function
+match provider_id {
+    // ... existing cases
+    "newprovider" => AdapterKind::NewProvider,  // if genai has it
+    _ => AdapterKind::OpenAI,  // or use OpenAI-compatible if it works
 }
 ```
 
-### 2. Export from mod.rs
+### 4. Update web UI
 
-```rust
-// crates/openllm-core/src/providers/mod.rs
-mod newprovider;
-pub use newprovider::NewProvider;
-```
+Add any provider-specific hints or UI in `crates/openllm/src/web/static/index.html`.
 
-### 3. Register in Provider Factory
+## Adding a New gRPC RPC
 
-The unified `create_provider` factory handles provider instantiation:
+### 1. Define in proto
 
-```rust
-// crates/openllm-core/src/providers/mod.rs
-pub fn create_provider(provider_id: &str, logger: Arc<dyn Logger>) -> Box<dyn Provider> {
-    match provider_id.to_lowercase().as_str() {
-        "newprovider" => Box::new(NewProvider::new(Arc::clone(&logger))),
-        // ... other providers
-    }
-}
+Edit `proto/openllm/v1/service.proto`:
 
-// Also add to supported_providers()
-pub fn supported_providers() -> Vec<ProviderInfo> {
-    vec![
-        // ... existing providers
-        ProviderInfo { id: "newprovider", display_name: "New Provider" },
-    ]
-}
-```
-
-### 4. Bindings Auto-Expose New Providers
-
-The NAPI and Python bindings use the unified `LlmProvider` class that delegates to `create_provider`. No binding-specific code is needed for new providers:
-
-```typescript
-// Node.js - just use the provider ID
-const provider = new LlmProvider("newprovider");
-
-// Python - same pattern
-provider = LlmProvider("newprovider")
-```
-
-### Special Case: VsCodeProvider
-
-The `VsCodeProvider` is unique—it uses MCP to communicate with the VS Code extension rather than direct HTTP:
-
-```rust
-// crates/openllm-core/src/providers/vscode.rs
-pub struct VsCodeProvider {
-    mcp_client: Option<Arc<McpClient>>,
-    cached_models: RwLock<Vec<VsCodeModelInfo>>,
-    logger: Arc<dyn Logger>,
-}
-
-impl VsCodeProvider {
-    // Call openllm_llm_list MCP tool to get vscode.lm models
-    pub async fn list_models(&self) -> Result<Vec<VsCodeModelInfo>, ProviderError>;
+```protobuf
+service OpenLLM {
+    // ... existing RPCs
     
-    // Call openllm_llm_send MCP tool to chat with vscode.lm model
-    async fn send_request(&self, model_id: &str, messages: &[ChatMessage]) 
-        -> Result<Vec<StreamChunk>, ProviderError>;
+    rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);
+}
+
+message NewMethodRequest {
+    string field = 1;
+}
+
+message NewMethodResponse {
+    string result = 1;
 }
 ```
 
-This allows OpenLLM to access Copilot and other `vscode.lm` models through the same unified API.
+### 2. Regenerate stubs
 
-### 5. Update VS Code Extension
-
-The VS Code extension's `NativeProviderAdapter` automatically uses the unified interface. If the provider has an alias (e.g., "google" for "gemini"), add it to the name normalization:
-
-```typescript
-// packages/vscode/src/adapters/NativeProviderAdapter.ts
-if (normalizedName === 'newprovider-alias') {
-    normalizedName = 'newprovider';
-}
+```bash
+./scripts/generate-clients.sh typescript
+cargo build --release  # Regenerates Rust code
 ```
 
-## Adding a New Secret Store
+### 3. Implement in Rust
 
-### 1. Implement in Rust
-
-Create `crates/openllm-core/src/secrets/newstore.rs`:
+Edit `crates/openllm/src/server/grpc.rs`:
 
 ```rust
-use super::traits::{SecretStore, SecretInfo};
-
-pub struct NewSecretStore {
-    // fields
-}
-
-impl SecretStore for NewSecretStore {
-    fn name(&self) -> &str { "newstore" }
-    fn is_available(&self) -> bool { true }
-    fn get(&self, key: &str) -> Option<String> { /* ... */ }
-    fn store(&self, key: &str, value: &str) -> Result<(), Box<dyn Error>> { /* ... */ }
-    fn delete(&self, key: &str) -> Result<(), Box<dyn Error>> { /* ... */ }
-    fn has(&self, key: &str) -> bool { /* ... */ }
-    fn get_info(&self, key: &str) -> SecretInfo { /* ... */ }
+async fn new_method(
+    &self,
+    request: Request<NewMethodRequest>,
+) -> Result<Response<NewMethodResponse>, Status> {
+    let req = request.into_inner();
+    
+    // Implementation
+    
+    Ok(Response::new(NewMethodResponse {
+        result: "done".to_string(),
+    }))
 }
 ```
-
-### 2. Register in Registry
-
-```rust
-// crates/openllm-core/src/secrets/registry.rs
-registry.insert("newstore", ("Description", false));
-```
-
-### 3. Add to Bindings
-
-Follow same pattern as providers.
 
 ## Testing
 
-### Running All Tests
+### Rust Tests
 
 ```bash
-# Rust tests
+# All tests
 cargo test
 
-# Node.js tests
-cd tests/node && node test_secret_stores.js
+# Specific test
+cargo test test_name
 
-# Python tests
-source .venv/bin/activate
-pytest tests/python/ -v
-```
-
-### VS Code Extension Tests
-
-Tests are in `packages/vscode/src/adapters/__tests__/`:
-- `MessageConverter.test.ts`
-- `VSCodeCancellationTokenAdapter.test.ts`
-- `VSCodeProviderAdapter.test.ts`
-- `ProviderIntegration.test.ts`
-
-## Debugging
-
-### Rust
-
-```bash
-# With debug symbols
-cargo build
-
-# Run with RUST_BACKTRACE
-RUST_BACKTRACE=1 cargo test
-```
-
-### Node.js Bindings
-
-```bash
-# Check if binding loads
-node -e "console.log(require('@openllm/native'))"
-```
-
-### Python Bindings
-
-```bash
-source .venv/bin/activate
-python -c "import openllm; print(dir(openllm))"
+# With output
+cargo test -- --nocapture
 ```
 
 ### VS Code Extension
 
-1. Open Output panel → "Open LLM Provider"
-2. Set `openLLM.logLevel` to `"debug"` in settings
-3. Check Developer Tools Console (Help → Toggle Developer Tools)
+Use F5 to launch the extension in development mode. Check:
+- Output panel → "Open LLM Provider"
+- Developer Tools Console (Help → Toggle Developer Tools)
+
+### Web Dashboard
+
+Open browser dev tools to check:
+- Network tab for API calls
+- Console for Alpine.js errors
+
+## Debugging
+
+### Daemon Logs
+
+The daemon uses `tracing` for logging:
+
+```bash
+# Set log level
+RUST_LOG=debug ./target/release/openllm daemon
+
+# Or more specific
+RUST_LOG=openllm=debug,tonic=info ./target/release/openllm daemon
+```
+
+### Check Daemon Socket
+
+```bash
+# See if socket exists
+ls -la /run/user/$(id -u)/openllm/
+
+# Check if daemon is listening
+ss -xl | grep openllm
+```
+
+### VS Code Extension Logs
+
+1. Open Output panel (View → Output)
+2. Select "Open LLM Provider" from dropdown
+3. Set `openLLM.logLevel` to `debug` in settings
+
+### Web Server Issues
+
+```bash
+# Check if port is in use
+lsof -i :8787
+
+# Check daemon is running
+pgrep -f "openllm daemon"
+```
 
 ## Common Issues
 
-### NAPI Build Fails
+### Socket Permission Denied
 
 ```bash
-# Ensure you have the right target
-rustup target add x86_64-unknown-linux-gnu
+# Check socket permissions
+ls -la /run/user/$(id -u)/openllm/daemon.sock
 
-# Clean and rebuild
+# Should be owned by your user with 0600 permissions
+```
+
+### Proto Mismatch
+
+If TypeScript and Rust disagree on proto format:
+
+```bash
+# Clean and regenerate everything
+rm -rf packages/grpc-client/src/generated/*
+./scripts/generate-clients.sh typescript
 cargo clean
-cargo build --release -p openllm-napi
+cargo build --release
 ```
 
-### Python Import Error
+### Daemon Won't Start
 
 ```bash
-# Ensure you're in the right venv
-which python  # Should be .venv/bin/python
+# Kill any stale processes
+pkill -9 openllm
 
-# Rebuild
-cd crates/openllm-python
-maturin develop --release
+# Remove stale socket
+rm -f /run/user/$(id -u)/openllm/daemon.sock
+
+# Check for port conflicts
+lsof -i :8787
+
+# Restart
+./target/release/openllm daemon
 ```
 
-### VS Code Extension Not Loading
+### Extension Not Connecting
 
-1. Check that `@openllm/native` resolves:
-   ```bash
-   cd packages/vscode
-   node -e "console.log(require.resolve('@openllm/native'))"
-   ```
-
-2. Ensure the `.node` binary exists and matches your platform
-
-### Keychain Store Not Working
-
-The keychain store requires:
-- macOS: Keychain Access
-- Linux: `libsecret` (Secret Service API)
-- Windows: Credential Manager
-
-On Linux, install:
-```bash
-sudo apt install libsecret-1-dev
-```
+1. Ensure daemon is running
+2. Check Output panel for connection errors
+3. Reload VS Code window
+4. Check socket path matches expected location
 
 ## Release Process
 
 1. Update version in:
-   - `Cargo.toml` (workspace version)
+   - `crates/openllm/Cargo.toml`
    - `packages/vscode/package.json`
-   - `crates/openllm-napi/npm/package.json`
 
-2. Build all bindings for target platforms
+2. Build release binary:
+   ```bash
+   cargo build --release
+   ```
 
-3. Test all bindings
-
-4. Package VS Code extension:
+3. Package VS Code extension:
    ```bash
    cd packages/vscode
-   npx vsce package
+   npm run package
    ```
 
-5. Publish Python package:
-   ```bash
-   cd crates/openllm-python
-   maturin publish
-   ```
+4. Test the release:
+   - Install VSIX
+   - Start daemon
+   - Verify all features work

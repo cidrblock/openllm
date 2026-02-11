@@ -1,0 +1,44 @@
+{
+  "name": "@openllm/daemon",
+  "version": "0.1.0",
+  "description": "OpenLLM daemon - unified AI service",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "openllm": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "daemon": "tsx src/index.ts daemon",
+    "web": "tsx src/index.ts web",
+    "status": "tsx src/index.ts status",
+    "test": "vitest",
+    "lint": "eslint src/",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --outfile=dist/daemon.js --format=esm"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.10.0",
+    "@grpc/proto-loader": "^0.7.13",
+    "commander": "^12.1.0",
+    "express": "^4.21.0",
+    "js-yaml": "^4.1.0",
+    "keytar": "^7.9.0",
+    "multi-llm-ts": "file:../../../multi-llm-ts",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "esbuild": "^0.23.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

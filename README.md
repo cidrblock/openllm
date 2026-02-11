@@ -1,206 +1,183 @@
-# Open LLM
+# OpenLLM
 
-Bring Your Own LLM — a unified interface for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, Copilot, and more.
+A unified AI daemon for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and more.
 
 ## Features
 
-- **Multi-provider support**: 8+ LLM providers with unified API
-- **Multi-language**: Rust core with Python and Node.js bindings
-- **VS Code extension**: Native integration with `vscode.lm` API (Copilot, GitHub Models)
-- **Unified orchestration**: Tool calling handled in Rust for all providers
-- **MCP integration**: Access VS Code models and tools via Model Context Protocol
-- **Pluggable storage**: Environment variables, system keychain, or custom stores
-- **Native configuration**: YAML config files shared across all tools
+- **Unified daemon**: Single Rust binary serves all clients via gRPC
+- **Multi-provider**: 15+ LLM providers with consistent API
+- **Web dashboard**: Configure providers, API keys, and models via browser UI
+- **Session continuity**: Start a chat in VS Code, continue in CLI, share with teammates
+- **VS Code integration**: Models appear in VS Code's Language Model picker
+- **Dynamic model discovery**: Fetches available models from provider APIs
 
-## Supported Providers
+## Architecture
 
-| Provider | Tool Calling | Vision | Streaming | Notes |
-|----------|-------------|--------|-----------|-------|
-| OpenAI | ✓ | ✓ | ✓ | Direct HTTP |
-| Anthropic | ✓ | ✓ | ✓ | Direct HTTP |
-| Google Gemini | ✓ | ✓ | ✓ | Direct HTTP |
-| Mistral | ✓ | ✗ | ✓ | Direct HTTP |
-| Ollama (local) | ✗ | ✗ | ✓ | Direct HTTP |
-| Azure OpenAI | ✓ | ✓ | ✓ | Direct HTTP |
-| OpenRouter | ✓ | ✓ | ✓ | Direct HTTP |
-| **VS Code LM** | ✓ | ✗ | ✓ | **MCP to vscode.lm** |
-
-The **VS Code LM** provider allows accessing Copilot, GitHub Models, and other `vscode.lm` models through the unified API. This works via MCP (Model Context Protocol) - the Rust core calls the VS Code extension, which proxies to `vscode.lm`.
-
-## Installation
-
-### Python
-
-```bash
-pip install openllm
 ```
-
-### Node.js
-
-```bash
-npm install @openllm/native
-```
-
-### VS Code Extension
-
-Install from VS Code Marketplace or:
-
-```bash
-code --install-extension open-llm.open-llm-provider
+┌─────────────────────────────────────────────────────────────────────┐
+│  Clients                                                             │
+│  ├── VS Code Extension (gRPC + backchannel)                         │
+│  ├── Web Dashboard (HTTP → gRPC proxy)                              │
+│  ├── Python scripts (gRPC)                                          │
+│  ├── Node.js apps (gRPC)                                            │
+│  └── CLI (gRPC)                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ gRPC (Unix socket)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  openllm daemon (Rust)                                               │
+│  ├── OpenLLM Service: chat, sessions, models, config                │
+│  ├── Providers: OpenAI, Anthropic, Gemini, Ollama, etc.             │
+│  ├── Sessions: persistence, replay, sharing                         │
+│  └── Secrets: keychain storage, env var references                  │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+    LLM APIs           Web Dashboard         VS Code
+  (HTTP direct)       (localhost:8787)    (backchannel)
 ```
 
 ## Quick Start
 
-### Python
+### 1. Build and Run
 
-```python
-from openllm import (
-    FileConfigProvider,
-    ProviderConfig,
-    KeychainSecretStore,
-    list_providers
-)
+```bash
+# Build
+cargo build --release
 
-# List available providers
-for p in list_providers():
-    print(f"{p.id}: {p.display_name}")
+# Start the daemon
+./target/release/openllm daemon
 
-# Store API key in system keychain
-keychain = KeychainSecretStore()
-keychain.store("openai", "sk-...")
-
-# Configure providers
-config = FileConfigProvider.user()
-config.add_provider(ProviderConfig(
-    name="openai",
-    enabled=True,
-    models=["gpt-4o", "gpt-4o-mini"]
-))
+# Start the web server (in another terminal)
+./target/release/openllm web
 ```
 
-### Node.js
+### 2. Configure via Web Dashboard
 
-```javascript
-const { chat, listProviders, KeychainSecretStore } = require('@openllm/native');
+Open http://localhost:8787 to:
+- Add API keys for providers (stored in system keychain)
+- Or reference environment variables for keys
+- Enable/disable models per provider
 
-// Simple chat - one function does everything
-await chat(
-  [{ role: 'user', content: 'Hello, world!' }],
-  { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-...' },
-  (chunk) => {
-    if (chunk.type === 'text') {
-      process.stdout.write(chunk.text);
-    }
-  }
-);
+### 3. Install VS Code Extension
 
-// List available providers
-listProviders().forEach(p => console.log(`${p.id}: ${p.displayName}`));
-
-// Store API key in system keychain
-const keychain = new KeychainSecretStore();
-await keychain.store('openai', 'sk-...');
+```bash
+cd packages/vscode
+npm install
+npm run package
+code --install-extension open-llm-provider-0.1.0.vsix
 ```
 
-### VS Code Extension
+The extension:
+- Connects to the daemon automatically
+- Registers configured models with VS Code's Language Model API
+- Provides workspace path info to the daemon for workspace-level config
 
-1. Open Command Palette → **"Open LLM: Providers and Models"**
-2. Add API keys for your providers
-3. Click "Models..." to fetch available models
-4. Select models and save
-5. Models appear in `vscode.lm.selectChatModels({ vendor: 'open-llm' })`
+## Supported Providers
+
+| Provider | Tool Calling | Vision | Streaming |
+|----------|-------------|--------|-----------|
+| OpenAI | ✓ | ✓ | ✓ |
+| Anthropic | ✓ | ✓ | ✓ |
+| Google Gemini | ✓ | ✓ | ✓ |
+| Mistral | ✓ | ✗ | ✓ |
+| Ollama | ✗ | ✗ | ✓ |
+| Azure OpenAI | ✓ | ✓ | ✓ |
+| OpenRouter | ✓ | ✓ | ✓ |
+| DeepSeek | ✓ | ✗ | ✓ |
+| Groq | ✓ | ✗ | ✓ |
+| Together | ✓ | ✗ | ✓ |
+| Cohere | ✓ | ✗ | ✓ |
+| xAI (Grok) | ✓ | ✗ | ✓ |
 
 ## Configuration
 
-### Native Config Files
-
-**User level:** `~/.openllm/config.yaml`
-
-```yaml
-providers:
-  - name: openai
-    enabled: true
-    models:
-      - gpt-4o
-      - gpt-4o-mini
-  - name: anthropic
-    enabled: true
-    models:
-      - claude-3-5-sonnet-20241022
-  - name: ollama
-    enabled: true
-    api_base: http://localhost:11434
-    models:
-      - llama3
-```
-
-**Workspace level:** `.openllm/config.yaml`
-
 ### API Keys
 
-Priority order:
-1. System keychain (or VS Code SecretStorage)
-2. Environment variables (`OPENAI_API_KEY`, etc.)
-3. `.env` files
+Two options per provider (mutually exclusive):
 
-See [Configuration Guide](docs/CONFIGURATION.md) for details.
+1. **Keychain storage**: Enter key value → stored securely in system keychain
+2. **Environment variable**: Specify env var name (e.g., `OPENAI_API_KEY`)
 
-## Documentation
+### Config Files
 
-- [Architecture](docs/ARCHITECTURE.md) - System design and components
-- [Configuration](docs/CONFIGURATION.md) - Settings and API key storage
-- [Usage Guide](docs/USAGE.md) - Python and Node.js examples
-- [Development](docs/DEVELOPMENT.md) - Building from source
+- **User config**: `~/.openllm/config.yaml`
+- **Workspace config**: `<workspace>/.openllm/config.yaml`
 
-## Repository Structure
+```yaml
+# Example config.yaml
+providers:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
+      - gpt-4o-mini
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
+      - claude-3-5-sonnet-20241022
+```
+
+## Project Structure
 
 ```
 openllm/
 ├── crates/
-│   ├── openllm-core/       # Rust core library
-│   ├── openllm-napi/       # Node.js bindings
-│   └── openllm-python/     # Python bindings
+│   └── openllm/              # Rust daemon + web server
+│       ├── src/
+│       │   ├── main.rs       # CLI entrypoint
+│       │   ├── server/       # gRPC services
+│       │   ├── providers/    # LLM providers (via genai)
+│       │   ├── session/      # Session management
+│       │   ├── secrets/      # Keychain integration
+│       │   ├── resolver/     # Config & secret resolution
+│       │   └── web/          # Web dashboard (axum + embedded assets)
+│       └── Cargo.toml
+├── proto/
+│   └── openllm/v1/service.proto  # gRPC service definition
 ├── packages/
-│   └── vscode/             # VS Code extension
-├── tests/
-│   ├── node/               # Node.js tests
-│   └── python/             # Python tests
-└── docs/                   # Documentation
+│   ├── python/               # Python gRPC client
+│   ├── proto-ts/             # TypeScript proto definitions
+│   └── vscode/               # VS Code extension
+└── docs/
 ```
 
-## Building from Source
+## gRPC Services
+
+The daemon exposes the `OpenLLM` service:
+
+- `Chat` / `SessionChat` - Streaming chat
+- `CreateSession` / `ListSessions` / `ForkSession` - Session management
+- `ExportSession` / `ImportSession` - Session sharing
+- `ListModels` / `ListProviders` - Discovery
+- `GetSecret` / `SetSecret` / `DeleteSecret` - Secrets management
+- `VSCodeStream` - Bidirectional backchannel for VS Code extension
+
+## Development
 
 ```bash
-# Rust core
+# Build
 cargo build --release
 
-# Node.js bindings
-cargo build --release -p openllm-napi
-cp target/release/libopenllm_napi.so crates/openllm-napi/npm/openllm.linux-x64-gnu.node
+# Run daemon
+./target/release/openllm daemon
 
-# Python bindings
-python3 -m venv .venv
-source .venv/bin/activate
-pip install maturin
-cd crates/openllm-python && maturin develop --release
+# Run web server
+./target/release/openllm web
 
-# VS Code extension
-cd packages/vscode && npm install && npm run compile
+# Generate TypeScript proto stubs
+./scripts/generate-clients.sh typescript
+
+# Build VS Code extension
+cd packages/vscode && npm run compile
 ```
 
-## Testing
+## Documentation
 
-```bash
-# Rust
-cargo test
-
-# Node.js
-cd tests/node && node test_secret_stores.js
-
-# Python
-source .venv/bin/activate
-pytest tests/python/ -v
-```
+- [Architecture](docs/ARCHITECTURE.md) - System architecture
+- [Daemon Vision](docs/DAEMON_VISION.md) - Full design document
+- [Configuration](docs/CONFIGURATION.md) - Config file reference
 
 ## License
 

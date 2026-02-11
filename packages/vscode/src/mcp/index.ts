@@ -1,13 +1,8 @@
 /**
- * MCP (Model Context Protocol) module
+ * MCP module - now handled by daemon
  * 
- * Provides an MCP-compliant server using the official @modelcontextprotocol/sdk.
- * The server runs over HTTP on a Unix socket (or Windows named pipe) for security.
- * 
- * Features:
- * - Internal tools (openllm_*) for secrets and config management
- * - VS Code tools proxied from vscode.lm.tools
- * - Full MCP protocol compliance via official SDK
+ * The daemon handles MCP server registration and tool bridging.
+ * VS Code tools are exposed via the gRPC backchannel.
  */
 
-export { McpToolServer, McpServerInfo, createMcpToolServer } from './McpToolServer';
+// McpToolServer removed - functionality now in daemon/backchannel.ts

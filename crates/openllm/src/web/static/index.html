@@ -1,0 +1,1847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenLLM Dashboard</title>
+  
+  <!-- Red Hat Design System -->
+  <link rel="stylesheet" href="https://ux.redhat.com/assets/css/red-hat-font.css">
+  <link rel="stylesheet" href="https://jspm.dev/@rhds/tokens/css/global.css">
+  
+  <!-- RHDS Web Components -->
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-card/rh-card.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-button/rh-button.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-tabs/rh-tabs.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-badge/rh-badge.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-spinner/rh-spinner.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-table/rh-table.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-tag/rh-tag.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-surface/rh-surface.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-alert/rh-alert.js"></script>
+  <script type="module" src="https://jspm.dev/@rhds/elements/rh-switch/rh-switch.js"></script>
+  
+  <!-- Alpine.js -->
+  <script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+  
+  <style>
+    :root {
+      --rh-space-lg: 24px;
+      --rh-space-md: 16px;
+      --rh-space-sm: 8px;
+      --rh-space-xs: 4px;
+    }
+    
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      margin: 0;
+      font-family: 'Red Hat Text', 'RedHatText', sans-serif;
+      background-color: var(--rh-color-surface-lighter, #f2f2f2);
+      color: var(--rh-color-text-primary, #151515);
+    }
+    
+    .header-bar {
+      background-color: var(--rh-color-surface-darkest, #151515);
+      color: var(--rh-color-text-primary-on-dark, #ffffff);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .header-bar h1 {
+      margin: 0;
+      font-family: 'Red Hat Display', 'RedHatDisplay', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 500;
+    }
+    
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* RHDS Header Buttons */
+    .header-btn {
+      background: transparent;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      border-radius: 3px;
+      padding: 4px 12px;
+      font-size: 14px;
+      font-weight: 500;
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .header-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .header-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .header-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Version Badge */
+    .version-badge {
+      background-color: transparent;
+      color: #D2D2D2;
+      border: 1px solid #4D4D4D;
+      border-radius: 3px;
+      padding: 2px 8px;
+      font-size: 12px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+    }
+    
+    main {
+      padding: var(--rh-space-lg);
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--rh-space-md);
+      margin-bottom: var(--rh-space-lg);
+    }
+    
+    .stat-card {
+      background: var(--rh-color-surface-lightest, #ffffff);
+      border-radius: var(--rh-border-radius-default, 3px);
+      padding: var(--rh-space-lg);
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+    }
+    
+    .stat-card h3 {
+      margin: 0 0 var(--rh-space-sm) 0;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--rh-color-text-secondary, #6a6e73);
+    }
+    
+    .stat-card .value {
+      font-family: 'Red Hat Display', 'RedHatDisplay', sans-serif;
+      font-size: 2rem;
+      font-weight: 500;
+      color: var(--rh-color-text-primary, #151515);
+    }
+    
+    .providers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+      gap: var(--rh-space-md);
+    }
+    
+    .provider-card {
+      background: var(--rh-color-surface-lightest, #ffffff);
+      border-radius: var(--rh-border-radius-default, 3px);
+      padding: var(--rh-space-md) var(--rh-space-lg);
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+    }
+    
+    .provider-card.configured {
+      border-left: 4px solid var(--rh-color-green-50, #3e8635);
+    }
+    
+    .provider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--rh-space-md);
+    }
+    
+    .provider-name {
+      font-family: 'Red Hat Display', 'RedHatDisplay', sans-serif;
+      font-weight: 500;
+      font-size: 1.125rem;
+    }
+    
+    .form-group {
+      margin-bottom: var(--rh-space-md);
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: var(--rh-space-sm);
+      color: var(--rh-color-text-primary, #151515);
+    }
+    
+    .form-row {
+      display: flex;
+      gap: var(--rh-space-sm);
+      align-items: flex-end;
+    }
+    
+    .form-row .form-group {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    
+    input, select, textarea {
+      width: 100%;
+      padding: 0.625rem 0.75rem;
+      font-size: 1rem;
+      font-family: 'Red Hat Text', 'RedHatText', sans-serif;
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+      border-radius: var(--rh-border-radius-default, 3px);
+      background: var(--rh-color-surface-lightest, #ffffff);
+      color: var(--rh-color-text-primary, #151515);
+    }
+    
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--rh-color-brand-red-on-light, #ee0000);
+      box-shadow: 0 0 0 1px var(--rh-color-brand-red-on-light, #ee0000);
+    }
+    
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.625rem 1rem;
+      font-size: 1rem;
+      font-family: 'Red Hat Text', 'RedHatText', sans-serif;
+      font-weight: 500;
+      border: none;
+      border-radius: var(--rh-border-radius-default, 3px);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.2s;
+    }
+    
+    /* Red Hat brand red for primary actions */
+    .btn-primary {
+      background-color: var(--rh-color-brand-red-on-light, #ee0000);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background-color: var(--rh-color-red-60, #a30000);
+    }
+    
+    .btn-danger {
+      background-color: var(--rh-color-gray-90, #151515);
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background-color: var(--rh-color-gray-80, #292929);
+    }
+    
+    .btn-secondary {
+      background-color: var(--rh-color-surface-light, #f0f0f0);
+      color: var(--rh-color-text-primary, #151515);
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+    }
+    
+    .btn-secondary:hover {
+      background-color: var(--rh-color-surface-lighter, #e0e0e0);
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    /* RHDS-compliant status tags */
+    .status-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 500;
+      border-radius: 3px;
+    }
+    
+    /* Success Tag (Configured) - RHDS green */
+    .status-tag.configured {
+      background-color: #e7f1e4;
+      color: #1e4f18;
+      border: 1px solid #3e8635;
+    }
+    
+    /* Warning Tag (Key Missing) - RHDS orange/warning */
+    .status-tag.key-missing {
+      background-color: #fdf7e7;
+      color: #795600;
+      border: 1px solid #f0ab00;
+    }
+    
+    /* Neutral Tag (Not Configured) - RHDS gray, not warning orange */
+    .status-tag.not-configured {
+      background-color: #f0f0f0;
+      color: #151515;
+      border: 1px solid #d2d2d2;
+    }
+    
+    /* Provider card key-missing state */
+    .provider-card.key-missing {
+      border-left: 4px solid #f0ab00;
+    }
+    
+    /* RHDS Toggle Group (Segmented Control) */
+    .rh-toggle-group {
+      display: inline-flex;
+      background: #f0f0f0;
+      border-radius: 3px;
+      padding: 2px;
+      gap: 2px;
+    }
+    
+    .rh-toggle-item {
+      padding: 6px 12px;
+      border: none;
+      background: transparent;
+      color: #151515;
+      font-family: 'Red Hat Text', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    
+    .rh-toggle-item:hover:not(.selected) {
+      background: #e0e0e0;
+    }
+    
+    .rh-toggle-item.selected {
+      background: #ffffff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Compact/Mini Toggle Group for card headers */
+    .rh-toggle-group-mini {
+      display: inline-flex;
+      background: #f0f0f0;
+      border-radius: 3px;
+      padding: 2px;
+      gap: 1px;
+    }
+    
+    .rh-toggle-group-mini .rh-toggle-item {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    
+    /* Header actions container */
+    .rh-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .model-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--rh-color-surface-lightest, #ffffff);
+      border-radius: var(--rh-border-radius-default, 3px);
+      overflow: hidden;
+    }
+    
+    .model-table th {
+      background: var(--rh-color-surface-light, #f0f0f0);
+      font-weight: 500;
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+    }
+    
+    .model-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+    }
+    
+    .model-table tr:hover td {
+      background: var(--rh-color-surface-lighter, #f8f8f8);
+    }
+    
+    .capability-tag {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      font-size: 0.7rem;
+      font-weight: 500;
+      border-radius: 10px;
+      margin-right: 0.25rem;
+    }
+    
+    .capability-tag.stream {
+      background: var(--rh-color-blue-10, #e7f1fa);
+      color: var(--rh-color-blue-50, #0066cc);
+    }
+    
+    .capability-tag.tools {
+      background: var(--rh-color-green-10, #f2fce4);
+      color: var(--rh-color-green-50, #3e8635);
+    }
+    
+    .capability-tag.vision {
+      background: var(--rh-color-orange-10, #fdf7e7);
+      color: var(--rh-color-orange-60, #795600);
+    }
+    
+    .chat-container {
+      height: 400px;
+      overflow-y: auto;
+      background: var(--rh-color-surface-light, #f0f0f0);
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+      border-radius: var(--rh-border-radius-default, 3px);
+      padding: var(--rh-space-md);
+    }
+    
+    .chat-message {
+      margin-bottom: var(--rh-space-md);
+      padding: var(--rh-space-md);
+      border-radius: var(--rh-border-radius-default, 3px);
+    }
+    
+    .chat-message.user {
+      background: var(--rh-color-brand-red-on-light, #ee0000);
+      color: white;
+      margin-left: 3rem;
+    }
+    
+    .chat-message.assistant {
+      background: var(--rh-color-surface-lightest, #ffffff);
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+      margin-right: 3rem;
+    }
+    
+    .chat-message strong {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+    }
+    
+    .streaming-cursor::after {
+      content: '▋';
+      animation: blink 1s infinite;
+    }
+    
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+    
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    
+    .spin {
+      animation: spin 1s linear infinite;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 3rem;
+      color: var(--rh-color-text-secondary, #6a6e73);
+    }
+    
+    /* Model checkboxes */
+    .models-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--rh-color-border-subtle, #d2d2d2);
+      border-radius: var(--rh-border-radius-default, 3px);
+      padding: var(--rh-space-sm);
+      background: var(--rh-color-surface-lighter, #f8f8f8);
+    }
+    
+    .model-checkbox {
+      display: flex;
+      align-items: center;
+      gap: var(--rh-space-sm);
+      padding: var(--rh-space-xs) var(--rh-space-sm);
+      border-radius: var(--rh-border-radius-default, 3px);
+      cursor: pointer;
+    }
+    
+    .model-checkbox:hover {
+      background: var(--rh-color-surface-light, #f0f0f0);
+    }
+    
+    .model-checkbox input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--rh-color-brand-red-on-light, #ee0000);
+    }
+    
+    .model-checkbox label {
+      flex: 1;
+      font-size: 0.875rem;
+      cursor: pointer;
+      margin: 0;
+    }
+    
+    .model-checkbox .model-id {
+      font-family: 'Red Hat Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--rh-color-text-secondary, #6a6e73);
+    }
+    
+    .enabled-count {
+      font-size: 0.75rem;
+      color: var(--rh-color-text-secondary, #6a6e73);
+      margin-top: var(--rh-space-xs);
+    }
+    
+    /* Modal styles */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    
+    .modal {
+      background: white;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    
+    .modal-header {
+      padding: var(--rh-space-md) var(--rh-space-lg);
+      border-bottom: 1px solid #d2d2d2;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .modal-header h2 {
+      margin: 0;
+      font-family: 'Red Hat Display', 'RedHatDisplay', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 500;
+    }
+    
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--rh-space-lg);
+    }
+    
+    .modal-footer {
+      padding: var(--rh-space-md) var(--rh-space-lg);
+      border-top: 1px solid #d2d2d2;
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--rh-space-sm);
+    }
+
+    /* RHDS Modal */
+    .rh-modal {
+      background: #fff;
+      border-radius: 3px;
+      width: 400px;
+      max-width: 90vw;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+    }
+    .rh-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      border-bottom: 1px solid #d2d2d2;
+    }
+    .rh-modal-header h3 {
+      margin: 0;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #151515;
+    }
+    .rh-close-btn {
+      background: none;
+      border: none;
+      font-size: 1.25rem;
+      color: #6a6e73;
+      cursor: pointer;
+      padding: 4px;
+    }
+    .rh-close-btn:hover { color: #151515; }
+    .rh-modal-body {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .rh-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 16px 24px;
+      border-top: 1px solid #d2d2d2;
+    }
+
+    /* RHDS Selectable Tiles */
+    .rh-tile {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid #d2d2d2;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .rh-tile:hover { border-color: #8a8d90; background: #fafafa; }
+    .rh-tile--selected {
+      border: 2px solid #ee0000;
+      background: #fff;
+    }
+    .rh-tile-radio {
+      padding-top: 2px;
+    }
+    .rh-tile-radio input {
+      accent-color: #ee0000;
+      width: 16px;
+      height: 16px;
+    }
+    .rh-tile-content { flex: 1; }
+    .rh-tile-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #151515;
+      margin-bottom: 4px;
+    }
+    .rh-tile-desc {
+      font-size: 0.85rem;
+      color: #6a6e73;
+      margin-bottom: 8px;
+    }
+    .rh-tile-path {
+      display: block;
+      font-size: 0.8rem;
+      color: #6a6e73;
+      background: #f0f0f0;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-family: 'Red Hat Mono', monospace;
+    }
+
+    /* RHDS Form Elements */
+    .rh-form-group {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e0e0e0;
+    }
+    .rh-form-label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: #151515;
+      margin-bottom: 6px;
+    }
+    .rh-text-input, .rh-select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d2d2d2;
+      border-radius: 3px;
+      font-size: 0.875rem;
+      box-sizing: border-box;
+    }
+    .rh-text-input:focus, .rh-select:focus {
+      outline: none;
+      border-color: #ee0000;
+      box-shadow: 0 0 0 1px #ee0000;
+    }
+    .rh-helper-text {
+      font-size: 0.75rem;
+      color: #6a6e73;
+      margin: 6px 0 0 0;
+    }
+
+    /* RHDS Buttons */
+    .rh-btn {
+      padding: 8px 16px;
+      border-radius: 3px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .rh-btn--primary {
+      background: #ee0000;
+      color: #fff;
+      border: none;
+    }
+    .rh-btn--primary:hover { background: #a30000; }
+    .rh-btn--primary:disabled {
+      background: #d2d2d2;
+      cursor: not-allowed;
+    }
+    .rh-btn--secondary {
+      background: #fff;
+      color: #151515;
+      border: 1px solid #d2d2d2;
+    }
+    .rh-btn--secondary:hover { background: #f0f0f0; }
+    
+    .search-filters {
+      display: flex;
+      gap: var(--rh-space-md);
+      margin-bottom: var(--rh-space-md);
+      flex-wrap: wrap;
+    }
+    
+    .search-input {
+      flex: 1;
+      min-width: 200px;
+    }
+    
+    .filter-chips {
+      display: flex;
+      gap: var(--rh-space-sm);
+      align-items: center;
+    }
+    
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 12px;
+      font-size: 0.875rem;
+      border-radius: 16px;
+      cursor: pointer;
+      border: 1px solid #d2d2d2;
+      background: #f0f0f0;
+      color: #151515;
+      transition: all 0.2s;
+    }
+    
+    .filter-chip:hover {
+      background: #e0e0e0;
+    }
+    
+    .filter-chip.active {
+      background: #e7f1e4;
+      border-color: #3e8635;
+      color: #1e4f18;
+    }
+    
+    .filter-chip input {
+      display: none;
+    }
+    
+    .model-list {
+      border: 1px solid #d2d2d2;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    .model-list-item {
+      display: flex;
+      align-items: center;
+      gap: var(--rh-space-md);
+      padding: var(--rh-space-sm) var(--rh-space-md);
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+    }
+    
+    .model-list-item:last-child {
+      border-bottom: none;
+    }
+    
+    .model-list-item:hover {
+      background: #f8f8f8;
+    }
+    
+    .model-list-item.selected {
+      background: #e7f1e4;
+    }
+    
+    .model-list-item input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: #ee0000;
+    }
+    
+    .model-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .model-name {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .model-meta {
+      font-size: 0.75rem;
+      color: #6a6e73;
+      display: flex;
+      gap: var(--rh-space-sm);
+      flex-wrap: wrap;
+    }
+    
+    .model-caps {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    
+    .section-header {
+      padding: var(--rh-space-sm) var(--rh-space-md);
+      background: #f0f0f0;
+      font-weight: 500;
+      font-size: 0.875rem;
+      color: #6a6e73;
+      position: sticky;
+      top: 0;
+    }
+    
+    .no-results {
+      padding: var(--rh-space-lg);
+      text-align: center;
+      color: #6a6e73;
+    }
+    
+    @media (max-width: 900px) {
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .providers-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div x-data="dashboard()" x-init="init()">
+  <!-- Header -->
+  <header class="header-bar">
+    <h1>OpenLLM Dashboard</h1>
+    <div class="header-actions">
+      <!-- Config location -->
+      <button class="header-btn" @click="openConfigModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C7.985 3.648 8.48 4 9 4h4.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/>
+        </svg>
+        <span x-text="configLocation === 'user' ? 'User' : 'Workspace'"></span>
+      </button>
+      <!-- Version -->
+      <span class="version-badge" x-show="status.version" x-text="'v' + status.version"></span>
+      <!-- Refresh -->
+      <button class="header-btn" @click="refresh()" :disabled="loading">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" :class="{ 'spin': loading }">
+          <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+          <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+        </svg>
+        <span x-show="!loading">Refresh</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <h3>Daemon Status</h3>
+        <div class="value" x-text="status.connectedClients !== undefined ? 'Running' : '—'"></div>
+        <div style="font-size: 0.75rem; color: var(--rh-color-text-secondary, #6a6e73); margin-top: 0.25rem;">
+          <span x-text="(status.connectedClients || 0) + ' clients · ' + (status.activeSessions || 0) + ' sessions'"></span>
+        </div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>Models Available</h3>
+        <div class="value" x-text="models.length"></div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>Providers</h3>
+        <div class="value" x-text="configuredProviders + '/' + providers.length"></div>
+        <div style="font-size: 0.75rem; color: var(--rh-color-text-secondary, #6a6e73); margin-top: 0.25rem;">configured</div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>API Keys</h3>
+        <div class="value" x-text="secrets.filter(s => s.hasValue).length"></div>
+        <div style="font-size: 0.75rem; color: var(--rh-color-text-secondary, #6a6e73); margin-top: 0.25rem;">stored</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <rh-tabs>
+      <rh-tab slot="tab">Providers</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <template x-if="providers.length === 0">
+            <div class="empty-state">
+              <p>No providers available. The daemon may still be initializing.</p>
+            </div>
+          </template>
+          
+          <div class="providers-grid">
+            <template x-for="provider in sortedProviders" :key="provider.id">
+              <div class="provider-card" :class="{ 
+                configured: isProviderConfigured(provider.id),
+                'key-missing': isProviderConfigured(provider.id) && !isKeyAvailable(provider.id)
+              }">
+                <div class="provider-header">
+                  <span class="provider-name" x-text="provider.displayName || provider.id"></span>
+                  
+                  <div class="rh-header-actions">
+                    <!-- Compact Toggle for API Key Source -->
+                    <div class="rh-toggle-group-mini" role="radiogroup" :aria-label="'API Key Source for ' + provider.id">
+                      <button type="button" class="rh-toggle-item" 
+                              :class="{ selected: getKeySource(provider.id) === 'keychain' }"
+                              @click="setKeySource(provider.id, 'keychain')">
+                        Key
+                      </button>
+                      <button type="button" class="rh-toggle-item"
+                              :class="{ selected: getKeySource(provider.id) === 'env' }"
+                              @click="setKeySource(provider.id, 'env')">
+                        Env
+                      </button>
+                    </div>
+                    
+                    <span class="status-tag" 
+                          :class="getProviderStatusClass(provider.id)"
+                          x-text="getProviderStatusText(provider.id)"></span>
+                  </div>
+                </div>
+                
+                <!-- Dynamic Input based on source -->
+                <div class="form-row" style="margin-bottom: var(--rh-space-md);">
+                  <!-- Keychain input (password field) -->
+                  <template x-if="getKeySource(provider.id) === 'keychain'">
+                    <div class="form-group" style="flex: 1;">
+                      <label>Key Value</label>
+                      <input type="password" 
+                             :placeholder="isProviderConfigured(provider.id) ? '••••••••••••' : 'Enter API key'"
+                             x-model="apiKeys[provider.id]">
+                    </div>
+                  </template>
+                  
+                  <!-- Env var input (text field with hint) -->
+                  <template x-if="getKeySource(provider.id) === 'env'">
+                    <div class="form-group" style="flex: 1;">
+                      <label>Variable Name</label>
+                      <input type="text" 
+                             :placeholder="getDefaultEnvVarName(provider.id)"
+                             x-model="envVarNames[provider.id]">
+                      <small class="hint" style="color: var(--rh-color-text-secondary); margin-top: 4px; display: block;">
+                        e.g. <code x-text="getDefaultEnvVarName(provider.id)"></code>
+                      </small>
+                    </div>
+                  </template>
+                  
+                  <div style="display: flex; gap: var(--rh-space-sm); align-items: flex-end;">
+                    <button class="btn btn-primary" @click="saveProvider(provider.id)">Save</button>
+                    <button class="btn btn-danger" x-show="isProviderConfigured(provider.id)" @click="deleteProvider(provider.id)">Remove</button>
+                  </div>
+                </div>
+                
+                <!-- Model Selection Button -->
+                <div class="form-group" x-show="isProviderConfigured(provider.id)">
+                  <label>Enabled Models</label>
+                  <div style="display: flex; align-items: center; gap: var(--rh-space-md);">
+                    <button class="btn btn-secondary" @click="openModelSelector(provider.id)"
+                            :disabled="getModelsForProvider(provider.id).length === 0">
+                      Select Models...
+                    </button>
+                    <span class="enabled-count" x-text="getEnabledModelsCount(provider.id) + ' of ' + getModelsForProvider(provider.id).length + ' models enabled'"></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </rh-tab-panel>
+      
+      <rh-tab slot="tab">Models</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <template x-if="models.length === 0">
+            <div class="empty-state">
+              <p>No models available. Configure a provider with an API key first.</p>
+            </div>
+          </template>
+          
+          <template x-if="models.length > 0">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Enabled</th>
+                  <th>Model ID</th>
+                  <th>Provider</th>
+                  <th>Display Name</th>
+                  <th>Context Window</th>
+                  <th>Capabilities</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="model in models" :key="model.id">
+                  <tr>
+                    <td>
+                      <input type="checkbox" 
+                             :checked="isModelEnabled(model.provider, model.id)"
+                             @change="toggleModel(model.provider, model.id, $event.target.checked)"
+                             style="width: auto; accent-color: var(--rh-color-brand-red-on-light, #ee0000);">
+                    </td>
+                    <td style="font-family: 'Red Hat Mono', monospace; font-size: 0.85rem;" x-text="model.id"></td>
+                    <td x-text="model.provider || '—'"></td>
+                    <td x-text="model.displayName || '—'"></td>
+                    <td x-text="model.capabilities?.contextWindow ? model.capabilities.contextWindow.toLocaleString() : '—'"></td>
+                    <td>
+                      <span x-show="hasCapability(model, 'streaming')" class="capability-tag stream">Stream</span>
+                      <span x-show="hasCapability(model, 'tools')" class="capability-tag tools">Tools</span>
+                      <span x-show="hasCapability(model, 'vision')" class="capability-tag vision">Vision</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
+        </div>
+      </rh-tab-panel>
+      
+      <rh-tab slot="tab">Chat</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <!-- Model selector (only enabled models) -->
+          <div class="form-row" style="margin-bottom: var(--rh-space-md);">
+            <div class="form-group" style="max-width: 400px;">
+              <label>Model</label>
+              <select x-model="selectedModel">
+                <option value="">Select a model...</option>
+                <template x-for="model in enabledModels" :key="model.id">
+                  <option :value="model.id" x-text="(model.displayName || model.id) + ' (' + model.provider + ')'"></option>
+                </template>
+              </select>
+            </div>
+            <button class="btn btn-secondary" @click="clearChat()" :disabled="chatMessages.length === 0">Clear Chat</button>
+          </div>
+          
+          <!-- Chat messages -->
+          <div class="chat-container" id="chat-messages">
+            <template x-if="chatMessages.length === 0">
+              <div class="empty-state">
+                <template x-if="enabledModels.length === 0">
+                  <p>Enable some models in the Providers tab first, then start chatting!</p>
+                </template>
+                <template x-if="enabledModels.length > 0">
+                  <p>Select a model and start chatting!</p>
+                </template>
+              </div>
+            </template>
+            <template x-for="(msg, i) in chatMessages" :key="i">
+              <div class="chat-message" :class="msg.role">
+                <strong x-text="msg.role === 'user' ? 'You' : 'Assistant'"></strong>
+                <div x-html="msg.content" :class="{ 'streaming-cursor': msg.streaming }"></div>
+              </div>
+            </template>
+          </div>
+          
+          <!-- Chat input -->
+          <div class="form-row" style="margin-top: var(--rh-space-md);">
+            <div class="form-group">
+              <textarea x-model="chatInput"
+                        @keydown.enter.prevent="sendMessage()"
+                        :disabled="chatStreaming"
+                        placeholder="Type a message... (Enter to send)"
+                        rows="2"></textarea>
+            </div>
+            <button class="btn btn-primary" style="align-self: flex-end;"
+                    @click="sendMessage()"
+                    :disabled="chatStreaming || !selectedModel || !chatInput.trim()">
+              <span x-text="chatStreaming ? 'Sending...' : 'Send'"></span>
+            </button>
+          </div>
+        </div>
+      </rh-tab-panel>
+    </rh-tabs>
+  </main>
+
+  <!-- Model Selection Modal -->
+  <div class="modal-backdrop" x-show="modelSelectorOpen" x-cloak @click.self="closeModelSelector()">
+    <div class="modal" @click.stop>
+      <div class="modal-header">
+        <h2 x-text="'Select Models for ' + (modelSelectorProvider?.displayName || modelSelectorProvider?.id || '')"></h2>
+        <button class="btn btn-secondary" @click="closeModelSelector()" style="padding: 0.25rem 0.5rem;">✕</button>
+      </div>
+      
+      <div class="modal-body">
+        <!-- Search and Filters -->
+        <div class="search-filters">
+          <div class="search-input">
+            <input type="text" placeholder="Search models..." x-model="modelSearch" @input="filterModels()">
+          </div>
+          <div class="filter-chips">
+            <label class="filter-chip" :class="{ active: filterTools }">
+              <input type="checkbox" x-model="filterTools" @change="filterModels()">
+              🔧 Tools
+            </label>
+            <label class="filter-chip" :class="{ active: filterVision }">
+              <input type="checkbox" x-model="filterVision" @change="filterModels()">
+              👁 Vision
+            </label>
+          </div>
+        </div>
+        
+        <!-- Quick actions -->
+        <div style="display: flex; gap: var(--rh-space-sm); margin-bottom: var(--rh-space-md);">
+          <button class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.375rem 0.75rem;" 
+                  @click="selectAllFiltered()">Select All Visible</button>
+          <button class="btn btn-secondary" style="font-size: 0.875rem; padding: 0.375rem 0.75rem;" 
+                  @click="deselectAllFiltered()">Deselect All Visible</button>
+        </div>
+        
+        <!-- Model List -->
+        <div class="model-list">
+          <!-- Selected models section -->
+          <template x-if="selectedModelsInModal.length > 0">
+            <div>
+              <div class="section-header" x-text="'Selected (' + selectedModelsInModal.length + ')'"></div>
+              <template x-for="model in selectedModelsInModal" :key="model.id">
+                <div class="model-list-item selected" @click="toggleModelInModal(model.id)">
+                  <input type="checkbox" checked>
+                  <div class="model-info">
+                    <div class="model-name" x-text="model.displayName || model.id"></div>
+                    <div class="model-meta">
+                      <span x-text="'Context: ' + (model.capabilities?.contextWindow?.toLocaleString() || '?')"></span>
+                    </div>
+                  </div>
+                  <div class="model-caps">
+                    <span x-show="hasCapability(model, 'tools')" class="capability-tag tools">Tools</span>
+                    <span x-show="hasCapability(model, 'vision')" class="capability-tag vision">Vision</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+          
+          <!-- Available models section -->
+          <template x-if="filteredUnselectedModels.length > 0">
+            <div>
+              <div class="section-header" x-text="'Available (' + filteredUnselectedModels.length + ')'"></div>
+              <template x-for="model in filteredUnselectedModels" :key="model.id">
+                <div class="model-list-item" @click="toggleModelInModal(model.id)">
+                  <input type="checkbox">
+                  <div class="model-info">
+                    <div class="model-name" x-text="model.displayName || model.id"></div>
+                    <div class="model-meta">
+                      <span x-text="'Context: ' + (model.capabilities?.contextWindow?.toLocaleString() || '?')"></span>
+                    </div>
+                  </div>
+                  <div class="model-caps">
+                    <span x-show="hasCapability(model, 'tools')" class="capability-tag tools">Tools</span>
+                    <span x-show="hasCapability(model, 'vision')" class="capability-tag vision">Vision</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+          
+          <!-- No results -->
+          <template x-if="filteredUnselectedModels.length === 0 && selectedModelsInModal.length === 0">
+            <div class="no-results">No models match your search criteria</div>
+          </template>
+        </div>
+      </div>
+      
+      <div class="modal-footer">
+        <span style="flex: 1; font-size: 0.875rem; color: #6a6e73;" 
+              x-text="selectedModelsInModal.length + ' model(s) selected'"></span>
+        <button class="btn btn-secondary" @click="closeModelSelector()">Cancel</button>
+        <button class="btn btn-primary" @click="saveModelSelection()">Save Selection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config Location Modal -->
+  <div class="modal-backdrop" x-show="showConfigModal" x-cloak @click.self="showConfigModal = false">
+    <div class="rh-modal" @click.stop>
+      <div class="rh-modal-header">
+        <h3>Save config to</h3>
+        <button class="rh-close-btn" @click="showConfigModal = false">✕</button>
+      </div>
+      
+      <div class="rh-modal-body">
+        <!-- User Tile -->
+        <div class="rh-tile" :class="{ 'rh-tile--selected': configLocation === 'user' }" @click="configLocation = 'user'">
+          <div class="rh-tile-radio">
+            <input type="radio" name="cfg" value="user" x-model="configLocation">
+          </div>
+          <div class="rh-tile-content">
+            <div class="rh-tile-title">User (Global)</div>
+            <div class="rh-tile-desc">Settings apply to all projects</div>
+            <code class="rh-tile-path">~/.openllm/models.json</code>
+          </div>
+        </div>
+
+        <!-- Workspace Tile -->
+        <div class="rh-tile" :class="{ 'rh-tile--selected': configLocation === 'workspace' }" @click="configLocation = 'workspace'">
+          <div class="rh-tile-radio">
+            <input type="radio" name="cfg" value="workspace" x-model="configLocation">
+          </div>
+          <div class="rh-tile-content">
+            <div class="rh-tile-title">Workspace (Project)</div>
+            <div class="rh-tile-desc">Settings specific to this project</div>
+            
+            <!-- Progressive disclosure: path input -->
+            <div class="rh-form-group" x-show="configLocation === 'workspace'" x-transition @click.stop>
+              <label class="rh-form-label">Workspace Path</label>
+              <template x-if="connectedWorkspaces.length > 0">
+                <select x-model="workspacePath" class="rh-select">
+                  <option value="">Select a connected workspace...</option>
+                  <template x-for="ws in connectedWorkspaces" :key="ws">
+                    <option :value="ws" x-text="ws"></option>
+                  </template>
+                </select>
+              </template>
+              <template x-if="connectedWorkspaces.length === 0">
+                <div>
+                  <input type="text" x-model="workspacePath" class="rh-text-input" placeholder="/path/to/workspace">
+                  <p class="rh-helper-text">No VS Code connected. Enter path manually.</p>
+                </div>
+              </template>
+              <code class="rh-tile-path" x-show="workspacePath" x-text="workspacePath + '/.openllm/models.json'"></code>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="rh-modal-footer">
+        <button class="rh-btn rh-btn--secondary" @click="showConfigModal = false">Cancel</button>
+        <button class="rh-btn rh-btn--primary" @click="applyConfigLocation()" 
+                :disabled="configLocation === 'workspace' && !workspacePath">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+
+<script>
+function dashboard() {
+  return {
+    loading: false,
+    status: {},
+    providers: [],
+    models: [],
+    secrets: [],
+    
+    // Input values for provider configuration
+    apiKeys: {},           // { providerId: 'key-value' } - for keychain storage
+    envVarNames: {},       // { providerId: 'ENV_VAR_NAME' } - for env var reference
+    keySourceSelection: {}, // { providerId: 'keychain' | 'env' } - UI radio selection
+    
+    // Config-centric state: providers in config are "configured"
+    // Structure: { providerId: { api_key_keychain_name?: string, api_key_env_var_name?: string, enabled_models: string[] } }
+    providerConfig: {},
+    
+    // Enabled models per provider: { providerId: Set<modelId> }
+    enabledModelsByProvider: {},
+    
+    // Cache for key availability checks
+    keyAvailability: {},   // { providerId: boolean }
+    
+    selectedModel: '',
+    chatInput: '',
+    chatMessages: [],
+    chatStreaming: false,
+    
+    // Modal state
+    modelSelectorOpen: false,
+    modelSelectorProviderId: null,
+    modelSelectorProvider: null,
+    modelSearch: '',
+    filterTools: false,
+    filterVision: false,
+    tempSelectedModels: new Set(),  // Temporary selection while modal is open
+    
+    // Config persistence
+    configLocation: 'user',  // 'user' or 'workspace'
+    workspacePath: '',       // Path to workspace when using workspace config
+    configPath: '',          // Actual path where config is saved
+    showConfigModal: false,
+    connectedWorkspaces: [], // Workspaces from connected VS Code clients
+
+    // A provider is configured if it exists in providerConfig
+    isProviderConfigured(providerId) {
+      return this.providerConfig.hasOwnProperty(providerId);
+    },
+
+    get configuredProviders() {
+      return Object.keys(this.providerConfig).length;
+    },
+
+    // Sorted providers: configured first (alpha), then unconfigured (alpha)
+    get sortedProviders() {
+      return [...this.providers].sort((a, b) => {
+        // Configured providers come first (based on config, not backend flag)
+        const aConfigured = this.isProviderConfigured(a.id);
+        const bConfigured = this.isProviderConfigured(b.id);
+        if (aConfigured && !bConfigured) return -1;
+        if (!aConfigured && bConfigured) return 1;
+        // Within same configuration status, sort alphabetically by display name
+        const nameA = (a.displayName || a.id).toLowerCase();
+        const nameB = (b.displayName || b.id).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+    },
+
+    // Get the key source for a provider (from config or UI selection)
+    getKeySource(providerId) {
+      // First check config
+      const config = this.providerConfig[providerId];
+      if (config) {
+        if (config.api_key_keychain_name) return 'keychain';
+        if (config.api_key_env_var_name) return 'env';
+      }
+      // Fall back to UI selection, default to 'keychain'
+      return this.keySourceSelection[providerId] || 'keychain';
+    },
+
+    // Set the key source selection (UI only, before saving)
+    setKeySource(providerId, source) {
+      this.keySourceSelection[providerId] = source;
+      this.keySourceSelection = { ...this.keySourceSelection };
+    },
+
+    // Get default env var name for a provider
+    getDefaultEnvVarName(providerId) {
+      return `${providerId.toUpperCase()}_API_KEY`;
+    },
+
+    // Check if key is available for a configured provider
+    isKeyAvailable(providerId) {
+      return this.keyAvailability[providerId] === true;
+    },
+
+    // Get provider status class for styling
+    getProviderStatusClass(providerId) {
+      if (!this.isProviderConfigured(providerId)) {
+        return 'not-configured';
+      }
+      if (!this.isKeyAvailable(providerId)) {
+        return 'key-missing';
+      }
+      return 'configured';
+    },
+
+    // Get provider status text
+    getProviderStatusText(providerId) {
+      if (!this.isProviderConfigured(providerId)) {
+        return 'Not configured';
+      }
+      if (!this.isKeyAvailable(providerId)) {
+        return 'Key missing';
+      }
+      return 'Configured';
+    },
+
+    // Check key availability for a provider
+    async checkKeyAvailability(providerId) {
+      const config = this.providerConfig[providerId];
+      if (!config) {
+        this.keyAvailability[providerId] = false;
+        return;
+      }
+
+      let source, name;
+      if (config.api_key_keychain_name) {
+        source = 'keychain';
+        name = config.api_key_keychain_name;
+      } else if (config.api_key_env_var_name) {
+        source = 'env';
+        name = config.api_key_env_var_name;
+      } else {
+        this.keyAvailability[providerId] = false;
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/key-status?source=${source}&name=${encodeURIComponent(name)}`);
+        const data = await response.json();
+        this.keyAvailability[providerId] = data.exists;
+        this.keyAvailability = { ...this.keyAvailability };
+      } catch (e) {
+        console.error('Failed to check key availability:', e);
+        this.keyAvailability[providerId] = false;
+      }
+    },
+
+    // Check key availability for all configured providers
+    async checkAllKeyAvailability() {
+      const promises = Object.keys(this.providerConfig).map(id => this.checkKeyAvailability(id));
+      await Promise.all(promises);
+    },
+
+    get enabledModels() {
+      const enabled = [];
+      for (const model of this.models) {
+        if (this.isModelEnabled(model.provider, model.id)) {
+          enabled.push(model);
+        }
+      }
+      return enabled;
+    },
+
+    getModelsForProvider(providerId) {
+      return this.models.filter(m => m.provider === providerId);
+    },
+
+    // Modal computed properties
+    get modelsForModal() {
+      if (!this.modelSelectorProviderId) return [];
+      return this.getModelsForProvider(this.modelSelectorProviderId);
+    },
+
+    get selectedModelsInModal() {
+      return this.modelsForModal
+        .filter(m => this.tempSelectedModels.has(m.id))
+        .filter(m => this.matchesFilters(m));
+    },
+
+    get filteredUnselectedModels() {
+      return this.modelsForModal
+        .filter(m => !this.tempSelectedModels.has(m.id))
+        .filter(m => this.matchesFilters(m));
+    },
+
+    matchesFilters(model) {
+      // Search filter
+      if (this.modelSearch) {
+        const search = this.modelSearch.toLowerCase();
+        const name = (model.displayName || model.id || '').toLowerCase();
+        const id = (model.id || '').toLowerCase();
+        if (!name.includes(search) && !id.includes(search)) {
+          return false;
+        }
+      }
+      // Capability filters (API returns 'tools'/'vision', not 'supportsTools'/'supportsVision')
+      const caps = model.capabilities || {};
+      if (this.filterTools && !caps.tools && !caps.supportsTools) {
+        return false;
+      }
+      if (this.filterVision && !caps.vision && !caps.supportsVision) {
+        return false;
+      }
+      return true;
+    },
+
+    // Helper to check capability (handles both naming conventions)
+    hasCapability(model, cap) {
+      const caps = model.capabilities || {};
+      if (cap === 'tools') return caps.tools || caps.supportsTools;
+      if (cap === 'vision') return caps.vision || caps.supportsVision;
+      if (cap === 'streaming') return caps.streaming || caps.supportsStreaming;
+      return false;
+    },
+
+    // Modal methods
+    openModelSelector(providerId) {
+      this.modelSelectorProviderId = providerId;
+      this.modelSelectorProvider = this.providers.find(p => p.id === providerId);
+      this.modelSearch = '';
+      this.filterTools = false;
+      this.filterVision = false;
+      // Copy current selection to temp
+      const current = this.enabledModelsByProvider[providerId] || new Set();
+      this.tempSelectedModels = new Set(current);
+      this.modelSelectorOpen = true;
+    },
+
+    closeModelSelector() {
+      this.modelSelectorOpen = false;
+      this.modelSelectorProviderId = null;
+      this.modelSelectorProvider = null;
+      this.tempSelectedModels = new Set();
+    },
+
+    toggleModelInModal(modelId) {
+      if (this.tempSelectedModels.has(modelId)) {
+        this.tempSelectedModels.delete(modelId);
+      } else {
+        this.tempSelectedModels.add(modelId);
+      }
+      // Trigger reactivity
+      this.tempSelectedModels = new Set(this.tempSelectedModels);
+    },
+
+    selectAllFiltered() {
+      this.filteredUnselectedModels.forEach(m => {
+        this.tempSelectedModels.add(m.id);
+      });
+      this.tempSelectedModels = new Set(this.tempSelectedModels);
+    },
+
+    deselectAllFiltered() {
+      this.selectedModelsInModal.forEach(m => {
+        this.tempSelectedModels.delete(m.id);
+      });
+      this.tempSelectedModels = new Set(this.tempSelectedModels);
+    },
+
+    async saveModelSelection() {
+      if (this.modelSelectorProviderId) {
+        this.enabledModelsByProvider[this.modelSelectorProviderId] = new Set(this.tempSelectedModels);
+        this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
+        // Persist to config file
+        await this.saveConfig();
+      }
+      this.closeModelSelector();
+    },
+
+    filterModels() {
+      // Just trigger reactivity - computed properties handle the filtering
+    },
+
+    isModelEnabled(providerId, modelId) {
+      const set = this.enabledModelsByProvider[providerId];
+      return set ? set.has(modelId) : false;
+    },
+
+    getEnabledModelsCount(providerId) {
+      const set = this.enabledModelsByProvider[providerId];
+      return set ? set.size : 0;
+    },
+
+    toggleModel(providerId, modelId, enabled) {
+      if (!this.enabledModelsByProvider[providerId]) {
+        this.enabledModelsByProvider[providerId] = new Set();
+      }
+      if (enabled) {
+        this.enabledModelsByProvider[providerId].add(modelId);
+      } else {
+        this.enabledModelsByProvider[providerId].delete(modelId);
+      }
+      // Trigger reactivity
+      this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
+      // TODO: Persist enabled models to backend
+      console.log(`Model ${modelId} ${enabled ? 'enabled' : 'disabled'} for ${providerId}`);
+    },
+
+    async init() {
+      await this.loadConfig();
+      await this.checkAllKeyAvailability();
+      await this.refresh();
+      setInterval(() => this.refresh(), 30000);
+    },
+
+    getConfigLocation() {
+      if (this.configLocation === 'workspace' && this.workspacePath) {
+        return this.workspacePath;
+      }
+      return 'user';
+    },
+
+    async loadConfig() {
+      try {
+        const location = this.getConfigLocation();
+        const response = await fetch(`/api/config?location=${encodeURIComponent(location)}`);
+        const data = await response.json();
+        
+        this.configPath = data.path || '';
+        
+        // Load providers from config - this determines "configured" status
+        if (data.config?.providers) {
+          this.providerConfig = data.config.providers;
+          
+          // Build enabledModelsByProvider from the config
+          for (const [providerId, providerData] of Object.entries(data.config.providers)) {
+            if (providerData.enabled_models && providerData.enabled_models.length > 0) {
+              this.enabledModelsByProvider[providerId] = new Set(providerData.enabled_models);
+            } else {
+              this.enabledModelsByProvider[providerId] = new Set();
+            }
+          }
+          this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
+        } else {
+          this.providerConfig = {};
+        }
+      } catch (e) {
+        console.error('Failed to load config:', e);
+      }
+    },
+
+    async saveConfig() {
+      try {
+        // Build providers config with api_key_keychain_name/api_key_env_var_name and enabled_models
+        const providers = {};
+        for (const [providerId, providerData] of Object.entries(this.providerConfig)) {
+          const modelSet = this.enabledModelsByProvider[providerId];
+          const entry = {
+            enabled_models: modelSet ? Array.from(modelSet) : [],
+          };
+          // Only include one of the key fields (mutually exclusive)
+          if (providerData.api_key_keychain_name) {
+            entry.api_key_keychain_name = providerData.api_key_keychain_name;
+          } else if (providerData.api_key_env_var_name) {
+            entry.api_key_env_var_name = providerData.api_key_env_var_name;
+          }
+          providers[providerId] = entry;
+        }
+        
+        const location = this.getConfigLocation();
+        const response = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location,
+            config: { providers },
+          }),
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+          this.configPath = data.path;
+          console.log('Config saved to:', data.path);
+        } else {
+          console.error('Failed to save config:', data.error);
+        }
+      } catch (e) {
+        console.error('Failed to save config:', e);
+      }
+    },
+
+    async fetchConnectedWorkspaces() {
+      try {
+        const response = await fetch('/api/workspaces');
+        const data = await response.json();
+        this.connectedWorkspaces = data.workspaces || [];
+      } catch (e) {
+        console.error('Failed to fetch workspaces:', e);
+        this.connectedWorkspaces = [];
+      }
+    },
+
+    async openConfigModal() {
+      await this.fetchConnectedWorkspaces();
+      this.showConfigModal = true;
+    },
+
+    async applyConfigLocation() {
+      await this.loadConfig();
+      this.showConfigModal = false;
+    },
+
+    async refresh() {
+      this.loading = true;
+      try {
+        const [statusRes, providersRes, modelsRes, secretsRes] = await Promise.all([
+          fetch('/api/status'),
+          fetch('/api/providers'),
+          fetch('/api/models'),
+          fetch('/api/secrets'),
+        ]);
+        
+        this.status = await statusRes.json();
+        const providersData = await providersRes.json();
+        const modelsData = await modelsRes.json();
+        const secretsData = await secretsRes.json();
+        
+        this.providers = providersData.providers || [];
+        this.models = modelsData.models || [];
+        this.secrets = secretsData.secrets || [];
+        
+        // Initialize enabled models for each provider if not already set from config
+        this.providers.forEach(p => {
+          if (!this.enabledModelsByProvider[p.id]) {
+            this.enabledModelsByProvider[p.id] = new Set();
+          }
+        });
+        // Trigger reactivity
+        this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
+      } catch (e) {
+        console.error('Failed to refresh:', e);
+      }
+      this.loading = false;
+    },
+
+    async saveProvider(providerId) {
+      const source = this.getKeySource(providerId);
+      
+      try {
+        let configEntry = {
+          enabled_models: this.enabledModelsByProvider[providerId] 
+            ? Array.from(this.enabledModelsByProvider[providerId]) 
+            : [],
+        };
+
+        if (source === 'keychain') {
+          // Save API key to keychain
+          const key = this.apiKeys[providerId];
+          if (!key) {
+            alert('Please enter an API key');
+            return;
+          }
+          
+          const secretKey = this.getDefaultEnvVarName(providerId);
+          await fetch(`/api/secrets/${secretKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: key }),
+          });
+          
+          configEntry.api_key_keychain_name = secretKey;
+          this.apiKeys[providerId] = '';
+          
+        } else if (source === 'env') {
+          // Just save env var reference (no actual key storage)
+          const envVarName = this.envVarNames[providerId] || this.getDefaultEnvVarName(providerId);
+          configEntry.api_key_env_var_name = envVarName;
+        }
+
+        // Update provider config
+        this.providerConfig[providerId] = configEntry;
+        this.providerConfig = { ...this.providerConfig };
+        
+        // Initialize enabled models set if needed
+        if (!this.enabledModelsByProvider[providerId]) {
+          this.enabledModelsByProvider[providerId] = new Set();
+        }
+        
+        // Save the config file
+        await this.saveConfig();
+        
+        // Check key availability
+        await this.checkKeyAvailability(providerId);
+        
+        await this.refresh();
+      } catch (e) {
+        console.error('Failed to save provider:', e);
+        alert('Failed to save provider configuration');
+      }
+    },
+
+    async deleteProvider(providerId) {
+      try {
+        const config = this.providerConfig[providerId];
+        
+        // If using keychain, delete the key from secrets store
+        if (config?.api_key_keychain_name) {
+          await fetch(`/api/secrets/${config.api_key_keychain_name}`, { method: 'DELETE' });
+        }
+        // Note: We don't delete env vars - user manages those externally
+        
+        // Remove provider from config (makes it "not configured")
+        delete this.providerConfig[providerId];
+        this.providerConfig = { ...this.providerConfig };
+        
+        // Clear enabled models for this provider
+        delete this.enabledModelsByProvider[providerId];
+        this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
+        
+        // Clear key availability cache
+        delete this.keyAvailability[providerId];
+        this.keyAvailability = { ...this.keyAvailability };
+        
+        // Clear UI state
+        delete this.keySourceSelection[providerId];
+        delete this.envVarNames[providerId];
+        
+        // Save the updated config
+        await this.saveConfig();
+        
+        await this.refresh();
+      } catch (e) {
+        console.error('Failed to delete provider:', e);
+        alert('Failed to remove provider configuration');
+      }
+    },
+
+    clearChat() {
+      this.chatMessages = [];
+    },
+
+    async sendMessage() {
+      if (!this.chatInput.trim() || !this.selectedModel || this.chatStreaming) return;
+      
+      const userMessage = this.chatInput.trim();
+      this.chatInput = '';
+      this.chatStreaming = true;
+      
+      this.chatMessages.push({ role: 'user', content: userMessage });
+      
+      const assistantIdx = this.chatMessages.length;
+      this.chatMessages.push({ role: 'assistant', content: '', streaming: true });
+      
+      const messages = this.chatMessages
+        .filter(m => !m.streaming || m === this.chatMessages[assistantIdx])
+        .slice(0, -1)
+        .map(m => ({ role: m.role, content: m.content }));
+      messages.push({ role: 'user', content: userMessage });
+      
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: this.selectedModel, messages }),
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'text') {
+                  this.chatMessages[assistantIdx].content += data.content;
+                } else if (data.type === 'done') {
+                  this.chatMessages[assistantIdx].streaming = false;
+                } else if (data.error) {
+                  this.chatMessages[assistantIdx].content += `\n\nError: ${data.error}`;
+                  this.chatMessages[assistantIdx].streaming = false;
+                }
+              } catch (e) {}
+            }
+          }
+          
+          const container = document.getElementById('chat-messages');
+          container.scrollTop = container.scrollHeight;
+        }
+      } catch (e) {
+        this.chatMessages[assistantIdx].content = `Error: ${e.message}`;
+        this.chatMessages[assistantIdx].streaming = false;
+      }
+      
+      this.chatStreaming = false;
+    },
+  };
+}
+</script>
+
+</body>
+</html>

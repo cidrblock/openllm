@@ -9,6 +9,7 @@ out/
 # VS Code Extension
 *.vsix
 .vscode-test/
+packages/vscode/bin/
 
 # OS
 .DS_Store

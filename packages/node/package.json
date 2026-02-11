@@ -1,0 +1,40 @@
+{
+  "name": "@openllm/client",
+  "version": "0.1.0",
+  "description": "OpenLLM gRPC client for Node.js/TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "generate": "../../proto/generate.sh typescript",
+    "test": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.10.0",
+    "nice-grpc": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-proto": "^1.180.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "openllm",
+    "llm",
+    "grpc",
+    "ai",
+    "client"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openllm/openllm"
+  },
+  "license": "MIT"
+}

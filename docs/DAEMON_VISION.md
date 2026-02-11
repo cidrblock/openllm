@@ -1,20 +1,44 @@
 # OpenLLM Daemon Vision
 
-**Status:** Proposal  
+**Status:** Partially Implemented  
 **Author:** OpenLLM Team  
 **Date:** February 2026
 
 ---
 
+> **Note:** This is the original design document. For current architecture, see `ARCHITECTURE.md`.
+> 
+> **Implemented:**
+> - Rust gRPC daemon on Unix socket
+> - Web dashboard with RHDS styling
+> - VS Code extension (gRPC client + Language Model API registration)
+> - Session management (create, list, resume)
+> - Provider support via genai crate (15+ providers)
+> - Keychain secret storage
+> - YAML configuration (user/workspace levels)
+> 
+> **Changed from original design:**
+> - VS Code extension is a pure gRPC client (no embedded MCP server)
+> - Secrets stored in system keychain, not VS Code SecretStorage
+> - Config uses explicit `api_key_keychain_name` or `api_key_env_var_name` fields (no implicit env var searching)
+> - Web dashboard is a separate `openllm web` process (gRPC client to daemon)
+> 
+> **Deferred:**
+> - MCP shim for Claude Desktop
+> - VsCodeProvider for accessing Copilot models through daemon
+> - Some CLI subcommands (session attach/detach, import/export)
+
+---
+
 ## Executive Summary
 
-OpenLLM evolves from a library with language bindings to a **unified AI daemon** that serves as the single source of truth for LLM access, configuration, and session state across all clients—VS Code, CLI, Python scripts, and external MCP tools like Claude Desktop.
+OpenLLM is a **unified AI daemon** that serves as the single source of truth for LLM access, configuration, and session state across all clients—VS Code, CLI, Python scripts, and web dashboard.
 
 The daemon enables:
 - **Session continuity**: Start a chat in VS Code, continue it from the CLI
-- **Universal model access**: Python scripts can use Copilot models via the daemon's connection to VS Code
+- **Universal model access**: All clients share the same provider configuration
 - **Zero configuration conflicts**: One daemon = one config = one source of truth
-- **MCP server exposure**: Claude Desktop, Cursor, and other MCP clients can use OpenLLM's configured models
+- **Web dashboard**: Browser-based UI for provider and model configuration
 
 ---
 
@@ -25,12 +49,11 @@ The daemon enables:
 │                              Clients                                     │
 │                                                                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │ VS Code Ext  │  │  Python CLI  │  │ Claude Desk  │  │  Other MCP   │ │
-│  │  (gRPC +     │  │   (gRPC)     │  │  (MCP stdio) │  │   Clients    │ │
-│  │   MCP Srv)   │  │              │  │              │  │              │ │
+│  │ VS Code Ext  │  │  Python CLI  │  │ Web Dashboard│  │  Node.js     │ │
+│  │  (gRPC)      │  │   (gRPC)     │  │ (HTTP→gRPC) │  │  (gRPC)      │ │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘ │
 │         │                 │                 │                 │         │
-│         │ gRPC            │ gRPC            │ MCP→gRPC        │         │
+│         │ gRPC            │ gRPC            │ HTTP            │ gRPC    │
 │         └─────────────────┴─────────────────┴─────────────────┘         │
 └─────────────────────────────────────────────┬───────────────────────────┘
                                               │
@@ -42,27 +65,27 @@ The daemon enables:
 │  │                         Session Manager                              ││
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  ││
 │  │  │ sess-abc123 │  │ sess-def456 │  │ sess-xyz789 │                  ││
-│  │  │ VS Code     │  │ CLI         │  │ Claude Desk │                  ││
+│  │  │ VS Code     │  │ CLI         │  │ Web         │                  ││
 │  │  │ 15 messages │  │ 3 messages  │  │ 8 messages  │                  ││
 │  │  └─────────────┘  └─────────────┘  └─────────────┘                  ││
 │  └─────────────────────────────────────────────────────────────────────┘│
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐         │
-│  │  LLM Providers  │  │  Tool Registry  │  │  Config/Secrets │         │
-│  │  OpenAI, etc.   │  │  (Orchestrator) │  │  (Single Source)│         │
-│  └────────┬────────┘  └────────┬────────┘  └─────────────────┘         │
-│           │                    │                                         │
-│           │ HTTP               │ MCP Client                              │
-└───────────┼────────────────────┼─────────────────────────────────────────┘
-            │                    │
-            ▼                    ▼
-    ┌───────────────┐    ┌───────────────────────┐
-    │   LLM APIs    │    │  VS Code Extension    │
-    │  OpenAI       │    │    (MCP Server)       │
-    │  Anthropic    │    │  • vscode.lm models   │
-    │  Google       │    │  • vscode.lm.tools    │
-    │  Mistral      │    │  • SecretStorage      │
-    └───────────────┘    └───────────────────────┘
+│  │  LLM Providers  │  │  Config/Secrets │  │  VS Code        │         │
+│  │  OpenAI, etc.   │  │  (YAML+Keychain)│  │  Backchannel    │         │
+│  └────────┬────────┘  └─────────────────┘  └────────┬────────┘         │
+│           │                                          │                   │
+│           │ HTTP                                     │ gRPC (workspace)  │
+└───────────┼──────────────────────────────────────────┼──────────────────┘
+            │                                          │
+            ▼                                          ▼
+    ┌───────────────┐                         ┌───────────────────────┐
+    │   LLM APIs    │                         │  VS Code Extension    │
+    │  OpenAI       │                         │  • Workspace paths    │
+    │  Anthropic    │                         │  • LM API registration│
+    │  Google       │                         └───────────────────────┘
+    │  Mistral      │
+    └───────────────┘
 ```
 
 ---
@@ -87,40 +110,32 @@ The central Rust binary that runs as a background process.
 
 ### 2. VS Code Extension
 
-Dual role: **gRPC client** to daemon + **MCP server** for daemon.
+The extension acts as a **gRPC client** to the daemon with a **backchannel** for workspace info.
 
 **On activation:**
 1. Check if daemon is running (try connect to socket)
 2. If not running → spawn daemon as child process
 3. Connect to daemon via gRPC
-4. Start MCP server (exposing vscode.lm, tools, secrets)
-5. Register MCP endpoint with daemon
+4. Start backchannel stream (provides workspace paths)
+5. Register as LanguageModelChatProvider with VS Code
 
 **On deactivation:**
 1. Disconnect from daemon
-2. If spawner and no other clients → signal shutdown
+2. Unregister from VS Code LM API
 
-### 3. openllm-mcp-server (MCP Shim)
+### 3. Web Dashboard (`openllm web`)
 
-Thin binary that speaks MCP over stdio and proxies to daemon.
+Browser-based configuration UI served by a separate process.
 
-**Purpose:** Allow MCP clients (Claude Desktop, Cursor) to use OpenLLM.
+**Purpose:** Provide easy provider and model configuration without editing YAML.
 
-**`~/.config/claude/mcpserver.json`:**
-```json
-{
-  "openllm": {
-    "command": "openllm-mcp-server",
-    "args": []
-  }
-}
-```
+**Features:**
+- Configure API keys (keychain or env var reference)
+- Enable/disable providers and models
+- Choose user vs workspace config level
+- View connection status
 
-**Behavior:**
-1. MCP client spawns this binary
-2. Binary connects to daemon (starting it if needed)
-3. Translates MCP ↔ gRPC
-4. Client thinks it owns a dedicated server
+**URL:** `http://localhost:8787`
 
 ### 4. Python/Node.js Clients
 
@@ -169,6 +184,13 @@ Assistant: Here's the updated code...
 # Detach (session persists)
 $ openllm session detach
 Session saved.
+
+# Export session to share with team
+$ openllm session export sess-abc123 > session.json
+
+# Import a colleague's session
+$ openllm session import < session.json
+Imported session: sess-abc123
 
 # Daemon management
 $ openllm daemon status
@@ -277,6 +299,67 @@ Sessions are persisted to disk for crash recovery:
 - Inactive sessions: pruned after configurable TTL (default: 7 days)
 - Manual deletion via CLI or API
 
+### Session Sharing Between Engineers
+
+Because sessions are human-readable JSON files, they become **shareable knowledge artifacts**:
+
+```bash
+# Export a session
+$ openllm session export sess-abc123 > debugging-session.json
+
+# Share via git, Slack, email, etc.
+$ git add docs/ai-sessions/auth-refactor.json
+$ git commit -m "Add AI-assisted auth refactor session for reference"
+
+# Colleague imports the session
+$ openllm session import < debugging-session.json
+Imported session: sess-abc123 (15 messages)
+
+# Or just copy the file
+$ cp debugging-session.json ~/.openllm/sessions/
+```
+
+**Use cases:**
+
+| Scenario | How it helps |
+|----------|--------------|
+| **Debugging handoff** | "I couldn't figure out the memory leak—here's my session" |
+| **Code review** | Include AI reasoning alongside the PR |
+| **Onboarding** | Share sessions that explain codebase architecture |
+| **Pair programming** | Hand off mid-session to a colleague |
+| **Documentation** | "Here's how I solved X" with full AI context |
+| **Knowledge base** | Curated sessions as team reference material |
+
+**Session JSON structure:**
+
+```json
+{
+  "id": "sess-abc123",
+  "topic": "Debugging memory leak in auth service",
+  "model": "openllm/copilot-gpt-4o",
+  "created_by": { "client": "vscode", "user": "alice" },
+  "created_at": "2026-02-09T10:30:00Z",
+  "messages": [
+    { "role": "user", "content": "I'm seeing OOM errors in production..." },
+    { "role": "assistant", "content": "Let's investigate..." },
+    ...
+  ],
+  "tool_calls": [...],
+  "metadata": {
+    "workspace": "/home/alice/projects/auth-service",
+    "branch": "fix/memory-leak",
+    "files_referenced": ["src/auth.ts", "src/session.ts"]
+  }
+}
+```
+
+The readable format means sessions can be:
+- Searched with grep/ripgrep
+- Diffed to see conversation evolution  
+- Linted or validated with JSON schemas
+- Stored in version control alongside code
+- Indexed for team-wide search
+
 ### Session Notifications
 
 When a session is modified by one client, others can be notified:
@@ -332,6 +415,8 @@ service OpenLLM {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (google.protobuf.Empty);
   rpc WatchSessions(WatchSessionsRequest) returns (stream SessionEvent);
+  rpc ExportSession(ExportSessionRequest) returns (ExportSessionResponse);
+  rpc ImportSession(ImportSessionRequest) returns (Session);
   
   //
   // Models
@@ -611,14 +696,26 @@ message UnregisterMcpEndpointRequest {}
 
 The daemon exposes itself as an MCP server (via the shim) with these tools:
 
+### Core Tools
+
 | Tool | Description |
 |------|-------------|
 | `openllm_chat` | Send a chat message, get streaming response |
 | `openllm_list_models` | List all available models (all providers) |
-| `openllm_list_sessions` | List active sessions |
-| `openllm_create_session` | Create a new session |
-| `openllm_session_chat` | Chat within a session |
 | `openllm_get_config` | Get configuration |
+
+### Session Tools (Cross-Tool Pickup)
+
+| Tool | Description |
+|------|-------------|
+| `openllm_session_list` | List available sessions with metadata |
+| `openllm_session_get` | Get full session with message history |
+| `openllm_session_create` | Create a new session |
+| `openllm_session_chat` | Chat within a session (uses session's model) |
+| `openllm_session_replay` | Get session formatted for context injection |
+| `openllm_session_summarize` | Get AI-generated summary of a session |
+| `openllm_session_fork` | Fork a session (new session linked to parent) |
+| `openllm_session_export` | Export session as shareable JSON artifact |
 
 This allows Claude Desktop to use OpenLLM's configured models:
 
@@ -636,6 +733,565 @@ openllm-daemon
      │ HTTP
      ▼
 OpenAI API
+```
+
+---
+
+## Cross-Tool Session Pickup
+
+One of the most powerful features: **start a session in one tool (VS Code), continue it in another (Cursor/Claude Desktop)**.
+
+### Important: The Proxy Requirement
+
+For OpenLLM to capture a session, **all chat messages must flow through OpenLLM**, even when using underlying models like Copilot. Native Copilot Chat (or any direct model access) bypasses OpenLLM and cannot be captured.
+
+```
+❌ Native Copilot Chat (OpenLLM CANNOT capture):
+
+  VS Code Copilot Chat
+       │
+       │ Direct to Copilot extension
+       ▼
+  GitHub Copilot → GPT-4o
+  
+  OpenLLM has NO visibility. Session NOT captured.
+
+
+✅ OpenLLM Chat using Copilot model (OpenLLM CAN capture):
+
+  OpenLLM Chat UI (or VS Code Chat with vendor: 'open-llm')
+       │
+       │ User selects: "openllm/copilot-gpt-4o"
+       ▼
+  OpenLLM Daemon ◄─── Session captured here (sess-abc123)
+       │
+       │ MCP: openllm_llm_send
+       ▼
+  VS Code Extension (MCP Server)
+       │
+       │ vscode.lm.sendRequest()
+       ▼
+  GitHub Copilot → GPT-4o
+  
+  Same model underneath, but OpenLLM sees all messages.
+```
+
+### How OpenLLM Exposes vscode.lm Models
+
+OpenLLM acts as a **proxy** for vscode.lm models:
+
+1. **Discovery**: Daemon queries VS Code's MCP server for available `vscode.lm` models
+2. **Re-exposure**: Models appear in OpenLLM with `openllm/` prefix (e.g., `openllm/copilot-gpt-4o`)
+3. **Routing**: When user selects this model, OpenLLM routes through MCP to real Copilot
+4. **Capture**: All messages flow through daemon → session persisted
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  OpenLLM Model Selector                                         │
+│                                                                  │
+│  Direct Providers (HTTP):                                        │
+│    ○ openai/gpt-4o                                              │
+│    ○ anthropic/claude-3-5-sonnet                                │
+│    ○ ollama/llama3                                              │
+│                                                                  │
+│  VS Code LM Models (via MCP proxy):                             │
+│    ● openllm/copilot-gpt-4o        ◄── Same as native Copilot  │
+│    ○ openllm/copilot-gpt-4              but OpenLLM sees it    │
+│    ○ openllm/github-claude-3-5-sonnet                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### User Experience Trade-off
+
+| Approach | Session Captured? | Cross-Tool Pickup? | Notes |
+|----------|-------------------|-------------------|-------|
+| Native Copilot Chat | ❌ No | ❌ No | Direct, but isolated |
+| OpenLLM Chat → Copilot | ✅ Yes | ✅ Yes | Same model, full features |
+| OpenLLM Chat → OpenAI | ✅ Yes | ✅ Yes | Direct HTTP, full features |
+
+**Recommendation**: For users who want session continuity, use OpenLLM's chat interface (or VS Code Chat with OpenLLM as provider) instead of native Copilot Chat. The underlying model is identical—only the routing changes.
+
+### The Challenge
+
+When switching between tools:
+- **Different models**: GPT-4o → Claude have different tokenization and context formats
+- **Different UIs**: Each tool has its own chat interface
+- **Context limits**: Need to fit history into new model's context window
+- **Tool state**: May have pending tool calls or results
+
+### The Solution: Session MCP Tools
+
+The daemon exposes session tools via MCP, allowing any MCP client to discover and continue sessions.
+
+### Example: VS Code → Cursor Handoff
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Step 1: User works in OpenLLM Chat (VS Code) with Copilot model   │
+│                                                                     │
+│  [User selected model: openllm/copilot-gpt-4o]                     │
+│                                                                     │
+│  User: "Help me refactor auth.ts to async/await"                   │
+│  Assistant: "I'll help with that. Looking at your code..."        │
+│  ... 20 messages later ...                                         │
+│  User: "Now I need to handle session refresh"                      │
+│  Assistant: "For session refresh, consider..."                     │
+│                                                                     │
+│  [Session sess-abc123 captured by OpenLLM daemon]                  │
+│  [20 messages, model: openllm/copilot-gpt-4o, source: vscode]      │
+│                                                                     │
+│  Note: Under the hood, OpenLLM routes to real Copilot via MCP.     │
+│  User gets same responses as native Copilot, but session is saved. │
+└────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ User switches to Cursor
+                              ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Step 2: User asks Cursor to continue                              │
+│                                                                     │
+│  User: "Continue my VS Code session about the refactor"            │
+│                                                                     │
+│  Claude: Let me check for your recent sessions...                  │
+│          [calls openllm_session_list]                              │
+│                                                                     │
+│  Tool Result:                                                       │
+│  ┌────────────────────────────────────────────────────────────────┐│
+│  │ Sessions:                                                       ││
+│  │ - sess-abc123: "Refactoring auth module"                       ││
+│  │   Model: openllm/copilot-gpt-4o | 20 msgs | VS Code | 1 hour ago││
+│  │ - sess-def456: "Bug investigation"                             ││
+│  │   Model: openai/gpt-4o | 5 msgs | CLI | 3 hours ago            ││
+│  └────────────────────────────────────────────────────────────────┘│
+│                                                                     │
+│  Claude: I found a session about refactoring from an hour ago.     │
+│          Would you like me to:                                      │
+│          1. Read the context and continue here (I respond)         │
+│          2. Relay messages to that session (Copilot responds)      │
+│          3. Fork the session (new thread, linked history)          │
+│                                                                     │
+│  User: Option 1, read the context                                  │
+│                                                                     │
+│  Claude: [calls openllm_session_replay(session_id="sess-abc123")]  │
+│                                                                     │
+└────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Step 3: Claude receives the session context                       │
+│                                                                     │
+│  Tool Result (openllm_session_replay):                             │
+│  ┌────────────────────────────────────────────────────────────────┐│
+│  │ === OpenLLM Session: sess-abc123 ===                           ││
+│  │ Model: openllm/copilot-gpt-4o (via vscode.lm)                  ││
+│  │ Created: 2026-02-09 10:30 in VS Code                           ││
+│  │ Topic: Refactoring auth module to async/await                  ││
+│  │                                                                 ││
+│  │ --- Conversation (20 messages) ---                             ││
+│  │                                                                 ││
+│  │ [User]: Help me refactor auth.ts to async/await                ││
+│  │                                                                 ││
+│  │ [Assistant]: I'll help with that. Looking at your code, I see  ││
+│  │ several callback-based patterns. Here's my approach:           ││
+│  │ 1. Convert outer callbacks first...                            ││
+│  │                                                                 ││
+│  │ ... (intermediate messages) ...                                ││
+│  │                                                                 ││
+│  │ [User]: Now I need to handle session refresh                   ││
+│  │                                                                 ││
+│  │ [Assistant]: For session refresh, I recommend implementing     ││
+│  │ a separate refreshSession() function that checks token expiry  ││
+│  │ before each API call...                                        ││
+│  │                                                                 ││
+│  │ === End Session ===                                            ││
+│  └────────────────────────────────────────────────────────────────┘│
+│                                                                     │
+│  Claude: I now have the full context of your refactoring work.     │
+│          Based on where you left off with session refresh,         │
+│          here's how I'd implement the automatic refresh logic...   │
+│                                                                     │
+└────────────────────────────────────────────────────────────────────┘
+
+Key insight: The original session used GPT-4o (via Copilot), but Claude can 
+now continue it because OpenLLM captured and persisted the session history.
+The model changed, but the context transferred successfully.
+```
+
+### Session MCP Tool Definitions
+
+```json
+{
+  "name": "openllm_session_list",
+  "description": "List OpenLLM chat sessions available for continuation. Sessions can be started in VS Code, CLI, or other tools.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "limit": {
+        "type": "integer",
+        "description": "Maximum sessions to return (default: 10)"
+      },
+      "source_filter": {
+        "type": "string",
+        "description": "Filter by source: 'vscode', 'cli', 'cursor', etc."
+      },
+      "model_filter": {
+        "type": "string", 
+        "description": "Filter by model: 'openai/*', 'anthropic/*', etc."
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "name": "openllm_session_replay",
+  "description": "Get a session's conversation history formatted for context injection. Use this to understand and continue a conversation started in another tool.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session ID from openllm_session_list"
+      },
+      "max_messages": {
+        "type": "integer",
+        "description": "Limit to N most recent messages (0 = all)"
+      },
+      "format": {
+        "type": "string",
+        "enum": ["full", "condensed", "summary_only"],
+        "description": "full: complete history, condensed: summary + recent, summary_only: just summary"
+      }
+    },
+    "required": ["session_id"]
+  }
+}
+```
+
+```json
+{
+  "name": "openllm_session_summarize",
+  "description": "Get an AI-generated summary of a session. Useful for large sessions that won't fit in context, or to quickly understand what was discussed.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string"
+      },
+      "max_tokens": {
+        "type": "integer",
+        "description": "Target summary length in tokens"
+      },
+      "include_key_decisions": {
+        "type": "boolean",
+        "description": "Highlight key decisions and conclusions"
+      }
+    },
+    "required": ["session_id"]
+  }
+}
+```
+
+```json
+{
+  "name": "openllm_session_continue",
+  "description": "Send a message to an existing session. The response comes from the session's original model (e.g., if session was with GPT-4o, response comes from GPT-4o).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string",
+        "description": "The message to send"
+      }
+    },
+    "required": ["session_id", "message"]
+  }
+}
+```
+
+```json
+{
+  "name": "openllm_session_fork",
+  "description": "Fork a session to create a new branch. The new session starts with the same history but can diverge. Useful for exploring alternative approaches.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session to fork from"
+      },
+      "new_model": {
+        "type": "string",
+        "description": "Model for the forked session (optional, defaults to same model)"
+      },
+      "fork_point": {
+        "type": "integer",
+        "description": "Message index to fork from (optional, defaults to end)"
+      }
+    },
+    "required": ["session_id"]
+  }
+}
+```
+
+```json
+{
+  "name": "openllm_session_export",
+  "description": "Export a session as a portable JSON artifact. Can be shared with colleagues, stored in git, or imported into another OpenLLM instance.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "description": "Session to export"
+      },
+      "include_tool_results": {
+        "type": "boolean",
+        "description": "Include full tool call results (default: true, set false for smaller export)"
+      },
+      "include_metadata": {
+        "type": "boolean",
+        "description": "Include workspace/file metadata (default: true)"
+      }
+    },
+    "required": ["session_id"]
+  }
+}
+```
+
+### Replay Format Options
+
+#### Full Replay
+Complete message history, suitable for models with large context windows:
+
+```markdown
+=== OpenLLM Session: sess-abc123 ===
+Model: copilot/gpt-4o
+Created: 2026-02-09 10:30 in VS Code
+Topic: Refactoring auth module
+
+--- Conversation ---
+
+[User]: Help me refactor auth.ts to async/await
+
+[Assistant]: I'll help with that. Looking at your code, I see several 
+callback-based patterns that can be converted. Here's my approach:
+
+1. Start with the outermost callbacks
+2. Convert each to async/await
+3. Add proper error handling with try/catch
+
+Let me show you the login function first...
+
+[User]: The login function is particularly complex
+
+[Assistant]: You're right. The login function has nested callbacks for:
+- Initial authentication
+- Token refresh
+- Session storage
+
+Here's how I'd break it down...
+
+... (full history) ...
+
+=== End Session ===
+```
+
+#### Condensed Replay
+Summary + recent messages, for models with smaller context:
+
+```markdown
+=== OpenLLM Session: sess-abc123 ===
+Model: copilot/gpt-4o
+Created: 2026-02-09 10:30 in VS Code
+
+--- Summary (20 messages condensed) ---
+
+This session covered refactoring auth.ts from callback-based to async/await 
+patterns. Key work completed:
+- Converted login() to async/await with try/catch
+- Refactored token validation as separate async function
+- Discussed error boundary patterns
+
+Key decisions made:
+- Use try/catch instead of .catch() for consistency
+- Add timeout handling to login()
+- Implement refresh token as separate concern
+
+Current focus: Implementing session refresh logic
+
+--- Recent Messages (last 3) ---
+
+[User]: The token refresh is timing out sometimes
+
+[Assistant]: That's likely a race condition. When multiple requests trigger 
+refresh simultaneously, they can conflict. I recommend:
+1. Add a refresh lock
+2. Queue pending requests
+3. Resolve all when refresh completes
+
+[User]: Now I need to handle session refresh
+
+[Assistant]: For session refresh, I recommend implementing a separate 
+refreshSession() function that checks token expiry before each API call...
+
+=== End Session ===
+```
+
+#### Summary Only
+Just the high-level summary, for quick context:
+
+```markdown
+=== OpenLLM Session Summary: sess-abc123 ===
+Model: copilot/gpt-4o | 20 messages | VS Code | 1 hour ago
+
+**Topic**: Refactoring auth.ts from callbacks to async/await
+
+**Key Points**:
+- Converted login() and validateToken() to async/await
+- Added comprehensive try/catch error handling
+- Discussed race conditions in token refresh
+- Decided on refresh lock pattern
+
+**Current State**: Working on session refresh implementation
+
+**Last Message**: Discussion of refreshSession() function design
+=== End Summary ===
+```
+
+### Continuation Options
+
+When a user picks up a session in a different tool, they have three options:
+
+#### Option 1: Context Injection (Read & Continue Locally)
+
+The new model reads the history and continues in its own context.
+
+```
+Cursor (Claude) reads sess-abc123 history
+   → Claude responds based on that context
+   → New messages NOT added to sess-abc123
+   → Essentially a "read-only" pickup
+```
+
+**Best for**: When you want to use a different model's perspective.
+
+#### Option 2: Relay (True Continuation)
+
+Messages are relayed through OpenLLM to the original model.
+
+```
+Cursor sends message → openllm_session_continue(sess-abc123, msg)
+   → Daemon routes to copilot/gpt-4o
+   → Response added to sess-abc123
+   → Cursor displays response
+```
+
+**Best for**: When you want to continue with the same model, just different UI.
+
+#### Option 3: Fork (Branch Off)
+
+Create a new session that starts with the same history.
+
+```
+Cursor: openllm_session_fork(sess-abc123, new_model="anthropic/claude-3-5-sonnet")
+   → Creates sess-xyz789 (forked from sess-abc123)
+   → New session uses Claude, starts with full history
+   → Both sessions exist independently
+```
+
+**Best for**: Exploring alternative approaches with different models.
+
+### gRPC Additions for Session Replay
+
+```protobuf
+//
+// Session Replay (for cross-tool pickup)
+//
+
+rpc ReplaySession(ReplaySessionRequest) returns (ReplaySessionResponse);
+rpc SummarizeSession(SummarizeSessionRequest) returns (SummarizeSessionResponse);
+rpc ForkSession(ForkSessionRequest) returns (Session);
+
+message ReplaySessionRequest {
+  string session_id = 1;
+  int32 max_messages = 2;         // 0 = all
+  ReplayFormat format = 3;
+}
+
+enum ReplayFormat {
+  REPLAY_FULL = 0;                // Complete message history
+  REPLAY_CONDENSED = 1;           // Summary + recent messages
+  REPLAY_SUMMARY_ONLY = 2;        // Just the summary
+}
+
+message ReplaySessionResponse {
+  string session_id = 1;
+  string model = 2;
+  string source = 3;              // "vscode", "cli", etc.
+  google.protobuf.Timestamp created_at = 4;
+  
+  // The formatted replay text (markdown)
+  string replay_text = 5;
+  
+  // Metadata
+  int32 total_messages = 6;
+  int32 included_messages = 7;
+  bool was_summarized = 8;
+  string topic = 9;               // Auto-detected or user-set
+}
+
+message SummarizeSessionRequest {
+  string session_id = 1;
+  int32 max_tokens = 2;
+  bool include_key_decisions = 3;
+  string summarizer_model = 4;    // Which model to use (optional)
+}
+
+message SummarizeSessionResponse {
+  string summary = 1;
+  repeated string key_decisions = 2;
+  string current_state = 3;
+  int32 original_message_count = 4;
+}
+
+message ForkSessionRequest {
+  string session_id = 1;
+  optional string new_model = 2;  // Model for forked session
+  optional int32 fork_point = 3;  // Message index to fork from
+  map<string, string> metadata = 4;
+}
+```
+
+### Session State Additions
+
+```rust
+pub struct Session {
+    // ... existing fields ...
+    
+    /// Auto-detected or user-set topic
+    pub topic: Option<String>,
+    
+    /// If this session was forked, the parent session ID
+    pub forked_from: Option<String>,
+    
+    /// Fork point (message index in parent)
+    pub fork_point: Option<usize>,
+    
+    /// Cached summary (regenerated when stale)
+    pub cached_summary: Option<CachedSummary>,
+}
+
+pub struct CachedSummary {
+    pub text: String,
+    pub key_decisions: Vec<String>,
+    pub generated_at: DateTime<Utc>,
+    pub message_count_at_generation: usize,
+}
 ```
 
 ---
@@ -697,12 +1353,14 @@ OpenAI API
 | Benefit | Description |
 |---------|-------------|
 | **Session Continuity** | Start in VS Code, continue in CLI, seamlessly |
+| **Session Sharing** | Export sessions as JSON; share via git, Slack, or email with colleagues |
 | **Universal Model Access** | Python/CLI can use Copilot via daemon's MCP connection |
 | **Zero Config Conflicts** | One daemon = one config = no drift |
 | **MCP Exposure** | Claude Desktop, Cursor can use OpenLLM's models |
 | **Warm Performance** | Daemon stays loaded; fast for all clients |
 | **Tool Sharing** | VS Code tools available to all clients |
 | **Unified Secrets** | One keychain/env lookup, shared |
+| **Knowledge Artifacts** | Sessions become searchable, version-controlled documentation |
 
 ---
 

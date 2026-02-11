@@ -1,287 +1,199 @@
 # Configuration Guide
 
-Open LLM supports multiple configuration sources for maximum flexibility.
+OpenLLM uses YAML configuration files and system keychain for secrets.
 
-## Configuration Sources
+## Config File Locations
 
-### 1. VS Code Settings (Default for Extension)
+### User Level
+`~/.openllm/config.yaml` - Applies globally to all workspaces
 
-Provider and model configuration in VS Code settings:
+### Workspace Level
+`<workspace>/.openllm/config.yaml` - Workspace-specific settings
 
-```json
-{
-  "openLLM.providers": [
-    {
-      "name": "openai",
-      "enabled": true,
-      "models": ["gpt-4o", "gpt-4o-mini"]
-    },
-    {
-      "name": "anthropic",
-      "enabled": true,
-      "models": ["claude-3-5-sonnet-20241022"]
-    },
-    {
-      "name": "ollama",
-      "enabled": true,
-      "apiBase": "http://localhost:11434",
-      "models": ["llama3", "qwen2.5-coder"]
-    }
-  ]
-}
-```
+## Config File Format
 
-### 2. Native YAML Files
-
-YAML configuration shared across all OpenLLM tools (extension, CLI, Python scripts):
-
-**User Level:** `~/.openllm/config.yaml`
 ```yaml
 providers:
-  - name: openai
-    enabled: true
-    models:
+  openai:
+    # Option 1: API key stored in system keychain
+    api_key_keychain_name: "OPENAI_API_KEY"
+    enabled_models:
       - gpt-4o
       - gpt-4o-mini
-  - name: anthropic
-    enabled: true
-    models:
+      - gpt-4-turbo
+  
+  anthropic:
+    # Option 2: API key from environment variable
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
       - claude-3-5-sonnet-20241022
-  - name: ollama
-    enabled: true
-    api_base: http://localhost:11434
-    models:
-      - llama3
+      - claude-3-opus-20240229
+  
+  ollama:
+    # Ollama doesn't require an API key
+    enabled_models:
+      - llama3.2
+      - qwen2.5-coder:7b
 ```
 
-**Workspace Level:** `.openllm/config.yaml`
-Same format. Workspace config can override user config.
+## API Key Storage Options
 
-## VS Code Extension Settings
+Each provider can specify exactly ONE of these (mutually exclusive):
 
-### Config Source
+### Option 1: Keychain Storage (`api_key_keychain_name`)
 
-Choose where to read provider configuration:
+- Key stored in system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- Specify the key name used in keychain
+- Set via web dashboard "API Key" toggle
 
-```json
-{
-  "openLLM.config.source": "vscode",
-  "openLLM.config.nativeLevel": "both"
-}
+```yaml
+providers:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"
 ```
 
-| Setting | Options | Description |
-|---------|---------|-------------|
-| `openLLM.config.source` | `"vscode"` / `"native"` | Where to read provider config |
-| `openLLM.config.nativeLevel` | `"user"` / `"workspace"` / `"both"` | Which native config files to use |
+### Option 2: Environment Variable (`api_key_env_var_name`)
 
-### Secret Storage
+- Key read from environment variable at runtime
+- Specify the env var name to check
+- Set via web dashboard "Env" toggle
 
-Configure where API keys are stored and resolved:
-
-```json
-{
-  "openLLM.secrets.primaryStore": "vscode",
-  "openLLM.secrets.checkEnvironment": true,
-  "openLLM.secrets.checkDotEnv": false
-}
+```yaml
+providers:
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `openLLM.secrets.primaryStore` | `"vscode"` | Primary key storage: `"vscode"` (VS Code SecretStorage) or `"keychain"` (system keychain) |
-| `openLLM.secrets.checkEnvironment` | `true` | Also check environment variables as fallback |
-| `openLLM.secrets.checkDotEnv` | `false` | Also check .env files as fallback |
+## Supported Providers
 
-## API Key Storage
+| Provider | ID | Default Env Var |
+|----------|-----|-----------------|
+| OpenAI | `openai` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` |
+| Mistral | `mistral` | `MISTRAL_API_KEY` |
+| Ollama | `ollama` | *(none needed)* |
+| Azure OpenAI | `azure` | `AZURE_OPENAI_API_KEY` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
+| Groq | `groq` | `GROQ_API_KEY` |
+| Together | `together` | `TOGETHER_API_KEY` |
+| Cohere | `cohere` | `COHERE_API_KEY` |
+| xAI (Grok) | `xai` | `XAI_API_KEY` |
+| Fireworks | `fireworks` | `FIREWORKS_API_KEY` |
 
-API keys are stored separately from configuration for security.
+## Web Dashboard Configuration
 
-### Priority Order (First Match Wins)
+The easiest way to configure OpenLLM is via the web dashboard:
 
-1. **Primary Store** (VS Code SecretStorage or System Keychain)
-2. **Environment Variables** (if `checkEnvironment` is true)
-3. **`.env` Files** (if `checkDotEnv` is true)
+1. Start the daemon: `openllm daemon`
+2. Start the web server: `openllm web`
+3. Open http://localhost:8787
 
-### Environment Variable Names
+### Provider Cards
 
-| Provider | Environment Variables |
-|----------|----------------------|
-| OpenAI | `OPENAI_API_KEY` |
-| Anthropic | `ANTHROPIC_API_KEY` |
-| Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
-| Mistral | `MISTRAL_API_KEY` |
-| Azure | `AZURE_API_KEY`, `AZURE_OPENAI_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Ollama | *(no key needed)* |
+Each provider shows:
+- **Name**: Provider display name
+- **Toggle**: Choose "Key" (keychain) or "Env" (environment variable)
+- **Input field**: Enter API key value (for keychain) or env var name
+- **Status badge**: "Configured", "Key missing", or "Not configured"
+- **Model selection**: Choose which models to enable
 
-### `.env` File Locations
+### Config Location
 
-When `checkDotEnv` is enabled, these files are checked:
+Click the settings icon to choose where config is saved:
+- **User**: `~/.openllm/config.yaml` (default)
+- **Workspace**: `<workspace>/.openllm/config.yaml` (requires VS Code connection)
 
-1. `~/.openllm/.env` (user global)
-2. `<workspace>/.env` (project-specific)
-3. `<workspace>/.openllm/.env` (project OpenLLM-specific)
+## VS Code Extension
 
-Example `.env` file:
+The VS Code extension:
+- Connects to the daemon automatically
+- Provides workspace paths for workspace-level config
+- Registers configured models with VS Code's Language Model API
+
+No configuration is stored in the extension itself.
+
+## CLI Configuration
+
+### View Config
 ```bash
-OPENAI_API_KEY=sk-proj-...
-ANTHROPIC_API_KEY=sk-ant-api03-...
-GEMINI_API_KEY=AIza...
+# Check daemon status
+./target/release/openllm daemon --status
 ```
 
-## Import/Export Commands
+### Start Services
+```bash
+# Start daemon (background)
+./target/release/openllm daemon &
 
-### Export to Native YAML
-
-**Command:** `Open LLM: Export Config to Native (YAML)`
-
-Exports VS Code settings to a YAML file:
-- Choose workspace or user level
-- Existing file is backed up automatically
-- Creates `.openllm/config.yaml` or `~/.openllm/config.yaml`
-
-### Import from Native YAML
-
-**Command:** `Open LLM: Import Config from Native (YAML)`
-
-Imports YAML configuration into VS Code settings:
-- Choose workspace or user level source
-- Replaces current VS Code provider settings
-
-## Python Usage
-
-```python
-from openllm import FileConfigProvider, ProviderConfig, ConfigLevel
-
-# User-level config
-user_config = FileConfigProvider.user()
-print(f"Path: {user_config.path}")
-print(f"Providers: {[p.name for p in user_config.get_providers()]}")
-
-# Workspace-level config
-workspace_config = FileConfigProvider.workspace("/path/to/project")
-
-# Add a provider
-user_config.add_provider(ProviderConfig(
-    name="openai",
-    enabled=True,
-    api_base=None,
-    models=["gpt-4o", "gpt-4o-mini"]
-))
-
-# Export to JSON (for VS Code migration)
-json_str = user_config.export_json()
-
-# Import from JSON (from VS Code)
-user_config.import_json(json_str)
+# Start web server
+./target/release/openllm web
 ```
 
-## Node.js Usage
+## Example Configurations
 
-```javascript
-const { FileConfigProvider } = require('@openllm/native');
-
-// User-level config
-const userConfig = FileConfigProvider.user();
-console.log(`Path: ${userConfig.path}`);
-
-// Workspace-level config
-const workspaceConfig = FileConfigProvider.workspace('/path/to/project');
-
-// Add a provider
-await workspaceConfig.addProvider({
-    name: 'openai',
-    enabled: true,
-    apiBase: undefined,
-    models: ['gpt-4o', 'gpt-4o-mini']
-});
-
-// Get all providers
-const providers = await workspaceConfig.getProviders();
-console.log(providers.map(p => p.name));
-
-// Export/import JSON
-const json = workspaceConfig.exportJson();
-workspaceConfig.importJson(json);
-```
-
-## Provider Configuration Options
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Provider identifier (openai, anthropic, gemini, etc.) |
-| `enabled` | boolean | Whether provider is active |
-| `apiBase` | string? | Custom API endpoint (optional) |
-| `models` | string[] | List of model IDs to enable |
-
-### Example Configurations
-
-**OpenAI:**
+### Minimal (Single Provider)
 ```yaml
-- name: openai
-  enabled: true
-  models:
-    - gpt-4o
-    - gpt-4o-mini
-    - gpt-4-turbo
+providers:
+  openai:
+    api_key_env_var_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
 ```
 
-**Anthropic:**
+### Multiple Providers
 ```yaml
-- name: anthropic
-  enabled: true
-  models:
-    - claude-3-5-sonnet-20241022
-    - claude-3-opus-20240229
+providers:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
+      - gpt-4o-mini
+  
+  anthropic:
+    api_key_keychain_name: "ANTHROPIC_API_KEY"
+    enabled_models:
+      - claude-3-5-sonnet-20241022
+  
+  ollama:
+    enabled_models:
+      - llama3.2
+      - qwen2.5-coder:7b
 ```
 
-**Ollama (Local):**
+### Local Development (All from Env Vars)
 ```yaml
-- name: ollama
-  enabled: true
-  api_base: http://localhost:11434
-  models:
-    - llama3.2
-    - qwen2.5-coder:7b
-    - deepseek-coder:6.7b
-```
-
-**Azure OpenAI:**
-```yaml
-- name: azure
-  enabled: true
-  api_base: https://your-resource.openai.azure.com
-  models:
-    - gpt-4o  # Your deployment name
-```
-
-**OpenRouter:**
-```yaml
-- name: openrouter
-  enabled: true
-  models:
-    - anthropic/claude-3.5-sonnet
-    - google/gemini-pro
-    - meta-llama/llama-3.2-70b-instruct
+providers:
+  openai:
+    api_key_env_var_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
+  
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
+      - claude-3-5-sonnet-20241022
 ```
 
 ## Best Practices
 
 ### Personal Development
-- Use VS Code SecretStorage (default) for API keys
-- Configure providers in VS Code settings for quick iteration
+- Use keychain storage for API keys (secure, persistent)
+- Configure via web dashboard for easy management
 
 ### Team Projects
-- Use `.openllm/config.yaml` in workspace (commit to git)
-- Use `.env` files for API keys (add to `.gitignore`)
-- Team members configure their own keys
-
-### Sharing Across Tools
-- Use `~/.openllm/config.yaml` for user-level config
-- Use system keychain for API keys
-- CLI, Python scripts, and VS Code all share the same config
+- Use workspace-level config (`.openllm/config.yaml`)
+- Reference env vars for API keys
+- Team members set their own env vars
+- Commit config file, add env var docs to README
 
 ### CI/CD
 - Use environment variables for API keys
-- Use workspace config files checked into repo
+- Set `api_key_env_var_name` in config
+- Pass secrets via CI/CD platform
+
+### Security
+- Never commit API keys to version control
+- Use keychain for local development
+- Use env vars for CI/CD and containers

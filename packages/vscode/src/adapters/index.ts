@@ -1,4 +1,4 @@
 export * from './VSCodeCancellationTokenAdapter';
 export * from './VSCodeLoggerAdapter';
 export * from './MessageConverter';
-export * from './NativeProviderAdapter';
+// NativeProviderAdapter removed - now using gRPC daemon

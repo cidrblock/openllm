@@ -2,169 +2,136 @@
 
 **Use any LLM with any VS Code extension** — OpenAI, Anthropic, Google, Ollama & more.
 
-## Features
+## Overview
 
-- **Chat Sidebar** — Built-in chat interface in the Activity Bar
-- **Multi-Provider Support** — OpenAI, Anthropic Claude, Google Gemini, Ollama (local), Mistral, Azure OpenAI, OpenRouter
-- **Tool Orchestration** — Supports VS Code tools (`vscode.lm.tools`) for agent-style operations
-- **Flexible Storage** — VS Code SecretStorage, system keychain, or environment variables
-- **Native Config** — Share provider configuration across VS Code, CLI, and Python tools
-- **Local Model Support** — Run models locally with Ollama for privacy and cost savings
-- **Streaming Support** — Real-time streaming responses from all providers
+This VS Code extension connects to the OpenLLM daemon and registers configured LLM models with VS Code's Language Model API. Other extensions can then use these models through the standard `vscode.lm` API.
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Other VS Code Extensions (e.g., Ansible, custom tools)        │
+│                                                                 │
+│  const models = await vscode.lm.selectChatModels({             │
+│    vendor: 'openllm'                                            │
+│  });                                                            │
+│  const response = await models[0].sendRequest(messages, ...);  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OpenLLM Extension (this extension)                            │
+│                                                                 │
+│  • Connects to daemon on activation                            │
+│  • Registers models with VS Code Language Model API            │
+│  • Provides workspace path via backchannel                     │
+│  • Starts daemon if not running                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │ gRPC (Unix socket)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  OpenLLM Daemon (Rust)                                          │
+│                                                                 │
+│  • Handles all LLM provider communication                      │
+│  • Manages configuration and secrets                           │
+│  • Provides streaming chat responses                           │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Installation
 
-1. Open VS Code
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Open LLM Provider"
-4. Click Install
+### From VSIX
 
-## Quick Start
-
-### Configure Providers
-
-1. Open Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-2. Run **"Open LLM: Providers and Models"**
-3. Add API keys for your providers
-4. Click "Models..." to fetch available models
-5. Select models and save
-
-### Manual Configuration
-
-Add to your VS Code settings (`settings.json`):
-
-```json
-{
-  "openLLM.providers": [
-    {
-      "name": "openai",
-      "enabled": true,
-      "models": ["gpt-4o", "gpt-4o-mini"]
-    },
-    {
-      "name": "anthropic",
-      "enabled": true,
-      "models": ["claude-3-5-sonnet-20241022"]
-    },
-    {
-      "name": "ollama",
-      "enabled": true,
-      "apiBase": "http://localhost:11434",
-      "models": ["llama3.2", "qwen2.5-coder"]
-    }
-  ]
-}
+```bash
+cd packages/vscode
+npm install
+npm run package
+code --install-extension open-llm-provider-0.1.0.vsix
 ```
 
-API keys can be stored in:
-- VS Code SecretStorage (via "Providers and Models" panel)
-- System keychain
-- Environment variables (`OPENAI_API_KEY`, etc.)
-- `.env` files (`~/.openllm/.env` or workspace `.env`)
+### Prerequisites
 
-## Chat Sidebar
+The OpenLLM daemon must be running:
 
-Click the chat icon in the Activity Bar to open the built-in chat interface:
+```bash
+# Build the daemon
+cargo build --release
 
-- Model selector with all available models
-- Streaming responses with real-time display
-- Rich markdown formatting with syntax highlighting
-- Session history with persistence
-- Stop generation button
-- New chat / clear conversation
+# Start the daemon
+./target/release/openllm daemon
+```
+
+## Configuration
+
+Configuration is managed through the **web dashboard**, not VS Code settings.
+
+### Start the Web Dashboard
+
+```bash
+./target/release/openllm web
+```
+
+Open http://localhost:8787 to:
+- Add API keys (stored in system keychain or referenced from environment variables)
+- Enable/disable providers
+- Select which models to expose
+
+### Config Files
+
+Configuration is stored in YAML files:
+
+| Location | Purpose |
+|----------|---------|
+| `~/.openllm/config.yaml` | User-level (global) settings |
+| `<workspace>/.openllm/config.yaml` | Workspace-specific settings |
+
+Example config:
+
+```yaml
+providers:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
+      - gpt-4o-mini
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
+      - claude-3-5-sonnet-20241022
+```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `Open LLM: Providers and Models` | Configure providers, API keys, and models |
-| `Open LLM: Show Available Models` | View all configured models |
-| `Open LLM: Reload Configuration` | Reload configuration |
-| `Open LLM: Show Status Panel` | Open status and debug panel |
-| `Open LLM: Open Playground` | Compare responses from multiple models |
-| `Open LLM: Focus Chat Panel` | Open the Chat sidebar |
-| `Open LLM: Clear Chat History` | Clear the current conversation |
-| `Open LLM: Export Config to Native` | Export to YAML file |
-| `Open LLM: Import Config from Native` | Import from YAML file |
+| `Open LLM: Show Daemon Status` | Check daemon connection status |
+| `Open LLM: Open Dashboard` | Open web dashboard in browser |
+| `Open LLM: Configure Provider` | Open provider configuration |
 
 ## Supported Providers
 
-| Provider | Tool Calling | Vision | Notes |
-|----------|-------------|--------|-------|
-| OpenAI | ✓ | ✓ | Direct HTTP |
-| Anthropic | ✓ | ✓ | Direct HTTP |
-| Google Gemini | ✓ | ✓ | Direct HTTP |
-| Mistral | ✓ | ✗ | Direct HTTP |
-| Ollama | ✗ | ✗ | Local models |
-| Azure OpenAI | ✓ | ✓ | Direct HTTP |
-| OpenRouter | ✓ | ✓ | Direct HTTP |
-| **VS Code LM** | ✓ | ✗ | **MCP to Copilot/GitHub Models** |
+| Provider | Tool Calling | Vision | Streaming |
+|----------|-------------|--------|-----------|
+| OpenAI | ✓ | ✓ | ✓ |
+| Anthropic | ✓ | ✓ | ✓ |
+| Google Gemini | ✓ | ✓ | ✓ |
+| Mistral | ✓ | ✗ | ✓ |
+| Ollama | ✗ | ✗ | ✓ |
+| Azure OpenAI | ✓ | ✓ | ✓ |
+| OpenRouter | ✓ | ✓ | ✓ |
+| DeepSeek | ✓ | ✗ | ✓ |
+| Groq | ✓ | ✗ | ✓ |
 
-### VS Code LM Provider
+## Using OpenLLM Models from Other Extensions
 
-OpenLLM can use Copilot and other `vscode.lm` models as if they were regular providers. This is enabled via MCP (Model Context Protocol)—the Rust core calls the extension's MCP server, which proxies to `vscode.lm`.
-
-This means:
-- Tool orchestration is handled in Rust for ALL models (including Copilot)
-- The same codebase works outside VS Code (direct HTTP providers) and inside VS Code (with vscode.lm access)
-- No separate code paths for different model types
-
-## Configuration Options
-
-### Provider Configuration
-
-| Setting | Description |
-|---------|-------------|
-| `openLLM.providers` | Array of provider configurations |
-| `openLLM.autoReload` | Auto-reload when config changes |
-| `openLLM.logLevel` | Logging level (debug, info, warn, error) |
-
-### Secret Storage
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `openLLM.secrets.primaryStore` | `"vscode"` | `"vscode"` or `"keychain"` |
-| `openLLM.secrets.checkEnvironment` | `true` | Check env vars as fallback |
-| `openLLM.secrets.checkDotEnv` | `false` | Check .env files as fallback |
-
-### Config Source
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `openLLM.config.source` | `"vscode"` | `"vscode"` or `"native"` |
-| `openLLM.config.nativeLevel` | `"both"` | `"user"`, `"workspace"`, or `"both"` |
-
-## Native Config Files
-
-Share configuration with CLI and Python tools:
-
-**User level:** `~/.openllm/config.yaml`
-**Workspace level:** `.openllm/config.yaml`
-
-```yaml
-providers:
-  - name: openai
-    enabled: true
-    models:
-      - gpt-4o
-      - gpt-4o-mini
-  - name: ollama
-    enabled: true
-    api_base: http://localhost:11434
-    models:
-      - llama3
-```
-
-## Using with Other Extensions
-
-Extensions can use the VS Code Language Model API:
+Other extensions can use OpenLLM models through the standard VS Code Language Model API:
 
 ```typescript
 import * as vscode from 'vscode';
 
-// Get Open LLM models
+// Get OpenLLM models
 const models = await vscode.lm.selectChatModels({
-  vendor: 'open-llm'
+  vendor: 'openllm'
 });
 
 if (models.length > 0) {
@@ -180,53 +147,72 @@ if (models.length > 0) {
 }
 ```
 
-## Architecture
+## Extension Architecture
 
-The extension serves four distinct roles:
+The extension is a thin gRPC client with these responsibilities:
 
-| Role | Description |
-|------|-------------|
-| **Configuration UI** | Visual interface for managing providers, API keys, and models |
-| **MCP Server** | MCP server exposing VS Code APIs to the Rust core (secrets, config, tools, **vscode.lm models**) |
-| **LM Provider** | Implements VS Code's Language Model API to register OpenLLM models with VS Code |
-| **Test UIs** | Chat sidebar and playground for testing models |
+| Component | Description |
+|-----------|-------------|
+| **Daemon Client** | Connects to the OpenLLM daemon via Unix socket |
+| **Backchannel** | Provides workspace path to daemon for workspace-level config |
+| **LM Provider** | Implements `LanguageModelChatProvider` to register models with VS Code |
+| **Status Bar** | Shows connection status |
 
-### MCP Server Capabilities
-
-The extension's MCP server exposes:
-
-| Category | MCP Tools | Purpose |
-|----------|-----------|---------|
-| Secrets | `openllm_secrets_*` | Access VS Code SecretStorage |
-| Config | `openllm_config_*` | Access VS Code settings |
-| **LLM** | `openllm_llm_list`, `openllm_llm_send` | **Access vscode.lm models (Copilot, etc.)** |
-| Tools | Proxied from `vscode.lm.tools` | VS Code tools for agent workflows |
-
-This allows the Rust core to use Copilot/GitHub Models through the same unified API as direct HTTP providers.
-
-The extension communicates with the Rust core (`openllm-core`) via NAPI bindings. The Rust core handles:
-- Unified secret resolution (env vars, VS Code, keychain)
-- Unified config resolution (VS Code settings, native YAML files)
-- LLM provider implementations (OpenAI, Anthropic, Gemini, **VsCodeProvider**)
-- Tool orchestration for ALL providers
-- Intelligent write routing (decides where to store secrets/config)
-
-See [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for detailed documentation.
+The extension does **not**:
+- Store secrets (secrets are in system keychain)
+- Store configuration (config is in YAML files)
+- Make direct HTTP calls to LLM providers (daemon handles this)
+- Provide a chat UI (use the web dashboard or other extensions)
 
 ## Development
 
 ```bash
+cd packages/vscode
+
 # Install dependencies
 npm install
 
-# Compile
+# Compile TypeScript
 npm run compile
 
 # Watch mode
 npm run watch
 
-# Press F5 to debug
+# Package to VSIX
+npm run package
+
+# Press F5 in VS Code to debug
 ```
+
+## Troubleshooting
+
+### Extension Not Connecting
+
+1. Check if daemon is running:
+   ```bash
+   pgrep -f "openllm daemon"
+   ```
+
+2. Check socket exists:
+   ```bash
+   ls -la /run/user/$(id -u)/openllm/daemon.sock
+   ```
+
+3. Restart daemon:
+   ```bash
+   pkill -9 openllm
+   rm -f /run/user/$(id -u)/openllm/daemon.sock
+   ./target/release/openllm daemon
+   ```
+
+4. Check Output panel: View → Output → "Open LLM Provider"
+
+### Models Not Appearing
+
+1. Open web dashboard (http://localhost:8787)
+2. Ensure provider has valid API key
+3. Enable the models you want
+4. Reload VS Code window
 
 ## License
 

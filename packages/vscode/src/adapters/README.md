@@ -1,37 +1,37 @@
 # VS Code Adapters
 
-This directory contains adapter classes that bridge VS Code-specific types to the Rust core library via Node.js bindings.
+This directory contains adapter classes that bridge VS Code-specific types to the gRPC daemon.
 
 ## Overview
 
-The Rust core (`openllm-core`) is designed to work in any environment via language bindings. The VS Code extension accesses it through NAPI-rs Node.js bindings (`@openllm/native`).
-
-The adapters in this directory bridge VS Code's native types to the core library.
+The OpenLLM daemon provides a gRPC API. The VS Code extension communicates with it via gRPC and exposes models through VS Code's Language Model API. The adapters in this directory handle the conversion between VS Code types and gRPC message formats.
 
 ## Architecture
 
 ```
 VS Code Extension (packages/vscode)
-├── extension.ts
-├── core/OpenLLMProvider.ts        # Implements vscode.LanguageModelChatProvider
-├── registry/ProviderRegistry.ts   # Creates provider instances
-└── adapters/                      # Bridge between VS Code and native
-    ├── NativeProviderAdapter.ts   # Wraps native providers
-    ├── MessageConverter.ts        # Converts VS Code → Core messages
+├── extension.ts                    # Entry point
+├── daemon/
+│   ├── client.ts                   # gRPC client to daemon
+│   └── backchannel.ts              # Bidirectional stream for workspace info
+├── providers/
+│   └── OpenLLMLanguageModelProvider.ts  # Implements vscode.LanguageModelChatProvider
+└── adapters/                       # Type conversions
+    ├── MessageConverter.ts         # VS Code ↔ gRPC message conversion
     ├── VSCodeCancellationTokenAdapter.ts
     └── VSCodeLoggerAdapter.ts
 
-@openllm/native (crates/openllm-napi)
-└── Rust bindings for providers, secrets, config
+openllm daemon (Rust)
+└── gRPC server on Unix socket
 ```
 
 ## Adapters
 
 ### MessageConverter
 
-Converts VS Code message format to core message format.
+Converts VS Code message format to gRPC proto message format and vice versa.
 
-**VS Code Message Parts:**
+**VS Code → gRPC:**
 - `vscode.LanguageModelTextPart` → `ContentPart` with `type: 'text'`
 - `vscode.LanguageModelToolCallPart` → `ContentPart` with `type: 'tool_use'`
 - `vscode.LanguageModelToolResultPart` → `ContentPart` with `type: 'tool_result'`
@@ -43,18 +43,14 @@ Converts VS Code message format to core message format.
   role: vscode.LanguageModelChatMessageRole.User,
   content: [
     new vscode.LanguageModelTextPart("Hello"),
-    new vscode.LanguageModelToolResultPart(callId, [
-      new vscode.LanguageModelTextPart("Result")
-    ])
   ]
 }
 
-// Converted to core message
+// Converted to gRPC ChatMessage
 {
   role: 'user',
   content: [
-    { type: 'text', text: "Hello" },
-    { type: 'tool_result', tool_use_id: callId, content: "Result" }
+    { type: 'text', text: "Hello" }
   ]
 }
 ```
@@ -67,26 +63,25 @@ Bridges VS Code's cancellation token to core's interface.
 - VS Code: `token.onCancellationRequested(() => {})` returns `Disposable`
 - Core: `token.onCancellationRequested(() => {})` returns `void`
 
-The adapter manages the disposable internally and provides the core interface.
+The adapter manages the disposable internally and provides a consistent interface.
 
 ### VSCodeLoggerAdapter
 
-Wraps VS Code's `OutputChannel` to implement core's `ILogger` interface.
+Wraps VS Code's `OutputChannel` to implement a common `ILogger` interface.
 
 **Usage:**
 ```typescript
-const channel = vscode.window.createOutputChannel('My Extension');
+const channel = vscode.window.createOutputChannel('Open LLM Provider');
 const logger = new VSCodeLoggerAdapter(channel);
 
 // Use as ILogger
-logger.info('Hello');
-logger.error('Error', someObject);
+logger.info('Connected to daemon');
+logger.error('Connection failed', error);
 ```
 
 ## Benefits of Adapter Pattern
 
-1. **Separation of Concerns**: Core library is runtime-agnostic
-2. **Reusability**: Rust core works in Python, Node.js, and VS Code
-3. **Testability**: Easy to test adapters in isolation
-4. **Maintainability**: Changes to VS Code API don't affect core
-5. **Performance**: Native Rust performance via bindings
+1. **Separation of Concerns**: gRPC types stay separate from VS Code types
+2. **Testability**: Easy to test adapters in isolation
+3. **Maintainability**: Changes to VS Code API don't affect daemon communication
+4. **Type Safety**: Clear conversion boundaries between type systems

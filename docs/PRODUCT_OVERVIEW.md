@@ -1,6 +1,6 @@
-# Open LLM Provider - Product Overview
+# OpenLLM - Product Overview
 
-**Status:** MVP Complete (In Testing)  
+**Status:** MVP Complete  
 **Version:** 0.1.0  
 **Last Updated:** February 2026
 
@@ -8,9 +8,9 @@
 
 ## Executive Summary
 
-Open LLM Provider is a provider-agnostic middleware layer that enables VS Code extensions and applications to connect to any LLM provider through a unified interface. It fulfills the "Bring Your Own Model" (BYOM) vision by supporting both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama, Llamafile).
+OpenLLM is a unified AI daemon that provides consistent access to multiple LLM providers through a single interface. It enables the "Bring Your Own Model" (BYOM) vision by supporting both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama).
 
-The project implements a **Rust core** with bindings for **Node.js**, **Python**, and a **VS Code extension**, enabling consistent LLM access across the entire development toolchain.
+The project implements a **Rust daemon** with **gRPC API**, a **web dashboard** for configuration, and a **VS Code extension** that registers models with VS Code's Language Model API.
 
 ---
 
@@ -18,138 +18,160 @@ The project implements a **Rust core** with bindings for **Node.js**, **Python**
 
 | Goal | Status | Implementation |
 |------|--------|----------------|
-| Decouple Provider Logic | ✅ Complete | Rust core handles all provider communication; consumers use high-level APIs |
-| Enable BYOM | ✅ Complete | 7 providers supported including local (Ollama) and custom endpoints |
-| Centralize Configuration | ✅ Complete | Native YAML config files + VS Code settings with bidirectional sync |
-| Accelerate AI Infusion | ✅ Complete | Ready-made communication layer with standard `vscode.lm` API integration |
+| Decouple Provider Logic | ✅ Complete | Rust daemon handles all provider communication; clients use gRPC |
+| Enable BYOM | ✅ Complete | 15+ providers supported including local (Ollama) and custom endpoints |
+| Centralize Configuration | ✅ Complete | YAML config files at user/workspace level; web dashboard for easy editing |
+| Accelerate AI Infusion | ✅ Complete | Ready-made gRPC API; VS Code integration via Language Model API |
 
 ---
 
 ## Supported Providers
 
-| Provider | API Type | Tool Calling | Vision | Streaming | Air-Gap Compatible |
-|----------|----------|--------------|--------|-----------|-------------------|
-| OpenAI | Cloud | ✓ | ✓ | ✓ | ✗ |
-| Anthropic | Cloud | ✓ | ✓ | ✓ | ✗ |
-| Google Gemini | Cloud | ✓ | ✓ | ✓ | ✗ |
-| Mistral | Cloud | ✓ | ✗ | ✓ | ✗ |
-| Azure OpenAI | Cloud/On-Prem | ✓ | ✓ | ✓ | ✓ (corporate) |
-| OpenRouter | Cloud | ✓ | ✓ | ✓ | ✗ |
-| Ollama | Local | ✗ | ✗ | ✓ | ✓ |
-| **VS Code LM** | MCP | ✓ | ✗ | ✓ | Depends on model |
+| Provider | Tool Calling | Vision | Streaming | Notes |
+|----------|--------------|--------|-----------|-------|
+| OpenAI | ✓ | ✓ | ✓ | GPT-4o, GPT-4 Turbo |
+| Anthropic | ✓ | ✓ | ✓ | Claude 3.5, Claude 3 |
+| Google Gemini | ✓ | ✓ | ✓ | Gemini Pro, Flash |
+| Mistral | ✓ | ✗ | ✓ | Mistral Large, Medium |
+| Azure OpenAI | ✓ | ✓ | ✓ | Corporate/on-prem |
+| OpenRouter | ✓ | ✓ | ✓ | 100+ model aggregator |
+| Ollama | ✗ | ✗ | ✓ | Local models |
+| DeepSeek | ✓ | ✗ | ✓ | DeepSeek Coder |
+| Groq | ✓ | ✗ | ✓ | Fast inference |
+| Together | ✓ | ✗ | ✓ | Open models |
+| Cohere | ✓ | ✗ | ✓ | Command models |
+| xAI (Grok) | ✓ | ✗ | ✓ | Grok models |
+| Fireworks | ✓ | ✗ | ✓ | Optimized inference |
 
 **Notes:** 
 - Ollama supports any model that can run locally (Llama, Mistral, Qwen, DeepSeek, etc.)
-- **VS Code LM** provider allows OpenLLM to access Copilot, GitHub Models, and any other `vscode.lm` models via MCP (Model Context Protocol). This enables unified orchestration—the same Rust code handles tool calling for both direct HTTP providers and VS Code LM models.
+- Models are discovered dynamically from provider APIs when possible
 
 ---
 
 ## Architecture Overview
 
-### Multi-Language Support
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Consumer Applications                         │
 │                                                                  │
-│   VS Code Extension     Python Applications     Node.js / CLI   │
-│   (Ansible, etc.)       (scripts, notebooks)    (automation)    │
-│         │                      │                      │          │
-│   NAPI + MCP Server       PyO3 Bindings         NAPI Bindings   │
-│         └──────────────────────┼──────────────────────┘          │
-└────────────────────────────────┼────────────────────────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │     openllm-core        │
-                    │       (Rust)            │
-                    │                         │
-                    │   • 8+ LLM Providers    │
-                    │     (incl. VsCodeProvider)
-                    │   • Tool Orchestration  │
-                    │   • Secret Management   │
-                    │   • Config Management   │
-                    │   • Streaming Support   │
-                    └────────────┬────────────┘
-                       │                    │
-                       │ HTTP               │ MCP
-                       ▼                    ▼
-    ┌─────────────────────────┐  ┌─────────────────────────┐
-    │    LLM Provider APIs    │  │    VS Code Extension    │
-    │  OpenAI, Anthropic...   │  │  (vscode.lm, tools)     │
-    └─────────────────────────┘  └─────────────────────────┘
+│   VS Code Extension     Python Scripts      Web Dashboard        │
+│   (gRPC client)         (gRPC client)       (HTTP → gRPC)        │
+│         │                      │                   │             │
+└─────────┼──────────────────────┼───────────────────┼─────────────┘
+          │                      │                   │
+          └──────────────────────┼───────────────────┘
+                                 │ gRPC over Unix Socket
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     openllm daemon (Rust)                        │
+│                                                                  │
+│   ┌─────────────────┐  ┌─────────────────┐  ┌────────────────┐  │
+│   │  gRPC Server    │  │  Web Server     │  │  Session Mgmt  │  │
+│   │  (tonic)        │  │  (axum)         │  │                │  │
+│   └────────┬────────┘  └────────┬────────┘  └────────────────┘  │
+│            │                    │                                │
+│   ┌────────▼────────┐  ┌────────▼────────┐  ┌────────────────┐  │
+│   │  LLM Providers  │  │  Unified Config │  │  Secret Store  │  │
+│   │  (genai crate)  │  │  Resolver       │  │  (keychain)    │  │
+│   └─────────────────┘  └─────────────────┘  └────────────────┘  │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │ HTTP
+                                 ▼
+                    ┌─────────────────────────┐
+                    │    LLM Provider APIs    │
+                    │  OpenAI, Anthropic...   │
+                    └─────────────────────────┘
 ```
 
-**Key Architectural Feature:** The `VsCodeProvider` in Rust treats VS Code's language models (Copilot, GitHub Models) as just another provider. It uses MCP (Model Context Protocol) to communicate with the VS Code extension, which proxies requests to `vscode.lm`. This enables unified tool orchestration—the same Rust code handles the complete tool calling loop for all providers.
+### Why Rust Daemon?
 
-### Why Rust Core?
-
-1. **Single source of truth** - Provider logic implemented once, used everywhere
-2. **Performance** - Native async streaming with minimal overhead
-3. **Security** - Type safety and memory safety built-in
-4. **Portability** - Same bindings work on Windows, macOS, Linux
+1. **Single source of truth** - Configuration and secrets managed centrally
+2. **Session continuity** - Start a chat in VS Code, continue from CLI
+3. **Performance** - Native async streaming with minimal overhead
+4. **Simplicity** - Clients are thin gRPC wrappers, not embedded native code
 
 ---
 
-## VS Code Extension
+## Components
 
-### Four Distinct Roles
+### 1. Rust Daemon (`openllm daemon`)
 
-| Role | Description | User Benefit |
-|------|-------------|--------------|
-| **Configuration UI** | Visual interface for managing providers, API keys, and model selection | No YAML editing required |
-| **MCP Server** | Bridge between Rust core and VS Code's secure storage/tools via Model Context Protocol | Keys stored securely in VS Code, tools accessible to LLM |
-| **LM Provider** | Implements VS Code's native `LanguageModelChatProvider` | Works with any VS Code AI extension |
-| **Test/Playground** | Built-in chat interface and model comparison tool | Test models before integration |
+The core service that runs as a background process:
+- Listens on Unix socket for gRPC requests
+- Manages provider connections and API keys
+- Handles chat streaming and session persistence
+- Stores secrets in system keychain
 
-### Integration with VS Code LM API
+### 2. Web Dashboard (`openllm web`)
 
-Open LLM registers as a "vendor" in VS Code's language model system:
+Browser-based configuration UI:
+- Configure API keys (keychain or environment variable)
+- Enable/disable providers and models
+- View connection status
+- Choose user or workspace config level
+
+### 3. VS Code Extension
+
+Integrates OpenLLM with VS Code:
+- Connects to daemon on activation
+- Registers models with VS Code's Language Model API
+- Provides workspace path info via backchannel
+- Commands: "Show Daemon Status", "Open Dashboard"
+
+---
+
+## VS Code Integration
+
+### How Models Appear in VS Code
 
 ```
 Other VS Code Extensions (e.g., Ansible)
          │
-         │  vscode.lm.selectChatModels({ vendor: 'open-llm' })
+         │  vscode.lm.selectChatModels({ vendor: 'openllm' })
          ▼
-Open LLM Extension → Returns configured models
+OpenLLM Extension → Returns configured models
          │
          │  model.sendRequest(messages, options)
          ▼
-Rust Core → Streams response from actual provider
+Daemon → Streams response from actual provider
 ```
 
-This means **any extension that uses VS Code's standard LM API can automatically use Open LLM providers** without custom integration code.
+Any extension using VS Code's standard LM API can use OpenLLM providers without custom code.
 
 ---
 
 ## Configuration & Secrets
 
-### Configuration Storage Options
+### Configuration Files
 
-| Option | Location | Best For |
-|--------|----------|----------|
-| VS Code Settings | `settings.json` | VS Code-only users, syncs with Settings Sync |
-| Native YAML (User) | `~/.config/openllm/config.yaml` | Shared across all tools (CLI, Python, VS Code) |
-| Native YAML (Workspace) | `.config/openllm/config.yaml` | Project-specific provider/model selection |
+| Location | Purpose |
+|----------|---------|
+| `~/.openllm/config.yaml` | User-level (global) settings |
+| `<workspace>/.openllm/config.yaml` | Workspace-specific settings |
 
-Users can switch between VS Code and Native config via extension settings.
+### API Key Storage
 
-### API Key Storage Options
+Two mutually exclusive options per provider:
 
-| Option | Persistence | Scope | Best For |
-|--------|-------------|-------|----------|
-| VS Code SecretStorage | Synced | Per-workspace or global | VS Code users, cloud sync |
-| System Keychain | OS-level | Global | Shared across all tools, highest security |
-| Environment Variables | Session | Process | CI/CD, Docker, scripts |
-| `.env` Files | File | Directory | Development, dotenv workflows |
+| Option | Field | Best For |
+|--------|-------|----------|
+| Keychain | `api_key_keychain_name` | Personal development, highest security |
+| Environment Variable | `api_key_env_var_name` | CI/CD, containers, shared environments |
 
-**Resolution Priority:** Environment → VS Code → System Keychain → .env
-
-### Import/Export Capabilities
-
-The extension supports bidirectional migration:
-- **Export to Native:** Copy VS Code settings → YAML files (for CLI/Python use)
-- **Import from Native:** Copy YAML files → VS Code settings
-- **Export Keys:** Copy keys between VS Code, Keychain, and .env
+Example config:
+```yaml
+providers:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"
+    enabled_models:
+      - gpt-4o
+      - gpt-4o-mini
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
+      - claude-3-5-sonnet-20241022
+```
 
 ---
 
@@ -157,140 +179,86 @@ The extension supports bidirectional migration:
 
 | ID | Title | Status | Notes |
 |----|-------|--------|-------|
-| 1 | Centralized Config | ✅ Complete | Native YAML config shared across all tools; VS Code settings also supported |
-| 2 | Local Model Support | ✅ Complete | Ollama provider with auto-discovery; custom API base URLs supported |
-| 3 | Simplified Integration | ✅ Complete | Standard `vscode.lm` API; downstream extensions need zero provider-specific code |
-| 4 | Provider Switching | ✅ Complete | Enable/disable providers via UI; switch models without restart |
+| 1 | Centralized Config | ✅ Complete | YAML config shared across all tools |
+| 2 | Local Model Support | ✅ Complete | Ollama provider with auto-discovery |
+| 3 | Simplified Integration | ✅ Complete | Standard VS Code LM API |
+| 4 | Provider Switching | ✅ Complete | Enable/disable via web dashboard |
+| 5 | Session Continuity | ✅ Complete | Sessions persist across clients |
 
 ---
 
 ## Acceptance Criteria - Status
-
-### Project Setup & Naming
-
-| Criterion | Status | Notes |
-|-----------|--------|-------|
-| Unique, viable project name | ⚠️ In Progress | "Open LLM" placeholder; trademark search needed |
-| Public GitHub repository | ⚠️ Not Started | Currently in private prototype repository |
-| Open-source licensing | ✅ Complete | MIT license applied |
 
 ### Core Functionality
 
 | Criterion | Status | Notes |
 |-----------|--------|-------|
 | Discover/connect to Ollama | ✅ Complete | Auto-connects to localhost:11434 |
-| Discover/connect to Llamafile | ⚠️ Partial | Works via custom API base URL (OpenAI-compatible) |
-| OpenAI-compatible endpoints | ✅ Complete | vLLM, RHEL AI, text-generation-inference all work via OpenAI provider |
-| Secure API key storage | ✅ Complete | VS Code SecretStorage + System Keychain |
+| OpenAI-compatible endpoints | ✅ Complete | vLLM, RHEL AI, TGI all work |
+| Secure API key storage | ✅ Complete | System keychain + env var support |
+| Dynamic model discovery | ✅ Complete | Models fetched from provider APIs |
 
-### Extension API ("The Plumbing")
-
-| Criterion | Status | Notes |
-|-----------|--------|-------|
-| Public API for other extensions | ✅ Complete | `vscode.lm.selectChatModels({ vendor: 'open-llm' })` |
-| Standardized completion/chat | ✅ Complete | `model.sendRequest(messages, options, token)` |
-| Connection status retrieval | ⚠️ Partial | Status panel shows provider status; API access in progress |
-
-### Documentation
+### Extension Integration
 
 | Criterion | Status | Notes |
 |-----------|--------|-------|
-| README.md for configuration | ✅ Complete | Includes Python, Node.js, and VS Code quick start |
-| DEVELOPER.md for extension authors | ⚠️ In Progress | Architecture docs exist; API reference needed |
+| VS Code Language Model API | ✅ Complete | `vscode.lm.selectChatModels({ vendor: 'openllm' })` |
+| Connection status | ✅ Complete | Status bar item + status panel |
+| Web-based configuration | ✅ Complete | Dashboard at localhost:8787 |
 
 ---
 
-## Out of Scope Items - Confirmed
+## Out of Scope
 
-| Item | Status | Notes |
-|------|--------|-------|
-| UI/UX for Chat | Clarification | Extension includes test chat UI; production chat UIs remain responsibility of downstream extensions |
-| Model Hosting | Confirmed | Extension connects to existing running models only |
-| Proprietary/Paid Subscriptions | Confirmed | No billing or subscription management |
-| Telemetry for model performance | Confirmed | No model evaluation or quality metrics |
-
----
-
-## Open Questions
-
-### 1. Naming ("Open LLM")
-
-**Issue:** "OpenLLM" is an existing BentoML project for LLM serving.
-
-**Options:**
-- "Open LLM Provider" (current marketplace name)
-- "Universal LLM" 
-- "LLM Bridge"
-- "Ansible AI Provider" (if staying Ansible-specific)
-
-**Recommendation:** Proceed with trademark search for "Open LLM Provider" as distinct from "OpenLLM"
-
-### 2. Governance (GitHub Organization)
-
-**Options:**
-- `ansible/` organization - ties to Ansible ecosystem
-- `redhat-developer/` organization - broader developer tools scope
-- `open-llm/` organization - standalone project
-
-**Recommendation:** `redhat-developer/` if intended for multiple Red Hat extensions; standalone org if true open-source community project
-
-### 3. API Standard
-
-**Current Implementation:** Extension uses VS Code's native `LanguageModelChatProvider` interface, which is based on OpenAI's chat completions API shape.
-
-**For Non-VS Code Consumers:** The Rust core exposes a streaming chat API modeled on OpenAI's API:
-- Messages array with roles (user, assistant, system)
-- Tool calling support (function definitions, tool results)
-- Streaming via async iterators
-
-**Recommendation:** Document the OpenAI-compatible interface as the standard; add OpenAPI spec for direct integrations
+| Item | Notes |
+|------|-------|
+| Chat UI | Extension provides status, not chat interface |
+| Model Hosting | Connects to existing running models only |
+| Telemetry | No model evaluation or quality metrics |
+| Billing | No subscription or payment management |
 
 ---
 
-## Technical Capabilities Beyond Original Scope
+## Session Continuity
 
-The current implementation includes several features beyond the original JIRA scope:
+A key feature is session continuity across tools:
 
-### Tool Calling Support
-Models that support function calling (OpenAI, Anthropic, Gemini, Mistral) can invoke VS Code's registered tools. This enables agentic workflows where the LLM can read files, run commands, etc.
+```bash
+# List sessions from any client
+$ openllm session list
+ID        MODEL           TOPIC                    MESSAGES  SOURCE   AGE
+abc123    openai/gpt-4o   Debugging auth module    15        vscode   5m ago
+def456    anthropic/...   Code review              8         cli      2h ago
 
-### Multi-Model Playground
-Built-in UI to send the same prompt to multiple models and compare responses side-by-side. Useful for model evaluation and prompt testing.
+# Continue in CLI
+$ openllm session attach abc123
 
-### Python & Node.js Bindings
-The Rust core is exposed via NAPI (Node.js) and PyO3 (Python) bindings, enabling:
-- Python scripts to use the same provider configuration as VS Code
-- CLI tools built on the same infrastructure
-- Jupyter notebook integration
-- Ansible modules/plugins using the same config
+# Export for teammate
+$ openllm session export abc123 > debugging-session.json
+```
 
-### Workspace vs User Scoping
-Configuration and secrets can be scoped to user-level (global) or workspace-level (project-specific), enabling:
-- Personal API keys at user level
-- Team-specific endpoints at workspace level
-- Per-project model selection
+Sessions are JSON files - searchable, diffable, version-controllable.
 
 ---
 
-## Deployment Artifacts
+## Deployment
 
-| Artifact | Status | Distribution |
-|----------|--------|--------------|
-| VS Code Extension (.vsix) | ✅ Ready | VS Code Marketplace (pending) |
-| Python Package | ⚠️ In Progress | PyPI (pending) |
-| npm Package | ✅ Ready | npm registry (pending) |
-| Rust Crate | ⚠️ In Progress | crates.io (pending) |
+| Component | Distribution |
+|-----------|--------------|
+| Rust Daemon | Single binary (Linux/macOS/Windows) |
+| VS Code Extension | VSIX package → Marketplace |
+| Python Client | pip package |
+| Web Dashboard | Embedded in daemon binary |
 
 ---
 
 ## Next Steps
 
-1. **Trademark Search** - Confirm "Open LLM Provider" is viable
-2. **Public Repository** - Move to target GitHub organization
-3. **Marketplace Publishing** - Submit VS Code extension
-4. **API Documentation** - Complete DEVELOPER.md for extension authors
-5. **RHEL AI Testing** - Validate with RHEL AI inference endpoints
-6. **Ansible Extension Integration** - Begin integration with Ansible VS Code extension
+1. **Public Repository** - Move to GitHub organization
+2. **Marketplace Publishing** - Submit VS Code extension
+3. **PyPI Publishing** - Publish Python gRPC client
+4. **RHEL AI Testing** - Validate with RHEL AI endpoints
+5. **Ansible Extension Integration** - Enable Ansible extension to use OpenLLM
 
 ---
 
@@ -299,20 +267,18 @@ Configuration and secrets can be scoped to user-level (global) or workspace-leve
 ### Ollama
 - Default endpoint: `http://localhost:11434`
 - No API key required
-- Model list fetched dynamically from running instance
-- Supports any GGUF model
+- Model list fetched dynamically
 
 ### Azure OpenAI
-- Requires custom API base URL (resource endpoint)
-- Uses API key or Azure AD authentication
+- Requires custom API base URL
 - Model names may differ from OpenAI standard
 
 ### OpenRouter
 - Aggregator supporting 100+ models
 - Single API key for all providers
-- Model IDs prefixed with provider (e.g., `anthropic/claude-3-opus`)
+- Model IDs prefixed with provider
 
 ### RHEL AI / vLLM / TGI
-- Use OpenAI provider with custom API base URL
-- Works with any OpenAI-compatible inference server
-- API key may or may not be required depending on server config
+- Use OpenAI-compatible provider
+- Set custom API base URL
+- API key optional depending on server config

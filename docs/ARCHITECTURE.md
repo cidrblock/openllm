@@ -1,494 +1,292 @@
-# Open LLM Architecture
+# OpenLLM Architecture
 
 ## Overview
 
-Open LLM is a multi-language LLM provider library with a Rust core and bindings for Node.js, Python, and a VS Code extension.
+OpenLLM is a unified AI daemon written in Rust that provides:
+- A gRPC API for chat, sessions, and configuration
+- A web dashboard for provider/model management
+- A VS Code extension that registers models with VS Code's Language Model API
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         Consumer Applications                            │
 │                                                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │   VS Code Ext   │  │   Python Apps   │  │   Node.js / CLI Tools   │  │
-│  │   (TypeScript)  │  │                 │  │                         │  │
+│  │   VS Code Ext   │  │   Python Apps   │  │   Web Dashboard         │  │
+│  │   (gRPC)        │  │   (gRPC)        │  │   (HTTP → gRPC)         │  │
 │  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │
 │           │                    │                        │               │
-│   NAPI + MCP Server     PyO3 Bindings            NAPI-rs Bindings       │
-│           │                    │                        │               │
-└───────────┼────────────────────┼────────────────────────┼───────────────┘
-            │                    │                        │
-            └────────────────────┼────────────────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │     openllm-core        │
-                    │       (Rust)            │
-                    │                         │
-                    │  ┌───────────────────┐  │
-                    │  │    Providers      │  │
-                    │  │  OpenAI, Claude,  │  │
-                    │  │  Gemini, Ollama,  │  │
-                    │  │  Mistral, Azure,  │  │
-                    │  │  OpenRouter,      │  │
-                    │  │  **VsCodeProvider**│  │
-                    │  └───────────────────┘  │
-                    │                         │
-                    │  ┌───────────────────┐  │
-                    │  │  Secret Stores    │  │
-                    │  │  Env, Memory,     │  │
-                    │  │  Keychain, MCP    │  │
-                    │  └───────────────────┘  │
-                    │                         │
-                    │  ┌───────────────────┐  │
-                    │  │  Config Providers │  │
-                    │  │  Memory, File,    │  │
-                    │  │  MCP (VS Code)    │  │
-                    │  └───────────────────┘  │
-                    └─────────────────────────┘
-                       │                    │
-                       │ HTTP               │ MCP
-                       ▼                    ▼
-    ┌─────────────────────────┐  ┌─────────────────────────┐
-    │     LLM Provider APIs   │  │    VS Code Extension    │
-    │  OpenAI, Anthropic,     │  │      MCP Server         │
-    │  Google, Mistral, etc.  │  │  (vscode.lm, secrets,   │
-    └─────────────────────────┘  │   config, tools)        │
-                                 └─────────────────────────┘
+│           └────────────────────┼────────────────────────┘               │
+│                                │                                         │
+└────────────────────────────────┼─────────────────────────────────────────┘
+                                 │ gRPC over Unix Socket
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        openllm daemon (Rust)                             │
+│                                                                          │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  gRPC Server (tonic)                                               │  │
+│  │  └── OpenLLM Service: chat, sessions, models, secrets             │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                          │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
+│  │  DaemonState    │  │  Providers      │  │  Session Manager        │  │
+│  │  (Central Hub)  │  │  (via genai)    │  │  (Persistence)          │  │
+│  └────────┬────────┘  └────────┬────────┘  └─────────────────────────┘  │
+│           │                    │                                         │
+│  ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────────────────────┐  │
+│  │ UnifiedSecret   │  │ UnifiedConfig   │  │  VS Code Backchannel    │  │
+│  │ Resolver        │  │ Resolver        │  │  (workspace paths)      │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
+│                                                                          │
+└────────────────────────────────────────────┬─────────────────────────────┘
+                                             │
+         ┌───────────────────────────────────┼───────────────────┐
+         │                                   │                   │
+         ▼                                   ▼                   ▼
+┌─────────────────┐              ┌─────────────────┐    ┌───────────────┐
+│   LLM APIs      │              │  System Keychain│    │  Config Files │
+│   (HTTP)        │              │  (secrets)      │    │  (YAML)       │
+└─────────────────┘              └─────────────────┘    └───────────────┘
 ```
 
-**Key architectural feature:** The `VsCodeProvider` in Rust treats VS Code's language models (Copilot, GitHub Models) as just another provider. It uses MCP to communicate with the VS Code extension, which proxies requests to `vscode.lm`. This allows unified orchestration - the same Rust code handles tool calling for both direct HTTP providers and VS Code LM models.
+## Components
 
-## Crate Structure
+### openllm daemon
 
-```
-crates/
-├── openllm-core/           # Pure Rust - core library
-│   └── src/
-│       ├── providers/      # LLM provider implementations
-│       │   ├── openai.rs   # OpenAI, Anthropic, etc. (via genai)
-│       │   └── vscode.rs   # VS Code LM provider (via MCP)
-│       ├── tools/          # Tool orchestration
-│       │   ├── registry.rs # Tool discovery and management
-│       │   └── orchestrator.rs # Tool calling loop
-│       ├── mcp/            # MCP client for VS Code communication
-│       ├── secrets/        # Secret store implementations
-│       ├── config/         # Config provider implementations
-│       ├── resolver/       # Unified secret & config resolvers
-│       ├── types/          # Shared types (messages, tools, etc.)
-│       └── logging/        # Logger implementations
-│
-├── openllm-napi/           # Node.js bindings (NAPI-rs)
-│   └── npm/                # npm package wrapper
-│
-└── openllm-python/         # Python bindings (PyO3)
-```
+The core Rust binary that runs as a background process.
 
-## Key Abstractions
+**Subcommands:**
+- `openllm daemon` - Start the gRPC server on Unix socket
+- `openllm web` - Start the web dashboard (connects to daemon via gRPC)
 
-### Providers
+**Socket location:** `/run/user/{uid}/openllm/daemon.sock`
 
-Each LLM provider is accessed through the unified `LlmProvider`:
+### Web Dashboard (`openllm web`)
+
+A separate process that serves the web UI and proxies HTTP requests to gRPC:
+
+- **Port**: `localhost:8787`
+- **Static assets**: Embedded in binary via `rust-embed`
+- **API routes**: `/api/*` → gRPC calls to daemon
+- **Chat SSE**: `/api/chat` → streaming responses
+
+### VS Code Extension
+
+The extension acts as a **thin gRPC client** to the daemon:
+
+1. On activation: Connects to daemon (starts if not running)
+2. Registers as a `LanguageModelChatProvider` with VS Code
+3. Provides workspace paths via gRPC backchannel
+4. Opens web dashboard on command
+
+**Key files:**
+- `extension.ts` - Activation, commands, status bar
+- `daemon/client.ts` - gRPC client wrapper
+- `daemon/backchannel.ts` - Bidirectional stream handler
+- `providers/OpenLLMLanguageModelProvider.ts` - VS Code LM API integration
+
+## Provider Architecture
+
+All LLM providers are implemented via the `genai` crate with a unified `Provider` trait:
 
 ```rust
-// Create any provider with a simple ID
-let provider = create_provider("openai", logger);
-let provider = create_provider("anthropic", logger);
-let provider = create_provider("mock", logger);  // For testing
-
-// All providers implement the same trait
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn metadata(&self) -> ProviderMetadata;
     
+    async fn list_models(&self, api_key: Option<&str>) 
+        -> ProviderResult<Option<Vec<DynamicModelInfo>>>;
+    
     async fn stream_chat(
         &self,
-        messages: Vec<ChatMessage>,
+        messages: Vec<Message>,
         config: ProviderModelConfig,
         options: StreamOptions,
         token: CancellationToken,
-    ) -> Result<impl Stream<Item = StreamChunk>>;
+    ) -> ProviderResult<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>>;
 }
 ```
 
-Supported providers:
-- **OpenAI** - GPT-4, GPT-3.5, etc.
-- **Anthropic** - Claude 3.5, Claude 3
-- **Google Gemini** - Gemini Pro, Flash
-- **Mistral** - Mistral Large, Medium
-- **Ollama** - Local models (Llama, Qwen, etc.)
-- **Azure OpenAI** - Azure-hosted OpenAI
-- **OpenRouter** - Multi-provider router
-- **VS Code** - Access vscode.lm models (Copilot, GitHub Models) via MCP
-- **Mock** - Testing provider with configurable behavior
+**Supported providers:**
+- OpenAI, Anthropic, Google Gemini, Mistral, Ollama
+- Azure OpenAI, OpenRouter, DeepSeek, Groq
+- Together, Cohere, xAI (Grok), Fireworks, Nebius
 
-### Secret Stores
+## Secret Management
 
-Secret stores implement the `SecretStore` trait:
+Secrets are managed explicitly per-provider with two options:
+
+### Option 1: Keychain Storage
+- Key stored in system keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- Config references key by name: `api_key_keychain_name: "OPENAI_API_KEY"`
+
+### Option 2: Environment Variable Reference
+- Config specifies env var name: `api_key_env_var_name: "OPENAI_API_KEY"`
+- Value read from environment at runtime
+
+**Important:** These options are mutually exclusive per provider. The web UI provides a toggle to choose between them.
+
+### UnifiedSecretResolver
 
 ```rust
-pub trait SecretStore: Send + Sync {
-    fn name(&self) -> &str;
-    fn is_available(&self) -> bool;
-    fn get(&self, key: &str) -> Option<String>;
-    fn store(&self, key: &str, value: &str) -> Result<()>;
-    fn delete(&self, key: &str) -> Result<()>;
+pub struct UnifiedSecretResolver {
+    // MCP client for VS Code backchannel (optional)
+    mcp_client: Option<Arc<McpClient>>,
+}
+
+impl UnifiedSecretResolver {
+    pub fn resolve_from_keychain(&self, key_name: &str) -> Option<ResolvedSecret>;
+    pub fn resolve_from_env(&self, env_var_name: &str) -> Option<ResolvedSecret>;
+    pub fn store_in_keychain(&self, key_name: &str, value: &str) -> Result<(), String>;
+    pub fn delete_from_keychain(&self, key_name: &str) -> Result<(), String>;
 }
 ```
 
-Available stores:
-- **EnvSecretStore** - Environment variables (read-only)
-- **MemorySecretStore** - In-memory (testing)
-- **KeychainSecretStore** - System keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-- **McpSecretStore** - VS Code SecretStorage via MCP
-- **ChainSecretStore** - Fallback chain of multiple stores
+## Configuration
 
-### Config Providers
+### Config Files
 
-Config providers manage provider and model configuration:
-
-```rust
-#[async_trait]
-pub trait ConfigProvider: Send + Sync {
-    async fn get_providers(&self) -> Vec<ProviderConfig>;
-    async fn add_provider(&self, config: ProviderConfig) -> Result<()>;
-    async fn update_provider(&self, name: &str, config: ProviderConfig) -> Result<()>;
-    async fn remove_provider(&self, name: &str) -> Result<()>;
-}
-```
-
-Available providers:
-- **MemoryConfigProvider** - In-memory
-- **FileConfigProvider** - YAML files (`~/.openllm/config.yaml` or `.openllm/config.yaml`)
-- **McpConfigProvider** - VS Code settings via MCP
-
-## VS Code Extension
-
-The VS Code extension (`packages/vscode`) serves **four distinct roles**:
-
-### Extension Roles
-
-| Role | Description | Key Files |
-|------|-------------|-----------|
-| **1. Configuration UI** | Visual interface for managing providers, API keys, and models | `ApiKeyPanel.ts`, `StatusPanel.ts` |
-| **2. MCP Server** | MCP server exposing VS Code's SecretStorage, settings, and tools to the Rust core | `McpToolServer.ts` |
-| **3. VS Code LM Provider** | Implements `LanguageModelChatProvider` to register LLM models with VS Code's AI features | `OpenLLMProvider.ts`, `ConfigManager.ts` |
-| **4. Test/Playground UIs** | Chat interface and playground for testing and comparing models | `ChatViewProvider.ts`, `PlaygroundPanel.ts` |
-
-### Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      VS Code Extension                           │
-│                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐  │
-│  │  Configuration   │  │   MCP Server     │  │  LM Provider  │  │
-│  │       UI         │  │  (McpToolServer) │  │  (Chat API)   │  │
-│  │  ─────────────   │  │  ─────────────   │  │  ───────────  │  │
-│  │  ApiKeyPanel     │  │  Secrets API     │  │  OpenLLM      │  │
-│  │  StatusPanel     │  │  Config API      │  │  Provider     │  │
-│  │                  │  │  Workspace API   │  │               │  │
-│  │                  │  │  VS Code Tools   │  │               │  │
-│  └────────┬─────────┘  └────────▲─────────┘  └───────┬───────┘  │
-│           │                     │                    │          │
-│           │    ┌────────────────┴────────────────┐   │          │
-│           │    │  Test/Playground UIs            │   │          │
-│           │    │  ChatViewProvider, Playground   │   │          │
-│           │    └─────────────────────────────────┘   │          │
-│           │                                          │          │
-│           ▼                                          ▼          │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                NAPI Bindings (in-process)                 │  │
-│  │         UnifiedSecretResolver, UnifiedConfigResolver      │  │
-│  │                      LlmProvider                          │  │
-│  └─────────────────────────────┬─────────────────────────────┘  │
-└────────────────────────────────┼────────────────────────────────┘
-                                 │
-                                 ▼
-                   ┌───────────────────────────┐
-                   │     openllm-core (Rust)   │
-                   │                           │
-                   │  ┌─────────────────────┐  │
-                   │  │  Unified Resolvers  │──┼──► MCP Client
-                   │  │  (secrets, config)  │  │    (calls back to
-                   │  └─────────────────────┘  │     VS Code MCP)
-                   │                           │
-                   │  ┌─────────────────────┐  │
-                   │  │   LLM Providers     │  │
-                   │  │  OpenAI, Anthropic, │  │
-                   │  │  Gemini, Ollama...  │  │
-                   │  └─────────────────────┘  │
-                   └───────────────────────────┘
-```
-
-### Role 1: Configuration UI
-
-The extension provides a visual interface (`ApiKeyPanel`) for:
-- Adding/removing API keys for providers
-- Selecting which models to enable
-- Configuring provider settings (base URLs, etc.)
-- Choosing between VS Code settings or native YAML config
-
-### Role 2: MCP Server
-
-The extension runs an MCP server (`McpToolServer.ts`) that exposes VS Code APIs to the Rust core:
-
-```
-Rust Core (openllm-core)
-    │
-    │  MCP over HTTP/Unix socket
-    ▼
-VS Code MCP Server
-    │
-    ├── Internal Tools (openllm_* prefix):
-    │   │
-    │   ├── Secrets API:
-    │   │   ├── openllm_secrets_get    → context.secrets.get()
-    │   │   ├── openllm_secrets_set    → context.secrets.store()
-    │   │   ├── openllm_secrets_delete → context.secrets.delete()
-    │   │   └── openllm_secrets_list   → list stored keys
-    │   │
-    │   ├── Config API:
-    │   │   ├── openllm_config_get     → workspace.getConfiguration()
-    │   │   ├── openllm_config_set     → workspace.getConfiguration().update()
-    │   │   └── openllm_workspace_root → get workspace path
-    │   │
-    │   └── LLM API (for unified orchestration):
-    │       ├── openllm_llm_list       → vscode.lm.selectChatModels()
-    │       │                            (filters out OpenLLM's own models)
-    │       └── openllm_llm_send       → model.sendRequest()
-    │                                    (sends chat to vscode.lm model)
-    │
-    └── User Tools (from vscode.lm.tools):
-        ├── cursor_read_file
-        ├── cursor_edit_file
-        └── ... (Copilot and extension tools)
-```
-
-This allows the Rust core to:
-1. Access VS Code's SecretStorage and settings without direct coupling
-2. Discover and execute VS Code tools (vscode.lm.tools)
-3. Use vscode.lm models (Copilot, GitHub Models) as if they were regular providers
-
-**See [MCP_TOOLS_ARCHITECTURE.md](MCP_TOOLS_ARCHITECTURE.md) for details on tool handling.**
-
-### Role 3: VS Code Language Model Provider
-
-The extension implements `vscode.LanguageModelChatProvider` to register LLM models with VS Code's native AI features:
-
-```typescript
-// Other extensions can use Open LLM models:
-const models = await vscode.lm.selectChatModels({ vendor: 'open-llm' });
-const response = await models[0].sendRequest(messages, {}, token);
-```
-
-### Role 4: Test/Playground UIs
-
-For development and testing:
-- **ChatViewProvider** - Sidebar chat interface for direct model interaction
-- **PlaygroundPanel** - Compare responses from multiple models side-by-side
-
-### Extension Settings
-
-The extension provides configuration via VS Code settings:
-
-**Secret Storage:**
-- `openLLM.secrets.primaryStore`: `"vscode"` or `"keychain"`
-- `openLLM.secrets.checkEnvironment`: Check env vars as fallback
-- `openLLM.secrets.checkDotEnv`: Check .env files as fallback
-
-**Config Source:**
-- `openLLM.config.source`: `"vscode"` or `"native"`
-- `openLLM.config.nativeLevel`: `"user"`, `"workspace"`, or `"both"`
-
-### Import/Export
-
-The extension supports bidirectional config migration:
-- **Export Config to Native (YAML)** - VS Code settings → YAML file
-- **Import Config from Native (YAML)** - YAML file → VS Code settings
-
-## Data Flow
-
-### Unified Chat API
-
-All chat requests flow through a single `chat()` function that handles everything:
-
-```typescript
-// TypeScript - one simple call
-await native.chat(
-  messages,
-  { provider: 'openai', model: 'gpt-4o', apiKey: '...' },
-  (chunk) => console.log(chunk.text)
-);
-```
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     ChatViewProvider (UI)                        │
-│                                                                  │
-│  User Message → native.chat() → UI Updates                      │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ NAPI
-                           ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    chat() function (Rust)                        │
-│                                                                  │
-│  1. Creates provider based on config.provider                   │
-│  2. Connects to MCP for tools (if registered)                   │
-│  3. Handles tool calling loop (detect → execute → continue)     │
-│  4. Streams events back via callback                            │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-        ▼                  ▼                  ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-│ Direct HTTP   │  │ VsCodeProvider│  │ ToolRegistry  │
-│ Providers     │  │ (MCP-based)   │  │ (MCP tools)   │
-│               │  │               │  │               │
-│ OpenAI, etc.  │  │ openllm_llm_* │  │ tools/list    │
-│      ↓        │  │      ↓        │  │ tools/call    │
-│  HTTP APIs    │  │  vscode.lm    │  │      ↓        │
-└───────────────┘  └───────────────┘  │ vscode.lm     │
-                                      │ .invokeTool() │
-                                      └───────────────┘
-```
-
-### Provider Routing
-
-The `ChatOrchestrator` routes requests based on provider ID:
-
-| Provider ID | Routing | Description |
-|-------------|---------|-------------|
-| `openai`, `anthropic`, `gemini`, etc. | Direct HTTP | Rust calls provider APIs directly |
-| `vscode` | MCP → vscode.lm | Rust calls `openllm_llm_send` MCP tool |
-| `mock` | In-memory | Testing/development |
-
-### Tool Orchestration Loop
-
-All tool orchestration runs in Rust, regardless of the model source:
-
-```
-1. Send request to LLM (direct HTTP or MCP to vscode.lm)
-   ↓
-2. Receive response stream
-   ↓
-3. Detect tool calls in response
-   ↓
-4. If tool calls found:
-   │ ├── Execute via MCP (ToolRegistry → VS Code MCP Server)
-   │ ├── Collect results
-   │ └── Continue to step 1 with results
-   ↓
-5. Stream final response back to caller
-```
-
-### Legacy Flow (removed)
-
-The previous architecture had separate TypeScript orchestration loops for vscode.lm and direct providers. This has been unified—ALL models now go through the Rust `ChatOrchestrator`.
-
-### Secret Resolution (Unified Resolver)
-
-The Rust core's `UnifiedSecretResolver` checks multiple sources in priority order:
-
-```
-1. Extension calls secretResolver.resolve("openai")
-   ↓
-2. Rust UnifiedSecretResolver checks sources:
-   │
-   ├── 1. Environment variables (OPENAI_API_KEY)
-   │       └── Direct env::var() call - highest priority
-   │
-   ├── 2. MCP endpoint (VS Code)
-   │       └── MCP call to VS Code MCP Server
-   │           └── VS Code calls context.secrets.get()
-   │
-   └── 3. System keychain
-           └── macOS Keychain / Windows Credential Manager / Linux Secret Service
-   ↓
-3. Return first found value with source info
-```
-
-### Config Resolution (Unified Resolver)
-
-The Rust core's `UnifiedConfigResolver` merges config from multiple sources:
-
-```
-1. Extension calls configResolver.getAllProviders()
-   ↓
-2. Rust UnifiedConfigResolver queries sources:
-   │
-   ├── Native YAML (user): ~/.config/openllm/config.yaml
-   ├── Native YAML (workspace): .config/openllm/config.yaml
-   │
-   └── MCP endpoint (VS Code)
-       └── MCP call to VS Code MCP Server
-           └── VS Code returns workspace.getConfiguration()
-   ↓
-3. Merge and prioritize (workspace > user, native > vscode)
-   ↓
-4. Return unified provider list with source attribution
-```
-
-### Write Routing
-
-When writing config or secrets, the unified resolvers handle routing:
-
-```
-1. Extension calls secretResolver.store("openai", key, "auto")
-   ↓
-2. Rust determines best destination:
-   │
-   ├── If MCP endpoint available → route to VS Code SecretStorage
-   └── Else → route to system keychain
-   ↓
-3. Return destination name for UI feedback
-```
-
-## Native Config Files
-
-### User Level: `~/.openllm/config.yaml`
+- **User level**: `~/.openllm/config.yaml`
+- **Workspace level**: `<workspace>/.openllm/config.yaml`
 
 ```yaml
 providers:
-  - name: openai
-    enabled: true
-    models:
+  openai:
+    api_key_keychain_name: "OPENAI_API_KEY"  # OR api_key_env_var_name
+    enabled_models:
       - gpt-4o
       - gpt-4o-mini
-  - name: anthropic
-    enabled: true
-    models:
+  anthropic:
+    api_key_env_var_name: "ANTHROPIC_API_KEY"
+    enabled_models:
       - claude-3-5-sonnet-20241022
-  - name: ollama
-    enabled: true
-    api_base: http://localhost:11434
-    models:
-      - llama3
 ```
 
-### Workspace Level: `.openllm/config.yaml`
+### UnifiedConfigResolver
 
-Same format, overrides user config when both are used.
+Loads and merges config from user and workspace files:
 
-## Benefits
+```rust
+pub struct UnifiedConfigResolver {
+    user_path: PathBuf,          // ~/.openllm/config.yaml
+    workspace_path: Option<PathBuf>,  // Set via VS Code backchannel
+}
+```
 
-### Reusability
-The Rust core works in any environment via bindings:
-- VS Code extensions (Node.js)
-- Python scripts and applications
-- CLI tools
-- Other Node.js applications
+## gRPC Protocol
 
-### Type Safety
-- Full TypeScript support in VS Code
-- Python type hints via PyO3
-- Rust's compile-time guarantees
+Defined in `proto/openllm/v1/service.proto`:
 
-### Performance
-- Native Rust performance
-- Async/streaming support
-- Minimal overhead from bindings
+### Core RPCs
 
-### Security
-- System keychain integration
-- No keys in config files
-- Environment variable fallback
+| RPC | Description |
+|-----|-------------|
+| `Chat` | Streaming chat with a model |
+| `SessionChat` | Chat within a persistent session |
+| `ListModels` | List available models from providers |
+| `ListProviders` | List configured providers |
+| `GetSecret` / `SetSecret` / `DeleteSecret` | Keychain management |
+| `Register` / `Unregister` | Client registration |
+| `VSCodeStream` | Bidirectional backchannel |
+
+### VS Code Backchannel
+
+The `VSCodeStream` RPC enables bidirectional communication:
+
+**Daemon → VS Code requests:**
+- `GetWorkspace` - Get connected workspace paths
+- `InvokeTool` - Invoke VS Code tools (future)
+- `ListModels` - List VS Code LM models (future)
+
+**VS Code → Daemon responses:**
+- Workspace folder paths
+- Tool results
+- Error responses
+
+## Session Management
+
+Sessions persist chat history for continuity across clients:
+
+```rust
+pub struct Session {
+    pub id: String,
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub created_by: ClientType,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub metadata: HashMap<String, String>,
+}
+```
+
+**Storage:** `~/.openllm/sessions/`
+
+**Features:**
+- Fork sessions to try different approaches
+- Export/import as JSON for sharing
+- Replay sessions in different tools
+
+## Data Flow
+
+### Chat Request Flow
+
+```
+1. Client sends ChatRequest via gRPC
+   ↓
+2. DaemonState.get_provider() finds provider instance
+   ↓
+3. UnifiedSecretResolver gets API key (keychain or env var based on config)
+   ↓
+4. Provider.stream_chat() calls LLM API
+   ↓
+5. Response chunks streamed back to client
+```
+
+### Model Discovery Flow
+
+```
+1. Client calls ListModels
+   ↓
+2. DaemonState.list_models_dynamic() iterates providers
+   ↓
+3. For each configured provider:
+   - Load API key from config (keychain name or env var name)
+   - Resolve key value
+   - Call provider.list_models(api_key)
+   ↓
+4. Aggregate and return all models
+```
+
+### Web Dashboard Flow
+
+```
+1. Browser loads http://localhost:8787
+   ↓
+2. Static HTML/JS served from embedded assets
+   ↓
+3. Alpine.js frontend makes API calls:
+   - GET /api/providers → gRPC ListProviders
+   - GET /api/models → gRPC ListModels
+   - POST /api/config → Save to YAML file
+   - POST /api/secrets/{key} → gRPC SetSecret (keychain)
+   ↓
+4. UI updates reactively
+```
+
+## File Locations
+
+| File | Path | Purpose |
+|------|------|---------|
+| Socket | `/run/user/{uid}/openllm/daemon.sock` | gRPC server socket |
+| User Config | `~/.openllm/config.yaml` | User-level provider config |
+| Workspace Config | `<ws>/.openllm/config.yaml` | Workspace-level config |
+| Sessions | `~/.openllm/sessions/*.json` | Persisted sessions |
+| Logs | Stdout/stderr | Daemon logs (tracing) |
+
+## Security
+
+- **Secrets**: Stored in system keychain, never in config files
+- **Socket**: Unix socket with user-only permissions
+- **Web dashboard**: Listens on localhost only
+- **No remote access**: Daemon designed for local use only

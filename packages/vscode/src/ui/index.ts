@@ -1,4 +1,2 @@
-export { StatusPanel } from './StatusPanel';
-export { PlaygroundPanel } from './PlaygroundPanel';
-export { ChatViewProvider } from './ChatViewProvider';
-export { ApiKeyPanel } from './ApiKeyPanel';
+// UI components are now served by the daemon web server
+// See http://localhost:8787 for the dashboard
