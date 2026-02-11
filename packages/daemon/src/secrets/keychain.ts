@@ -28,7 +28,11 @@ export class KeychainSecretStore implements SecretStore {
     if (this.loadError) return null;
     
     try {
-      this.keytar = await import('keytar');
+      const mod = await import('keytar');
+      // Handle ESM/CJS interop — keytar puts functions on .default
+      this.keytar = (mod.default && typeof mod.default.getPassword === 'function')
+        ? mod.default as any
+        : mod;
       return this.keytar;
     } catch (error: any) {
       this.loadError = error.message;

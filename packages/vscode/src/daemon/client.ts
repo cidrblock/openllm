@@ -6,7 +6,7 @@
  * 
  * The daemon uses Unix Domain Sockets for local IPC:
  * - Socket: $XDG_RUNTIME_DIR/openllm/daemon.sock (or ~/.openllm/daemon.sock)
- * - PID file: $XDG_RUNTIME_DIR/openllm/daemon.pid (or ~/.openllm/daemon.pid)
+ * - PID file: ~/.openllm/openllm.pid (always in home dir, matching daemon's transport.ts)
  */
 
 import { createChannel, createClient, Channel, ClientError, Status } from 'nice-grpc';
@@ -21,21 +21,40 @@ import { getLogger } from '../utils/logger';
 export * from '../proto/openllm/v1/service';
 
 /**
- * Get the OpenLLM runtime directory.
- * Uses XDG_RUNTIME_DIR if available (Linux standard), otherwise ~/.openllm/
+ * Get the OpenLLM runtime directory (for the socket).
+ * Uses XDG_RUNTIME_DIR if available, otherwise /run/user/<uid>/openllm.
+ * Must match the daemon's transport.ts getDefaultSocketPath().
  */
-function getOpenLLMDir(): string {
+function getRuntimeDir(): string {
     const xdgRuntime = process.env.XDG_RUNTIME_DIR;
     if (xdgRuntime) {
         return path.join(xdgRuntime, 'openllm');
     }
+    // Fallback: match daemon's transport.ts which uses /run/user/<uid>
+    if (process.platform !== 'win32') {
+        try {
+            const uid = os.userInfo().uid;
+            return path.join(`/run/user/${uid}`, 'openllm');
+        } catch {
+            // os.userInfo() can fail on some platforms
+        }
+    }
     return path.join(os.homedir(), '.openllm');
 }
 
-// Daemon paths
-const OPENLLM_DIR = getOpenLLMDir();
-const PID_FILE = path.join(OPENLLM_DIR, 'daemon.pid');
-const SOCKET_FILE = path.join(OPENLLM_DIR, 'daemon.sock');
+/**
+ * Get the OpenLLM config/state directory (for PID file, config).
+ * Always in ~/.openllm/ to match the daemon's transport.ts
+ */
+function getStateDir(): string {
+    return path.join(os.homedir(), '.openllm');
+}
+
+// Daemon paths — socket in runtime dir, PID in state dir (matches daemon's transport.ts)
+const RUNTIME_DIR = getRuntimeDir();
+const STATE_DIR = getStateDir();
+const PID_FILE = path.join(STATE_DIR, 'openllm.pid');
+const SOCKET_FILE = path.join(RUNTIME_DIR, 'daemon.sock');
 
 // gRPC address for Unix Domain Socket
 const DEFAULT_DAEMON_ADDRESS = `unix://${SOCKET_FILE}`;
@@ -113,7 +132,7 @@ export function getSocketPath(): string {
  * Get daemon directory
  */
 export function getDaemonDir(): string {
-    return OPENLLM_DIR;
+    return RUNTIME_DIR;
 }
 
 /**
@@ -141,23 +160,31 @@ export class DaemonClient {
             return; // Already connected
         }
 
+        const logger = getLogger();
         const { autoStart = true, timeout = 15000 } = options;
 
         // Check if daemon is running
-        if (!isDaemonRunning()) {
+        const running = isDaemonRunning();
+        logger.info(`[Daemon] isDaemonRunning=${running}, PID_FILE=${PID_FILE}, SOCKET=${SOCKET_FILE}`);
+        logger.info(`[Daemon] PID file exists: ${fs.existsSync(PID_FILE)}, Socket exists: ${fs.existsSync(SOCKET_FILE)}`);
+        
+        if (!running) {
             if (autoStart) {
+                logger.info('[Daemon] Daemon not running, attempting to start...');
                 await this.startDaemon();
                 // Wait for daemon to be ready
                 await this.waitForDaemon(timeout);
+                logger.info('[Daemon] Daemon started and ready');
             } else {
                 throw new Error(
                     `OpenLLM daemon is not running. ` +
                     `Expected socket at ${SOCKET_FILE}. ` +
-                    `Start the daemon with: openllm daemon start`
+                    `Start the daemon with: openllm daemon`
                 );
             }
         }
 
+        logger.info(`[Daemon] Creating gRPC channel to ${this.address}`);
         this.channel = createChannel(this.address);
         this.client = createClient(proto.OpenLLMDefinition, this.channel);
     }
@@ -167,20 +194,28 @@ export class DaemonClient {
      * 
      * The daemon is a TypeScript/Node.js application.
      * Priority: 1) `openllm` in PATH (global install or SEA binary)
-     *           2) Bundled daemon JS in extension's bin/ directory
-     *           3) Direct node execution of packages/daemon
+     *           2) Workspace monorepo packages/daemon/dist/index.js
+     *           3) Bundled daemon JS in extension's bin/ directory
+     * 
+     * Note: For browser-based VS Code (vscode.dev, Codespaces), the daemon must
+     * already be running as a remote service. Process spawning only works on desktop.
      */
     private async startDaemon(): Promise<void> {
         const { spawn } = await import('child_process');
+        const logger = getLogger();
         
-        // Ensure directory exists
-        if (!fs.existsSync(OPENLLM_DIR)) {
-            fs.mkdirSync(OPENLLM_DIR, { recursive: true, mode: 0o700 });
+        // Ensure both runtime and state directories exist
+        if (!fs.existsSync(RUNTIME_DIR)) {
+            fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
+        }
+        if (!fs.existsSync(STATE_DIR)) {
+            fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
         }
 
         const { cmd, args } = await this.findDaemonCommand();
         
-        // Start daemon in background
+        logger.info(`[Daemon] Spawning: ${cmd} ${[...args, 'daemon'].join(' ')}`);
+        
         const daemon = spawn(cmd, [...args, 'daemon'], {
             detached: true,
             stdio: 'ignore',
@@ -191,7 +226,53 @@ export class DaemonClient {
             },
         });
         
+        logger.info(`[Daemon] Spawned PID: ${daemon.pid}`);
         daemon.unref();
+    }
+    
+    /**
+     * Find a Node.js binary for running the daemon.
+     * 
+     * Priority:
+     *   1) `node` in PATH (system install, nvm, fnm, etc.)
+     *   2) VS Code's embedded Node.js (Electron ships one internally)
+     */
+    private async findNodeBinary(): Promise<string> {
+        const { execSync } = await import('child_process');
+        const logger = getLogger();
+        
+        // 1) node in PATH
+        try {
+            const cmd = process.platform === 'win32' ? 'where node' : 'which node';
+            const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
+            if (result && fs.existsSync(result)) {
+                logger.info(`[Daemon] Found node in PATH: ${result}`);
+                return result;
+            }
+        } catch {
+            // not in PATH
+        }
+        
+        // 2) VS Code's embedded node (varies by platform)
+        const appRoot = vscode.env.appRoot;
+        const embeddedCandidates = process.platform === 'win32'
+            ? [path.join(appRoot, 'node.exe')]
+            : [
+                path.join(appRoot, '..', 'node'),           // macOS .app layout
+                path.join(appRoot, 'node'),                  // Linux
+                path.join(path.dirname(process.execPath), 'node'),
+              ];
+        
+        for (const candidate of embeddedCandidates) {
+            if (fs.existsSync(candidate)) {
+                logger.info(`[Daemon] Found embedded node: ${candidate}`);
+                return candidate;
+            }
+        }
+        
+        throw new Error(
+            'Node.js not found. Install Node.js (https://nodejs.org) or ensure it is in your PATH.'
+        );
     }
 
     /**
@@ -199,34 +280,55 @@ export class DaemonClient {
      * Returns { cmd, args } where the daemon subcommand should be appended.
      * 
      * Priority:
-     *   1) `openllm` in PATH (global install or SEA binary)
-     *   2) Bundled daemon JS in extension's bin/daemon/ directory
+     *   1) `openllm` in PATH (global install, npm link, or SEA binary — no node needed)
+     *   2) Bundled daemon JS in extension's bin/ directory (needs node)
+     *   3) Monorepo workspace packages/daemon/dist/index.js (dev, needs node)
      */
     private async findDaemonCommand(): Promise<{ cmd: string; args: string[] }> {
         const { execSync } = await import('child_process');
+        const logger = getLogger();
         
-        // 1) Try to find openllm in PATH (global npm install or SEA binary)
+        // 1) Try to find openllm in PATH (global npm install, npm link, or SEA binary)
+        //    This is the ideal case — no external node dependency needed.
         try {
             const cmd = process.platform === 'win32' ? 'where openllm' : 'which openllm';
             const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
             if (result && fs.existsSync(result)) {
+                logger.info(`[Daemon] Found openllm in PATH: ${result}`);
                 return { cmd: result, args: [] };
             }
         } catch {
-            // Not in PATH
+            logger.info('[Daemon] openllm not found in PATH');
         }
 
-        // 2) Look for bundled daemon JS in extension
+        // For options 2 & 3 we need a Node.js binary (not the Electron process.execPath)
+        const nodeBin = await this.findNodeBinary();
+
+        // 2) Bundled daemon JS in extension (esbuild single-file bundle)
         if (extensionPath) {
-            const bundledEntry = path.join(extensionPath, 'bin', 'daemon', 'index.js');
+            const bundledEntry = path.join(extensionPath, 'bin', 'openllm-daemon.js');
             if (fs.existsSync(bundledEntry)) {
-                return { cmd: process.execPath, args: [bundledEntry] };
+                logger.info(`[Daemon] Found bundled daemon: ${bundledEntry}`);
+                return { cmd: nodeBin, args: [bundledEntry] };
+            }
+            logger.info(`[Daemon] No bundled daemon at ${bundledEntry}`);
+        }
+
+        // 3) Monorepo / workspace fallback (development)
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (workspaceFolders) {
+            for (const folder of workspaceFolders) {
+                const candidate = path.join(folder.uri.fsPath, 'packages', 'daemon', 'dist', 'index.js');
+                if (fs.existsSync(candidate)) {
+                    logger.info(`[Daemon] Found daemon in workspace: ${candidate}`);
+                    return { cmd: nodeBin, args: [candidate] };
+                }
             }
         }
 
         throw new Error(
             `OpenLLM daemon not found. ` +
-            `Install it with: npm install -g @openllm/daemon, or ensure the extension is properly installed.`
+            `Install globally: npm install -g @openllm/daemon`
         );
     }
 

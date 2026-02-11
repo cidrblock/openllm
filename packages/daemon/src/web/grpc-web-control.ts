@@ -9,14 +9,38 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROTO_PATH = path.resolve(__dirname, '../../../../proto/openllm/v1/service.proto');
-const PROTO_INCLUDE = path.resolve(__dirname, '../../../../proto');
+/**
+ * Resolve proto directory. Checks:
+ *  1) OPENLLM_PROTO_DIR env var
+ *  2) Next to parent dir: __dirname/../proto/  (esbuild bundle, __dirname is web/)
+ *  3) __dirname/proto/ (flat bundle)
+ *  4) Monorepo layout: __dirname/../../../../proto/  (development from dist/web/)
+ */
+function resolveProtoDir(): string {
+  const candidates = [
+    process.env.OPENLLM_PROTO_DIR,
+    path.resolve(__dirname, '../proto'),
+    path.resolve(__dirname, 'proto'),
+    path.resolve(__dirname, '../../../../proto'),
+  ].filter(Boolean) as string[];
+  
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'openllm', 'v1', 'service.proto'))) {
+      return dir;
+    }
+  }
+  throw new Error(`Proto file not found in any candidate directory`);
+}
+
+const PROTO_DIR = resolveProtoDir();
+const PROTO_PATH = path.join(PROTO_DIR, 'openllm', 'v1', 'service.proto');
 
 function createClient(): any {
   const socketPath = getDefaultSocketPath();
@@ -28,7 +52,7 @@ function createClient(): any {
     enums: String,
     defaults: true,
     oneofs: true,
-    includeDirs: [PROTO_INCLUDE],
+    includeDirs: [PROTO_DIR],
   });
   
   const proto = grpc.loadPackageDefinition(packageDef);

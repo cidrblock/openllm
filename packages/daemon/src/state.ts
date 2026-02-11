@@ -453,18 +453,29 @@ export class DaemonState {
   }
   
   /**
-   * Get all VS Code workspaces
+   * Get all VS Code workspaces.
+   * Checks both backchannel connections and registered VS Code clients.
    */
   getVSCodeWorkspaces(): string[] {
     const workspaces: string[] = [];
     
+    // From backchannel connections
     for (const conn of this.vscodeConnections.values()) {
-      if (conn.workspacePath) {
+      if (conn.workspacePath && !workspaces.includes(conn.workspacePath)) {
         workspaces.push(conn.workspacePath);
       }
       for (const folder of conn.workspaceFolders) {
         if (!workspaces.includes(folder)) {
           workspaces.push(folder);
+        }
+      }
+    }
+    
+    // From registered VS Code clients (Register RPC includes workspacePath)
+    for (const client of this.clients.values()) {
+      if (client.clientType === ClientType.VSCODE && client.workspacePath) {
+        if (!workspaces.includes(client.workspacePath)) {
+          workspaces.push(client.workspacePath);
         }
       }
     }

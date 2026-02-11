@@ -15,15 +15,39 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
-import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, type ConfigFile } from '../config/loader.js';
+import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../config/loader.js';
 import type { DaemonState } from '../state.js';
 import { getSupportedProviders, getDefaultEnvVar } from '../providers/adapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Static files path (dashboard HTML)
-const STATIC_PATH = path.resolve(__dirname, '../../static');
+/**
+ * Resolve the static files directory. Checks:
+ *  1) OPENLLM_STATIC_DIR env var
+ *  2) Next to parent dir: __dirname/../static/  (esbuild bundle, __dirname is web/)
+ *  3) __dirname/static/ (flat bundle)
+ *  4) Monorepo layout: __dirname/../../static/  (development from dist/web/)
+ */
+function resolveStaticPath(): string {
+  const candidates = [
+    process.env.OPENLLM_STATIC_DIR,
+    path.resolve(__dirname, '../static'),
+    path.resolve(__dirname, 'static'),
+    path.resolve(__dirname, '../../static'),
+  ].filter(Boolean) as string[];
+  
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+  
+  // Return last candidate even if not found — error will surface at serve time
+  return candidates[candidates.length - 1];
+}
+
+const STATIC_PATH = resolveStaticPath();
 
 /**
  * Create the Express application with direct DaemonState access.
@@ -74,12 +98,14 @@ export function createWebApp(state: DaemonState): Express {
   app.get('/api/providers', async (req, res) => {
     try {
       const providers = await state.listProviders();
-      res.json(providers.map((p) => ({
-        id: p.id,
-        display_name: p.displayName,
-        configured: p.configured,
-        healthy: p.healthy,
-      })));
+      res.json({
+        providers: providers.map((p) => ({
+          id: p.id,
+          displayName: p.displayName,
+          configured: p.configured,
+          healthy: p.healthy,
+        })),
+      });
     } catch (err: any) {
       console.error('[Web] /api/providers error:', err.message);
       res.status(500).json({ error: err.message });
@@ -92,16 +118,19 @@ export function createWebApp(state: DaemonState): Express {
   app.get('/api/models', async (req, res) => {
     try {
       const models = await state.listModels();
-      res.json(models.map((m) => ({
-        id: m.id,
-        provider: m.provider,
-        display_name: m.displayName,
-        context_window: m.contextWindow,
-        capabilities: {
-          supports_tools: m.capabilities?.supportsTools || false,
-          supports_vision: m.capabilities?.supportsVision || false,
-        },
-      })));
+      res.json({
+        models: models.map((m) => ({
+          id: m.id,
+          provider: m.provider,
+          displayName: m.displayName,
+          contextWindow: m.contextWindow,
+          capabilities: {
+            tools: m.capabilities?.supportsTools || false,
+            vision: m.capabilities?.supportsVision || false,
+            streaming: (m.capabilities as any)?.supportsStreaming || false,
+          },
+        })),
+      });
     } catch (err: any) {
       console.error('[Web] /api/models error:', err.message);
       res.status(500).json({ error: err.message });
@@ -109,12 +138,25 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
-   * GET /api/config - Get user configuration
+   * GET /api/config?location=user|<workspacePath> - Get configuration
+   * Returns { config: ConfigFile, path: string }
    */
   app.get('/api/config', (req, res) => {
     try {
-      const config = loadConfig();
-      res.json(config);
+      const location = (req.query.location as string) || 'user';
+      let config: ConfigFile;
+      let configPath: string;
+      
+      if (location === 'user') {
+        config = loadConfig() || { providers: {} };
+        configPath = getUserConfigPath();
+      } else {
+        // location is a workspace path
+        config = loadWorkspaceConfig(location) || { providers: {} };
+        configPath = getWorkspaceConfigPath(location);
+      }
+      
+      res.json({ config, path: configPath });
     } catch (err: any) {
       console.error('[Web] /api/config GET error:', err.message);
       res.status(500).json({ error: err.message });
@@ -122,13 +164,24 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
-   * POST /api/config - Save user configuration
+   * POST /api/config - Save configuration
+   * Accepts { location: 'user' | workspacePath, config: ConfigFile }
    */
   app.post('/api/config', (req, res) => {
     try {
-      const config = req.body as ConfigFile;
-      saveConfig(config);
-      res.json({ success: true });
+      const { location, config } = req.body;
+      const loc = location || 'user';
+      let savedPath: string;
+      
+      if (loc === 'user') {
+        saveConfig(config);
+        savedPath = getUserConfigPath();
+      } else {
+        saveWorkspaceConfig(loc, config);
+        savedPath = getWorkspaceConfigPath(loc);
+      }
+      
+      res.json({ success: true, path: savedPath });
     } catch (err: any) {
       console.error('[Web] /api/config POST error:', err.message);
       res.status(500).json({ error: err.message });
@@ -136,49 +189,40 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
-   * GET /api/config/workspace?path=... - Get workspace configuration
-   */
-  app.get('/api/config/workspace', (req, res) => {
-    try {
-      const wsPath = req.query.path as string;
-      if (!wsPath) {
-        res.status(400).json({ error: 'path query param required' });
-        return;
-      }
-      const config = loadWorkspaceConfig(wsPath);
-      res.json(config);
-    } catch (err: any) {
-      console.error('[Web] /api/config/workspace GET error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-  
-  /**
-   * POST /api/config/workspace?path=... - Save workspace configuration
-   */
-  app.post('/api/config/workspace', (req, res) => {
-    try {
-      const wsPath = req.query.path as string;
-      if (!wsPath) {
-        res.status(400).json({ error: 'path query param required' });
-        return;
-      }
-      const config = req.body as ConfigFile;
-      saveWorkspaceConfig(wsPath, config);
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error('[Web] /api/config/workspace POST error:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-  
-  /**
    * GET /api/workspaces - Get connected VS Code workspaces
+   * 
+   * First checks the cache. If empty but VS Code connections exist,
+   * queries them via backchannel for real-time workspace info.
    */
-  app.get('/api/workspaces', (req, res) => {
+  app.get('/api/workspaces', async (req, res) => {
     try {
-      const workspaces = state.getVSCodeWorkspaces();
-      res.json(workspaces);
+      let workspaces = state.getVSCodeWorkspaces();
+      
+      // If cache is empty, try querying connected VS Code instances
+      if (workspaces.length === 0) {
+        const connIds = state.getVSCodeConnectionIds();
+        for (const connId of connIds) {
+          try {
+            const ws = await state.requestWorkspace(connId);
+            // requestWorkspace updates the cache internally
+          } catch {
+            // VS Code might not respond in time, that's OK
+          }
+        }
+        workspaces = state.getVSCodeWorkspaces();
+      }
+      
+      // Also include workspace paths from registered clients as fallback
+      if (workspaces.length === 0) {
+        const clients = state.getClients();
+        for (const c of clients) {
+          if (c.workspacePath && !workspaces.includes(c.workspacePath)) {
+            workspaces.push(c.workspacePath);
+          }
+        }
+      }
+      
+      res.json({ workspaces });
     } catch (err: any) {
       console.error('[Web] /api/workspaces error:', err.message);
       res.status(500).json({ error: err.message });
@@ -193,15 +237,15 @@ export function createWebApp(state: DaemonState): Express {
       const clients = state.getClients();
       res.json({
         version: state.version,
-        started_at: state.startedAt.toISOString(),
-        connected_clients: state.clientCount,
-        active_sessions: 0,
+        startedAt: state.startedAt.toISOString(),
+        connectedClients: state.clientCount,
+        activeSessions: 0,
         clients: clients.map(c => ({
-          client_id: c.clientId,
-          client_type: c.clientType,
-          connected_at: c.connectedAt.toISOString(),
-          is_spawner: c.isSpawner,
-          workspace_path: c.workspacePath || '',
+          clientId: c.clientId,
+          clientType: c.clientType,
+          connectedAt: c.connectedAt.toISOString(),
+          isSpawner: c.isSpawner,
+          workspacePath: c.workspacePath || '',
         })),
       });
     } catch (err: any) {
@@ -221,10 +265,10 @@ export function createWebApp(state: DaemonState): Express {
           const envVar = getDefaultEnvVar(pid);
           const key = envVar || `${pid.toUpperCase()}_API_KEY`;
           const hasValue = await state.secretStore.has(key);
-          return { key, has_value: hasValue };
+          return { key, hasValue };
         })
       );
-      res.json(secrets);
+      res.json({ secrets });
     } catch (err: any) {
       console.error('[Web] /api/secrets error:', err.message);
       res.status(500).json({ error: err.message });
@@ -232,7 +276,28 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
-   * POST /api/secrets - Set a secret (API key)
+   * POST /api/secrets/:key - Set a specific secret (API key)
+   * Body: { value: string }
+   */
+  app.post('/api/secrets/:key', async (req, res) => {
+    try {
+      const key = req.params.key;
+      const { value } = req.body;
+      if (!value) {
+        res.status(400).json({ error: 'value required' });
+        return;
+      }
+      await state.secretStore.set(key, value);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[Web] /api/secrets POST error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
+  /**
+   * POST /api/secrets - Set a secret (API key) — legacy route
+   * Body: { key: string, value: string }
    */
   app.post('/api/secrets', async (req, res) => {
     try {
@@ -258,6 +323,34 @@ export function createWebApp(state: DaemonState): Express {
       res.json({ success: true });
     } catch (err: any) {
       console.error('[Web] /api/secrets DELETE error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
+  /**
+   * GET /api/key-status - Check if a specific key is available
+   * Query: source=keychain|env, name=KEY_NAME
+   */
+  app.get('/api/key-status', async (req, res) => {
+    try {
+      const source = req.query.source as string;
+      const name = req.query.name as string;
+      
+      if (!source || !name) {
+        res.status(400).json({ error: 'source and name query params required' });
+        return;
+      }
+      
+      let exists = false;
+      if (source === 'keychain') {
+        exists = await state.secretStore.has(name);
+      } else if (source === 'env') {
+        exists = !!process.env[name];
+      }
+      
+      res.json({ exists });
+    } catch (err: any) {
+      console.error('[Web] /api/key-status error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
@@ -322,14 +415,14 @@ export function createWebApp(state: DaemonState): Express {
           if (ended) break;
           
           if (chunk.type === 'text' && chunk.text) {
-            safeWrite(`data: ${JSON.stringify({ type: 'text', text: chunk.text })}\n\n`);
+            safeWrite(`data: ${JSON.stringify({ type: 'text', content: chunk.text })}\n\n`);
           } else if (chunk.type === 'done') {
             safeWrite(`data: ${JSON.stringify({ type: 'done', finish_reason: chunk.finishReason || 'stop' })}\n\n`);
           }
         }
       } catch (err: any) {
         console.error('[Web] Chat stream error:', err.message);
-        safeWrite(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
+        safeWrite(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
       } finally {
         safeWrite('data: [DONE]\n\n');
         safeEnd();

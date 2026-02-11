@@ -27,8 +27,33 @@ import { stopEmbeddedWebServer } from './web/server.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Proto file path (relative to project root)
-const PROTO_PATH = path.resolve(__dirname, '../../../proto/openllm/v1/service.proto');
+/**
+ * Resolve the proto file path. Checks multiple locations:
+ *  1) OPENLLM_PROTO_DIR env var (explicit override)
+ *  2) Next to the current file: __dirname/proto/  (esbuild bundle)
+ *  3) Monorepo layout: __dirname/../../../proto/  (development from dist/)
+ */
+function resolveProtoPath(): { protoFile: string; includeDir: string } {
+  const candidates = [
+    process.env.OPENLLM_PROTO_DIR,
+    path.resolve(__dirname, 'proto'),
+    path.resolve(__dirname, '../../../proto'),
+  ].filter(Boolean) as string[];
+  
+  for (const dir of candidates) {
+    const file = path.join(dir, 'openllm', 'v1', 'service.proto');
+    if (fs.existsSync(file)) {
+      return { protoFile: file, includeDir: dir };
+    }
+  }
+  
+  throw new Error(
+    `Proto file not found. Searched:\n` +
+    candidates.map(d => `  - ${path.join(d, 'openllm/v1/service.proto')}`).join('\n')
+  );
+}
+
+const { protoFile: PROTO_PATH, includeDir: PROTO_INCLUDE } = resolveProtoPath();
 
 let server: grpc.Server | null = null;
 let state: DaemonState | null = null;
@@ -47,7 +72,7 @@ function loadProto() {
     enums: String,
     defaults: true,
     oneofs: true,
-    includeDirs: [path.resolve(__dirname, '../../../proto')],
+    includeDirs: [PROTO_INCLUDE],
   });
   
   return grpc.loadPackageDefinition(packageDefinition);

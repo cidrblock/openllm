@@ -2,7 +2,7 @@
  * Configuration loader
  * 
  * Loads and saves YAML configuration from:
- * - User level: ~/.openllm/config.yaml
+ * - User level: ~/.config/openllm/config.yaml (XDG standard)
  * - Workspace level: <workspace>/.openllm/config.yaml
  */
 
@@ -33,10 +33,11 @@ export interface ConfigFile {
 }
 
 /**
- * Get user config path
+ * Get user config path (XDG Base Directory: ~/.config/openllm/config.yaml)
  */
 export function getUserConfigPath(): string {
-  return path.join(os.homedir(), '.openllm', 'config.yaml');
+  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdgConfig, 'openllm', 'config.yaml');
 }
 
 /**
@@ -56,7 +57,16 @@ export function loadConfigFromPath(configPath: string): ConfigFile | null {
   
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    const config = yaml.load(content) as ConfigFile;
+    const raw = yaml.load(content) as any;
+    if (!raw) return { providers: {} };
+    
+    // Reject old Rust-era array format — user must delete and reconfigure
+    if (Array.isArray(raw.providers)) {
+      console.warn(`[Config] Ignoring old array-based config at ${configPath}. Delete it and reconfigure.`);
+      return { providers: {} };
+    }
+    
+    const config = raw as ConfigFile;
     return config || { providers: {} };
   } catch (error) {
     console.error(`Failed to load config from ${configPath}:`, error);

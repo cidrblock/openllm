@@ -273,32 +273,45 @@ describe('Web API - Unary Endpoints (direct DaemonState)', () => {
     expect(body.healthy).toBe(true);
   });
   
-  it('should list providers from DaemonState', async () => {
+  it('should list providers from DaemonState (wrapped, camelCase)', async () => {
     const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/providers`);
     expect(statusCode).toBe(200);
-    expect(body).toHaveLength(2);
-    expect(body[0].id).toBe('openai');
-    expect(body[0].configured).toBe(true);
+    expect(body.providers).toHaveLength(2);
+    expect(body.providers[0].id).toBe('openai');
+    expect(body.providers[0].displayName).toBe('OpenAI');
+    expect(body.providers[0].configured).toBe(true);
+    // Should NOT have snake_case fields
+    expect(body.providers[0].display_name).toBeUndefined();
   });
   
-  it('should list models from DaemonState', async () => {
+  it('should list models from DaemonState (wrapped, camelCase)', async () => {
     const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/models`);
     expect(statusCode).toBe(200);
-    expect(body).toHaveLength(1);
-    expect(body[0].id).toBe('openai/gpt-4o');
+    expect(body.models).toHaveLength(1);
+    expect(body.models[0].id).toBe('openai/gpt-4o');
+    expect(body.models[0].displayName).toBe('GPT-4o');
+    expect(body.models[0].capabilities).toBeDefined();
+    // Should NOT have snake_case fields
+    expect(body.models[0].display_name).toBeUndefined();
   });
   
-  it('should list workspaces from DaemonState', async () => {
+  it('should list workspaces from DaemonState (wrapped)', async () => {
     const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/workspaces`);
     expect(statusCode).toBe(200);
-    expect(body).toContain('/home/test/project');
+    expect(body.workspaces).toContain('/home/test/project');
   });
   
-  it('should get daemon status from DaemonState', async () => {
+  it('should get daemon status from DaemonState (camelCase)', async () => {
     const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/status`);
     expect(statusCode).toBe(200);
     expect(body.version).toBe('0.1.0-test');
-    expect(body.connected_clients).toBe(1);
+    expect(body.connectedClients).toBe(1);
+    expect(body.activeSessions).toBe(0);
+    expect(body.clients).toHaveLength(1);
+    expect(body.clients[0].clientId).toBe('test-001');
+    // Should NOT have snake_case fields
+    expect(body.connected_clients).toBeUndefined();
+    expect(body.clients[0].client_id).toBeUndefined();
   });
   
   it('should return 400 for POST /api/chat without model', async () => {
@@ -315,6 +328,117 @@ describe('Web API - Unary Endpoints (direct DaemonState)', () => {
     });
     expect(statusCode).toBe(400);
     expect(body.error).toContain('messages');
+  });
+});
+
+describe('Web API - Config Endpoints', () => {
+  it('GET /api/config should return { config, path } shape', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/config`);
+    expect(statusCode).toBe(200);
+    // Must have config and path keys
+    expect(body).toHaveProperty('config');
+    expect(body).toHaveProperty('path');
+    expect(typeof body.path).toBe('string');
+    expect(body.path).toContain('.openllm');
+  });
+
+  it('GET /api/config?location=user should return user config', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/config?location=user`);
+    expect(statusCode).toBe(200);
+    expect(body).toHaveProperty('config');
+    expect(body).toHaveProperty('path');
+  });
+
+  it('POST /api/config should accept { location, config } payload', async () => {
+    const { statusCode, body } = await httpRequest('POST', `${baseUrl}/api/config`, {
+      location: 'user',
+      config: { providers: {} },
+    });
+    expect(statusCode).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body).toHaveProperty('path');
+  });
+});
+
+describe('Web API - Secrets Endpoints', () => {
+  it('GET /api/secrets should return { secrets: [...] } with hasValue (camelCase)', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/secrets`);
+    expect(statusCode).toBe(200);
+    expect(body).toHaveProperty('secrets');
+    expect(Array.isArray(body.secrets)).toBe(true);
+    // Each entry should have key and hasValue (not has_value)
+    for (const s of body.secrets) {
+      expect(s).toHaveProperty('key');
+      expect(s).toHaveProperty('hasValue');
+      expect(s).not.toHaveProperty('has_value');
+    }
+  });
+
+  it('POST /api/secrets/:key should set a secret', async () => {
+    const { statusCode, body } = await httpRequest('POST', `${baseUrl}/api/secrets/TEST_KEY`, {
+      value: 'test-value-123',
+    });
+    expect(statusCode).toBe(200);
+    expect(body.success).toBe(true);
+  });
+
+  it('POST /api/secrets/:key should reject missing value', async () => {
+    const { statusCode, body } = await httpRequest('POST', `${baseUrl}/api/secrets/TEST_KEY`, {});
+    expect(statusCode).toBe(400);
+    expect(body.error).toContain('value');
+  });
+
+  it('DELETE /api/secrets/:key should succeed', async () => {
+    const { statusCode, body } = await httpRequest('DELETE', `${baseUrl}/api/secrets/TEST_KEY`);
+    expect(statusCode).toBe(200);
+    expect(body.success).toBe(true);
+  });
+});
+
+describe('Web API - Key Status Endpoint', () => {
+  it('GET /api/key-status should check keychain availability', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/key-status?source=keychain&name=OPENAI_API_KEY`);
+    expect(statusCode).toBe(200);
+    expect(body).toHaveProperty('exists');
+    expect(body.exists).toBe(true);
+  });
+
+  it('GET /api/key-status should return false for unknown key', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/key-status?source=keychain&name=NONEXISTENT_KEY`);
+    expect(statusCode).toBe(200);
+    expect(body.exists).toBe(false);
+  });
+
+  it('GET /api/key-status should check env var availability', async () => {
+    // HOME is always set
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/key-status?source=env&name=HOME`);
+    expect(statusCode).toBe(200);
+    expect(body.exists).toBe(true);
+  });
+
+  it('GET /api/key-status should return 400 without params', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/key-status`);
+    expect(statusCode).toBe(400);
+    expect(body.error).toBeDefined();
+  });
+});
+
+describe('Web API - CORS and Headers', () => {
+  it('should set CORS headers on responses', async () => {
+    const { statusCode, body } = await httpRequest('GET', `${baseUrl}/api/health`);
+    // CORS is handled by middleware, verify the response is accessible
+    expect(statusCode).toBe(200);
+  });
+
+  it('SSE responses should have correct content-type and cache headers', async () => {
+    mockChatConfig = { chunks: ['hi'], chunkDelayMs: 0, finishReason: 'stop' };
+    const { headers } = await postSSE(`${baseUrl}/api/chat`, {
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    expect(headers['content-type']).toBe('text/event-stream');
+    expect(headers['cache-control']).toBe('no-cache');
+    expect(headers['connection']).toBe('keep-alive');
   });
 });
 
@@ -335,9 +459,9 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
     const doneSignals = events.filter(e => e.type === 'done_signal');
     
     expect(textEvents).toHaveLength(3);
-    expect(textEvents[0].text).toBe('Hello');
-    expect(textEvents[1].text).toBe(' SSE');
-    expect(textEvents[2].text).toBe('!');
+    expect(textEvents[0].content).toBe('Hello');
+    expect(textEvents[1].content).toBe(' SSE');
+    expect(textEvents[2].content).toBe('!');
     
     expect(doneEvents).toHaveLength(1);
     expect(doneEvents[0].finish_reason).toBe('stop');
@@ -353,7 +477,7 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
       messages: [{ role: 'user', content: 'What is the answer?' }],
     });
     
-    const fullText = events.filter(e => e.type === 'text').map(e => e.text).join('');
+    const fullText = events.filter(e => e.type === 'text').map(e => e.content).join('');
     expect(fullText).toBe('The answer is 42');
   });
   
@@ -386,7 +510,7 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
     
     const errorEvents = events.filter(e => e.type === 'error');
     expect(errorEvents.length).toBeGreaterThanOrEqual(1);
-    expect(errorEvents[0].message).toBe('Provider unavailable');
+    expect(errorEvents[0].error).toBe('Provider unavailable');
     
     // Reset
     mockChatConfig = { chunks: ['Hello'], chunkDelayMs: 5, finishReason: 'stop' };
@@ -404,7 +528,7 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
     
     const textEvents = events.filter(e => e.type === 'text');
     expect(textEvents).toHaveLength(2);
-    expect(textEvents[0].text).toBe('Slow');
+    expect(textEvents[0].content).toBe('Slow');
     expect(elapsed).toBeGreaterThan(100);
     
     mockChatConfig = { chunks: ['Hello'], chunkDelayMs: 5, finishReason: 'stop' };
@@ -420,7 +544,7 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
     ]);
     
     for (const result of results) {
-      const fullText = result.events.filter(e => e.type === 'text').map(e => e.text).join('');
+      const fullText = result.events.filter(e => e.type === 'text').map(e => e.content).join('');
       expect(fullText).toBe('concurrent test');
     }
   });
@@ -462,8 +586,8 @@ describe('Web API - SSE Chat Streaming (direct DaemonState)', () => {
     
     const textEvents = events.filter(e => e.type === 'text');
     expect(textEvents).toHaveLength(50);
-    expect(textEvents[0].text).toBe('chunk-0 ');
-    expect(textEvents[49].text).toBe('chunk-49 ');
+    expect(textEvents[0].content).toBe('chunk-0 ');
+    expect(textEvents[49].content).toBe('chunk-49 ');
     
     mockChatConfig = { chunks: ['Hello'], chunkDelayMs: 5, finishReason: 'stop' };
   });

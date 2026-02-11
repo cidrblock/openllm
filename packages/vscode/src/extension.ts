@@ -4,7 +4,8 @@ import {
   initializeDaemon, 
   shutdownDaemon, 
   setExtensionPath,
-  getDaemonClient 
+  getDaemonClient,
+  BackchannelHandler
 } from './daemon';
 import { OpenLLMLanguageModelProvider } from './providers';
 
@@ -13,6 +14,7 @@ const DASHBOARD_URL = 'http://localhost:8787';
 
 let daemonConnected = false;
 let languageModelProvider: OpenLLMLanguageModelProvider | null = null;
+let backchannelHandler: BackchannelHandler | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log('[OpenLLM] activate() called');
@@ -27,7 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
   try {
     logger.info('[Daemon] Connecting to OpenLLM daemon...');
     await initializeDaemon();
-    logger.info('[Daemon] Connected');
+    logger.info('[Daemon] Connected and registered');
     daemonConnected = true;
     
     // Check daemon health
@@ -43,10 +45,21 @@ export async function activate(context: vscode.ExtensionContext) {
     languageModelProvider = new OpenLLMLanguageModelProvider(client);
     await languageModelProvider.start();
     logger.info('[LMProvider] Language Model Provider started');
-  } catch (e) {
-    logger.error('[Daemon] Failed to connect:', e);
+
+    // Start the backchannel for daemon → VS Code callbacks (workspace queries, tool invocation, etc.)
+    backchannelHandler = new BackchannelHandler(client, context);
+    backchannelHandler.start().catch(e => {
+      logger.warn('[Backchannel] Failed to start:', e);
+    });
+    logger.info('[Backchannel] Started');
+  } catch (e: any) {
+    const msg = e?.message || JSON.stringify(e) || 'Unknown error';
+    logger.error(`[Daemon] Failed to connect: ${msg}`);
+    if (e?.stack) {
+      logger.error(`[Daemon] Stack: ${e.stack}`);
+    }
     vscode.window.showWarningMessage(
-      `OpenLLM: Could not connect to daemon. Dashboard may not be available.`
+      `OpenLLM: Could not connect to daemon — ${msg}`
     );
   }
 
@@ -82,6 +95,13 @@ export async function deactivate() {
   const logger = getLogger();
   logger.info('Open LLM Provider deactivating...');
   
+  // Stop the backchannel
+  if (backchannelHandler) {
+    await backchannelHandler.stop();
+    backchannelHandler = null;
+    logger.info('[Backchannel] Stopped');
+  }
+
   // Stop the Language Model Provider
   if (languageModelProvider) {
     languageModelProvider.stop();
