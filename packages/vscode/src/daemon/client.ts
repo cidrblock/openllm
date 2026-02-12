@@ -196,59 +196,15 @@ export class DaemonClient {
     }
     
     /**
-     * Find a Node.js binary for running the daemon.
-     * 
-     * Priority:
-     *   1) `node` in PATH (system install, nvm, fnm, etc.)
-     *   2) VS Code's embedded Node.js (Electron ships one internally)
-     */
-    private async findNodeBinary(): Promise<string> {
-        const { execSync } = await import('child_process');
-        const logger = getLogger();
-        
-        // 1) node in PATH
-        try {
-            const cmd = process.platform === 'win32' ? 'where node' : 'which node';
-            const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
-            if (result && fs.existsSync(result)) {
-                logger.info(`[Daemon] Found node in PATH: ${result}`);
-                return result;
-            }
-        } catch {
-            // not in PATH
-        }
-        
-        // 2) VS Code's embedded node (varies by platform)
-        const appRoot = vscode.env.appRoot;
-        const embeddedCandidates = process.platform === 'win32'
-            ? [path.join(appRoot, 'node.exe')]
-            : [
-                path.join(appRoot, '..', 'node'),           // macOS .app layout
-                path.join(appRoot, 'node'),                  // Linux
-                path.join(path.dirname(process.execPath), 'node'),
-              ];
-        
-        for (const candidate of embeddedCandidates) {
-            if (fs.existsSync(candidate)) {
-                logger.info(`[Daemon] Found embedded node: ${candidate}`);
-                return candidate;
-            }
-        }
-        
-        throw new Error(
-            'Node.js not found. Install Node.js (https://nodejs.org) or ensure it is in your PATH.'
-        );
-    }
-
-    /**
      * Find the daemon command and arguments.
      * Returns { cmd, args } where the daemon subcommand should be appended.
      * 
+     * The daemon is always a self-contained SEA (Single Executable Application)
+     * binary — no Node.js dependency needed at runtime.
+     * 
      * Priority:
-     *   1) `openllm` in PATH (global install, npm link, or SEA binary — no node needed)
-     *   2) Bundled SEA binary in extension's bin/ (self-contained, no node needed)
-     *   3) Bundled JS fallback in extension's bin/ (needs system node)
-     *   4) Monorepo workspace packages/daemon/dist/index.js (dev, needs node)
+     *   1) `openllm` in PATH (global install or SEA binary)
+     *   2) Bundled SEA binary in extension's bin/
      */
     private async findDaemonCommand(): Promise<{ cmd: string; args: string[] }> {
         const { execSync } = await import('child_process');
@@ -270,41 +226,18 @@ export class DaemonClient {
         if (extensionPath) {
             const platform = process.platform === 'win32' ? 'win32' 
                 : process.platform === 'darwin' ? 'darwin' : 'linux';
-            const arch = process.arch; // x64, arm64, etc.
+            const arch = process.arch;
             const seaBinary = path.join(extensionPath, 'bin', `openllm-daemon-${platform}-${arch}`);
             if (fs.existsSync(seaBinary)) {
                 logger.info(`[Daemon] Found SEA binary: ${seaBinary}`);
                 return { cmd: seaBinary, args: [] };
             }
-            logger.info(`[Daemon] No SEA binary at ${seaBinary}`);
-        }
-
-        // 3) Bundled JS fallback — needs system node
-        if (extensionPath) {
-            const bundledEntry = path.join(extensionPath, 'bin', 'openllm-daemon.js');
-            if (fs.existsSync(bundledEntry)) {
-                const nodeBin = await this.findNodeBinary();
-                logger.info(`[Daemon] Found JS fallback: ${bundledEntry} (node: ${nodeBin})`);
-                return { cmd: nodeBin, args: [bundledEntry] };
-            }
-        }
-
-        // 4) Monorepo / workspace fallback (development)
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders) {
-            for (const folder of workspaceFolders) {
-                const candidate = path.join(folder.uri.fsPath, 'packages', 'daemon', 'dist', 'index.js');
-                if (fs.existsSync(candidate)) {
-                    const nodeBin = await this.findNodeBinary();
-                    logger.info(`[Daemon] Found daemon in workspace: ${candidate}`);
-                    return { cmd: nodeBin, args: [candidate] };
-                }
-            }
+            logger.error(`[Daemon] SEA binary not found at ${seaBinary}`);
         }
 
         throw new Error(
-            `OpenLLM daemon not found. ` +
-            `Install globally: npm install -g @openllm/daemon`
+            `OpenLLM daemon binary not found. ` +
+            `The extension package may be corrupt — try reinstalling.`
         );
     }
 

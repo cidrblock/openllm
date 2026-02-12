@@ -67,6 +67,7 @@ function createMockState(): DaemonState {
         clientType: 'CLI' as any,
         connectedAt: new Date(),
         isSpawner: false,
+        workspacePaths: [],
       }];
     },
     
@@ -74,17 +75,21 @@ function createMockState(): DaemonState {
       return ['/home/test/project'];
     },
     
+    notifyModelsChanged(_reason: string): void {
+      // No-op in test mock
+    },
+    
     async listProviders(): Promise<ProviderInfo[]> {
       return [
-        { id: 'openai', displayName: 'OpenAI', configured: true, healthy: true },
-        { id: 'anthropic', displayName: 'Anthropic', configured: false, healthy: true },
-      ];
+        { id: 'openai', engine: 'openai', displayName: 'OpenAI', configured: true, healthy: true, requiresKey: true },
+        { id: 'anthropic', engine: 'anthropic', displayName: 'Anthropic', configured: false, healthy: true, requiresKey: true },
+      ] as ProviderInfo[];
     },
     
     async listModels(): Promise<ModelInfo[]> {
       return [
-        { id: 'openai/gpt-4o', provider: 'openai', displayName: 'GPT-4o', contextWindow: 128000 },
-      ];
+        { id: 'openai/gpt-4o', name: 'gpt-4o', engineModelId: 'gpt-4o', provider: 'openai', engine: 'openai', displayName: 'GPT-4o', contextWindow: 128000, capabilities: { supportsTools: true, supportsVision: false } },
+      ] as ModelInfo[];
     },
     
     async* chat(model: string, messages: Array<{ role: string; content: string }>) {

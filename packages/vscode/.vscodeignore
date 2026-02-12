@@ -17,3 +17,6 @@ node_modules/**
 
 # Include binaries (don't ignore)
 !bin/**
+# But exclude JS fallback bundle (SEA binary is the only supported daemon)
+bin/openllm-daemon.js
+bin/bundle.js

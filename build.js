@@ -5,7 +5,7 @@
  * One command builds everything:
  *   node build.js                # Full build (proto + SEA + VSIX + zip)
  *   node build.js --proto-only   # Just regenerate gRPC clients
- *   node build.js --skip-sea     # Skip SEA binary (type-check only, no daemon binary)
+ *   node build.js --skip-sea     # (REMOVED — SEA is always required)
  *   node build.js --skip-proto   # Skip proto generation (use existing generated code)
  *   node build.js --skip-zip     # Skip zip creation
  *   node build.js --code-install # Install VSIX into VS Code after building
@@ -16,7 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -177,8 +177,9 @@ function buildDaemon() {
     run('npm run build', { cwd: DAEMON_ROOT });
 
     if (SKIP_SEA) {
-        console.log('  Skipping SEA build (--skip-sea)');
-        return;
+        console.error('  ERROR: --skip-sea is not supported. The daemon requires a SEA binary.');
+        console.error('  Set NODE_SEA_BASE=/path/to/official/node if your system node lacks the SEA fuse.');
+        process.exit(1);
     }
 
     // Build SEA via daemon's own build script
@@ -206,37 +207,8 @@ function buildDaemon() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// Stage 3b: Generate vendor list in package.json from SEA binary
-// ═══════════════════════════════════════════════════════════════════════
-function generateVendorList() {
-    banner('Stage 3b: Generate vendor list in package.json');
-
-    const seaBinary = path.join(VSCODE_ROOT, 'bin', `openllm-daemon-${PLATFORM}-${ARCH}`);
-    if (!fs.existsSync(seaBinary)) {
-        console.warn('  SEA binary not found, skipping vendor list generation');
-        return;
-    }
-
-    const output = execFileSync(seaBinary, ['list-providers', '--json'], { encoding: 'utf-8' }).trim();
-    const providers = JSON.parse(output);
-
-    const vendors = providers.map(p => ({
-        vendor: `openllm-${p.id}`,
-        displayName: `OpenLLM (${p.displayName})`,
-    }));
-
-    const pkgPath = path.join(VSCODE_ROOT, 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    pkg.contributes = pkg.contributes || {};
-    pkg.contributes.languageModelChatProviders = vendors;
-    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-
-    console.log(`  Patched package.json with ${vendors.length} vendors`);
-    for (const v of vendors) {
-        console.log(`    ${v.vendor} → ${v.displayName}`);
-    }
-}
+// Stage 3b removed: vendor list is now static in package.json (single "openllm" vendor).
+// No build-time generation needed.
 
 // ═══════════════════════════════════════════════════════════════════════
 // Stage 4: Package VS Code extension
@@ -355,8 +327,7 @@ async function main() {
     // Stage 3: Build daemon (SEA)
     buildDaemon();
 
-    // Stage 3b: Generate vendor list from SEA binary
-    generateVendorList();
+    // Stage 3b removed: vendor list is static (single "openllm" vendor)
 
     // Stage 4: Package extension
     packageExtension();

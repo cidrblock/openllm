@@ -4,7 +4,7 @@
 
 import * as grpc from '@grpc/grpc-js';
 import { DaemonState, ClientType } from '../state.js';
-import { getSupportedProviders, getDefaultEnvVar } from '../providers/adapter.js';
+import { getEngines, getEngine } from '../providers/adapter.js';
 import {
   startEmbeddedWebServer,
   stopEmbeddedWebServer,
@@ -112,11 +112,13 @@ export function createOpenLLMService(state: DaemonState) {
         callback(null, {
           providers: providers.map((p) => ({
             id: p.id,
+            engine: p.engine,
             display_name: p.displayName,
             configured: p.configured,
             healthy: p.healthy,
             requires_key: p.requiresKey,
             default_base_url: p.defaultBaseUrl,
+            base_url: p.baseUrl,
           })),
         });
       }).catch((error) => {
@@ -140,13 +142,25 @@ export function createOpenLLMService(state: DaemonState) {
         callback(null, {
           models: models.map((m) => ({
             id: m.id,
+            name: m.name,
+            engine_model_id: m.engineModelId,
             provider: m.provider,
+            engine: m.engine,
             display_name: m.displayName,
             context_window: m.contextWindow,
             capabilities: {
               supports_tools: m.capabilities?.supportsTools || false,
               supports_vision: m.capabilities?.supportsVision || false,
             },
+            params: m.params ? {
+              temperature: m.params.temperature,
+              top_p: m.params.top_p,
+              max_tokens: m.params.max_tokens,
+              system_prompt: m.params.system_prompt,
+              system_prompt_mode: m.params.system_prompt_mode,
+              top_k: m.params.top_k,
+              timeout: m.params.timeout,
+            } : undefined,
           })),
         });
       }).catch((error) => {
@@ -165,19 +179,21 @@ export function createOpenLLMService(state: DaemonState) {
       call: grpc.ServerUnaryCall<any, any>,
       callback: grpc.sendUnaryData<any>
     ): void {
-      const providerId = call.request.provider_id || call.request.providerId || '';
-      if (!providerId) {
+      const engineId = call.request.engine_id || call.request.engineId || call.request.provider_id || '';
+      if (!engineId) {
         callback({
           code: grpc.status.INVALID_ARGUMENT,
-          message: 'provider_id is required',
+          message: 'engine_id is required',
         });
         return;
       }
-      state.discoverModels(providerId).then((models) => {
+      const apiKey = call.request.api_key || call.request.apiKey || undefined;
+      const baseUrl = call.request.base_url || call.request.baseUrl || undefined;
+      state.discoverModels(engineId, apiKey, baseUrl).then((models) => {
         callback(null, {
           models: models.map((m) => ({
             id: m.id,
-            provider: m.provider,
+            engine: m.engine,
             display_name: m.displayName,
             context_window: m.contextWindow,
             capabilities: {
@@ -214,10 +230,20 @@ export function createOpenLLMService(state: DaemonState) {
         return;
       }
       
+      // Extract per-request options (3-tier merge: request > config > engine default)
+      const opts = request.options || {};
+      const requestParams: Record<string, any> = {};
+      if (opts.temperature != null) requestParams.temperature = opts.temperature;
+      if (opts.top_p != null) requestParams.top_p = opts.top_p;
+      if (opts.top_k != null) requestParams.top_k = opts.top_k;
+      if (opts.max_tokens != null) requestParams.maxTokens = opts.max_tokens;
+      if (opts.timeout != null) requestParams.timeout = opts.timeout;
+      const hasParams = Object.keys(requestParams).length > 0;
+      
       // Stream the response
       (async () => {
         try {
-          for await (const chunk of state.chat(model, messages)) {
+          for await (const chunk of state.chat(model, messages, hasParams ? requestParams : undefined)) {
             if (chunk.type === 'text' && chunk.text) {
               call.write({ text: { text: chunk.text } });
             } else if (chunk.type === 'done') {
@@ -301,12 +327,11 @@ export function createOpenLLMService(state: DaemonState) {
       callback: grpc.sendUnaryData<any>
     ): void {
       // Return known key names with availability status
-      const providers = getSupportedProviders();
-      const checks = providers.map(async (pid: string) => {
-        const envVar = getDefaultEnvVar(pid);
-        const key = envVar || `${pid.toUpperCase()}_API_KEY`;
+      const engines = getEngines();
+      const checks = engines.filter(e => e.requiresKey).map(async (e) => {
+        const key = e.defaultEnvVar || `${e.id.toUpperCase()}_API_KEY`;
         const hasValue = await state.secretStore.has(key);
-        return { key, has_value: hasValue };
+        return { key, engine: e.id, has_value: hasValue };
       });
       
       Promise.all(checks).then((secrets) => {
@@ -429,8 +454,9 @@ export function createOpenLLMService(state: DaemonState) {
       for (const [pid, pcfg] of Object.entries(config)) {
         providers[pid] = {
           enabled: true,
+          engine: pcfg.engine || pid,
           api_key_ref: pcfg.api_key_keychain_name || pcfg.api_key_env_var_name || '',
-          base_url: pcfg.api_base || '',
+          base_url: pcfg.base_url || '',
         };
       }
       
@@ -459,6 +485,25 @@ export function createOpenLLMService(state: DaemonState) {
       });
       // Notify VS Code that models may have changed
       state.notifyModelsChanged('config_changed');
+    },
+    
+    /**
+     * List available engines (API implementations)
+     */
+    ListEngines(
+      call: grpc.ServerUnaryCall<any, any>,
+      callback: grpc.sendUnaryData<any>
+    ): void {
+      const engines = getEngines();
+      callback(null, {
+        engines: engines.map(e => ({
+          id: e.id,
+          display_name: e.displayName,
+          requires_key: e.requiresKey,
+          default_base_url: e.defaultBaseUrl,
+          default_env_var: e.defaultEnvVar,
+        })),
+      });
     },
     
     /**

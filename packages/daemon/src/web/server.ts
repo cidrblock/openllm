@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
 import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../config/loader.js';
 import type { DaemonState } from '../state.js';
-import { getSupportedProviders, getDefaultEnvVar } from '../providers/adapter.js';
+import { getEngines, getEngine, getProviderTemplates } from '../providers/adapter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,11 +101,13 @@ export function createWebApp(state: DaemonState): Express {
       res.json({
         providers: providers.map((p) => ({
           id: p.id,
+          engine: p.engine,
           displayName: p.displayName,
           configured: p.configured,
           healthy: p.healthy,
           requiresKey: p.requiresKey,
           defaultBaseUrl: p.defaultBaseUrl,
+          baseUrl: p.baseUrl,
         })),
       });
     } catch (err: any) {
@@ -115,22 +117,59 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
+   * GET /api/engines - List available engine types (for Add Provider wizard)
+   * Returns the fixed set of API implementations from multi-llm-ts.
+   */
+  app.get('/api/engines', (req, res) => {
+    const engines = getEngines().map(e => ({
+      id: e.id,
+      displayName: e.displayName,
+      requiresKey: e.requiresKey,
+      defaultBaseUrl: e.defaultBaseUrl,
+      defaultEnvVar: e.defaultEnvVar,
+    }));
+    res.json({ engines });
+  });
+  
+  /**
+   * GET /api/templates - Predefined provider templates for the wizard
+   */
+  app.get('/api/templates', (req, res) => {
+    res.json({ templates: getProviderTemplates() });
+  });
+  
+  /**
    * GET /api/discover-models/:providerId - Discover all models a provider offers
    * Ignores config — for browsing/selection UI. Does NOT trigger notifications.
    */
-  app.get('/api/discover-models/:providerId', async (req, res) => {
+  /**
+   * GET /api/discover-models/:engineId - Discover all models an engine offers
+   * Operates on the actual layer (engine, not virtual provider).
+   * Query params: ?apiKey=xxx&baseUrl=xxx (optional, for authenticated discovery)
+   */
+  app.get('/api/discover-models/:engineId', async (req, res) => {
     try {
-      const models = await state.discoverModels(req.params.providerId);
+      let apiKey = req.query.apiKey as string | undefined;
+      let baseUrl = req.query.baseUrl as string | undefined;
+      const providerId = req.query.providerId as string | undefined;
+      
+      // If providerId is given (edit mode), resolve API key and base URL from config
+      if (providerId && !apiKey) {
+        const resolved = await state.resolveProviderCredentials(providerId);
+        if (resolved.apiKey) apiKey = resolved.apiKey;
+        if (resolved.baseUrl && !baseUrl) baseUrl = resolved.baseUrl;
+      }
+      
+      const models = await state.discoverModels(req.params.engineId, apiKey, baseUrl);
       res.json({
         models: models.map((m) => ({
           id: m.id,
-          provider: m.provider,
+          engine: m.engine,
           displayName: m.displayName,
           contextWindow: m.contextWindow,
           capabilities: {
             tools: m.capabilities?.supportsTools || false,
             vision: m.capabilities?.supportsVision || false,
-            streaming: (m.capabilities as any)?.supportsStreaming || false,
           },
         })),
       });
@@ -152,14 +191,17 @@ export function createWebApp(state: DaemonState): Express {
       res.json({
         models: models.map((m) => ({
           id: m.id,
+          name: m.name,
+          engineModelId: m.engineModelId,
           provider: m.provider,
+          engine: m.engine,
           displayName: m.displayName,
           contextWindow: m.contextWindow,
           capabilities: {
             tools: m.capabilities?.supportsTools || false,
             vision: m.capabilities?.supportsVision || false,
-            streaming: (m.capabilities as any)?.supportsStreaming || false,
           },
+          params: m.params,
         })),
       });
     } catch (err: any) {
@@ -291,13 +333,12 @@ export function createWebApp(state: DaemonState): Express {
    */
   app.get('/api/secrets', async (req, res) => {
     try {
-      const providers = getSupportedProviders();
+      const engines = getEngines();
       const secrets = await Promise.all(
-        providers.map(async (pid: string) => {
-          const envVar = getDefaultEnvVar(pid);
-          const key = envVar || `${pid.toUpperCase()}_API_KEY`;
+        engines.filter(e => e.requiresKey).map(async (e) => {
+          const key = e.defaultEnvVar || `${e.id.toUpperCase()}_API_KEY`;
           const hasValue = await state.secretStore.has(key);
-          return { key, hasValue };
+          return { key, engine: e.id, hasValue };
         })
       );
       res.json({ secrets });
@@ -396,7 +437,7 @@ export function createWebApp(state: DaemonState): Express {
    * Calls state.chat() directly — no gRPC in the loop.
    */
   app.post('/api/chat', (req, res) => {
-    const { model, messages } = req.body;
+    const { model, messages, temperature, top_p, top_k, max_tokens, timeout: reqTimeout } = req.body;
     
     if (!model || !messages) {
       res.status(400).json({ error: 'model and messages required' });
@@ -431,6 +472,15 @@ export function createWebApp(state: DaemonState): Express {
       content: m.content || '',
     }));
     
+    // Build request params (per-request overrides)
+    const requestParams: Record<string, any> = {};
+    if (temperature != null) requestParams.temperature = temperature;
+    if (top_p != null) requestParams.top_p = top_p;
+    if (top_k != null) requestParams.top_k = top_k;
+    if (max_tokens != null) requestParams.maxTokens = max_tokens;
+    if (reqTimeout != null) requestParams.timeout = reqTimeout;
+    const hasParams = Object.keys(requestParams).length > 0;
+    
     console.log('[Web] Starting Chat stream:', model, `messages: ${chatMessages.length}`);
     
     // Detect actual client disconnect (connection close, not request body consumed)
@@ -446,7 +496,7 @@ export function createWebApp(state: DaemonState): Express {
     // Stream directly from DaemonState — no gRPC involved
     (async () => {
       try {
-        for await (const chunk of state.chat(model, chatMessages)) {
+        for await (const chunk of state.chat(model, chatMessages, hasParams ? requestParams : undefined)) {
           if (ended) break;
           
           if (chunk.type === 'text' && chunk.text) {
@@ -471,14 +521,19 @@ export function createWebApp(state: DaemonState): Express {
   app.post('/api/provider/:id/configure', async (req, res) => {
     try {
       const providerId = req.params.id;
-      const { apiKey, envVarName, apiBase, target, workspacePath } = req.body;
+      const { engine, displayName, apiKey, envVarName, baseUrl, target, workspacePath } = req.body;
       
       const config: ConfigFile = (target === 'workspace' && workspacePath
         ? loadWorkspaceConfig(workspacePath)
         : loadConfig()) || { providers: {} };
       
       if (!config.providers) config.providers = {};
-      config.providers[providerId] = config.providers[providerId] || {};
+      
+      // Initialize or update provider config
+      const existing = config.providers[providerId] || {} as any;
+      if (engine) existing.engine = engine;
+      if (displayName) existing.display_name = displayName;
+      config.providers[providerId] = existing;
       
       if (apiKey) {
         const keychainName = `${providerId.toUpperCase()}_API_KEY`;
@@ -490,8 +545,8 @@ export function createWebApp(state: DaemonState): Express {
         delete config.providers[providerId].api_key_keychain_name;
       }
       
-      if (apiBase) {
-        config.providers[providerId].api_base = apiBase;
+      if (baseUrl) {
+        config.providers[providerId].base_url = baseUrl;
       }
       
       if (target === 'workspace' && workspacePath) {

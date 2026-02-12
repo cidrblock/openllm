@@ -534,6 +534,11 @@ class OpenLLMStub(object):
                 request_serializer=openllm_dot_v1_dot_service__pb2.GetProviderStatusRequest.SerializeToString,
                 response_deserializer=openllm_dot_v1_dot_service__pb2.ProviderStatus.FromString,
                 _registered_method=True)
+        self.ListEngines = channel.unary_unary(
+                '/openllm.v1.OpenLLM/ListEngines',
+                request_serializer=openllm_dot_v1_dot_service__pb2.ListEnginesRequest.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.ListEnginesResponse.FromString,
+                _registered_method=True)
         self.ListTools = channel.unary_unary(
                 '/openllm.v1.OpenLLM/ListTools',
                 request_serializer=openllm_dot_v1_dot_service__pb2.ListToolsRequest.SerializeToString,
@@ -756,6 +761,13 @@ class OpenLLMServicer(object):
 
     def GetProviderStatus(self, request, context):
         """Get provider status (configured, healthy, etc.)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListEngines(self, request, context):
+        """List available engine types (fixed set of API implementations)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1008,6 +1020,11 @@ def add_OpenLLMServicer_to_server(servicer, server):
                     servicer.GetProviderStatus,
                     request_deserializer=openllm_dot_v1_dot_service__pb2.GetProviderStatusRequest.FromString,
                     response_serializer=openllm_dot_v1_dot_service__pb2.ProviderStatus.SerializeToString,
+            ),
+            'ListEngines': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListEngines,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.ListEnginesRequest.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.ListEnginesResponse.SerializeToString,
             ),
             'ListTools': grpc.unary_unary_rpc_method_handler(
                     servicer.ListTools,
@@ -1544,6 +1561,33 @@ class OpenLLM(object):
             '/openllm.v1.OpenLLM/GetProviderStatus',
             openllm_dot_v1_dot_service__pb2.GetProviderStatusRequest.SerializeToString,
             openllm_dot_v1_dot_service__pb2.ProviderStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListEngines(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/openllm.v1.OpenLLM/ListEngines',
+            openllm_dot_v1_dot_service__pb2.ListEnginesRequest.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.ListEnginesResponse.FromString,
             options,
             channel_credentials,
             insecure,

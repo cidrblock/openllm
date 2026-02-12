@@ -73,60 +73,8 @@
     },
     "languageModelChatProviders": [
       {
-        "vendor": "openllm-mock",
-        "displayName": "OpenLLM (Mock (Testing))"
-      },
-      {
-        "vendor": "openllm-openai",
-        "displayName": "OpenLLM (OpenAI)"
-      },
-      {
-        "vendor": "openllm-anthropic",
-        "displayName": "OpenLLM (Anthropic)"
-      },
-      {
-        "vendor": "openllm-gemini",
-        "displayName": "OpenLLM (Google Gemini)"
-      },
-      {
-        "vendor": "openllm-mistral",
-        "displayName": "OpenLLM (Mistral)"
-      },
-      {
-        "vendor": "openllm-ollama",
-        "displayName": "OpenLLM (Ollama)"
-      },
-      {
-        "vendor": "openllm-azure",
-        "displayName": "OpenLLM (Azure OpenAI)"
-      },
-      {
-        "vendor": "openllm-openrouter",
-        "displayName": "OpenLLM (OpenRouter)"
-      },
-      {
-        "vendor": "openllm-deepseek",
-        "displayName": "OpenLLM (DeepSeek)"
-      },
-      {
-        "vendor": "openllm-groq",
-        "displayName": "OpenLLM (Groq)"
-      },
-      {
-        "vendor": "openllm-xai",
-        "displayName": "OpenLLM (xAI (Grok))"
-      },
-      {
-        "vendor": "openllm-cerebras",
-        "displayName": "OpenLLM (Cerebras)"
-      },
-      {
-        "vendor": "openllm-lmstudio",
-        "displayName": "OpenLLM (LM Studio)"
-      },
-      {
-        "vendor": "openllm-meta",
-        "displayName": "OpenLLM (Meta (Llama))"
+        "vendor": "openllm",
+        "displayName": "OpenLLM"
       }
     ]
   },

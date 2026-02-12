@@ -4,6 +4,9 @@
  * Loads and saves YAML configuration from:
  * - User level:      <configDir>/config.yaml   (platform-aware via paths.ts)
  * - Workspace level:  <workspace>/.config/openllm/config.yaml
+ * 
+ * The config uses "virtual" provider and model names as primary keys.
+ * See the plan's Terminology section for virtual vs actual distinction.
  */
 
 import * as fs from 'node:fs';
@@ -14,26 +17,84 @@ import {
   getWorkspaceConfigPath as _getWorkspaceConfigPath,
 } from '../paths.js';
 
+// ── Name validation ────────────────────────────────────────────────────
+
 /**
- * Provider configuration
+ * Regex for virtual provider and model names.
+ * Lowercase alphanumeric, dots, hyphens, underscores. No slashes, no spaces.
+ * Engine model IDs from discovery (which may contain slashes) are exempt.
  */
-export interface ProviderConfig {
-  /** Keychain key name (mutually exclusive with api_key_env_var_name) */
-  api_key_keychain_name?: string;
-  /** Environment variable name (mutually exclusive with api_key_keychain_name) */
-  api_key_env_var_name?: string;
-  /** Custom API base URL */
-  api_base?: string;
-  /** Enabled model IDs */
-  enabled_models?: string[];
+const VIRTUAL_NAME_REGEX = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * Validate a virtual name (provider or model).
+ * Returns true if valid, false otherwise.
+ * Engine model IDs (containing slashes) are NOT validated by this — they pass through.
+ */
+export function isValidVirtualName(name: string): boolean {
+  return VIRTUAL_NAME_REGEX.test(name);
+}
+
+// ── Config interfaces ──────────────────────────────────────────────────
+
+/**
+ * Per-model config entry.
+ * The YAML key is the virtual model name (= unique ID within its provider).
+ * 
+ * - Key with no `model_id` → the key IS the engine model ID (novice path)
+ * - Key with `model_id` → the key is a virtual name, model_id is the actual engine model
+ * - `{}` = enabled with all default params
+ */
+export interface ModelConfig {
+  /** Actual engine model ID — required when the key is a virtual name */
+  model_id?: string;
+  /** System prompt text (prepended to or replaces request system message) */
+  system_prompt?: string;
+  /** How to combine config system_prompt with request: "prepend" (default) or "replace" */
+  system_prompt_mode?: 'prepend' | 'replace';
+  /** Sampling temperature (0.0 - 2.0) */
+  temperature?: number;
+  /** Nucleus sampling (0.0 - 1.0) */
+  top_p?: number;
+  /** Top-k sampling (integer) */
+  top_k?: number;
+  /** Maximum output tokens */
+  max_tokens?: number;
+  /** Request timeout in milliseconds */
+  timeout?: number;
 }
 
 /**
- * Full configuration file structure
+ * Per-provider config entry.
+ * The YAML key is the virtual provider name (= unique ID).
+ * 
+ * A provider points to an engine (actual API implementation) and holds
+ * credentials, base URL, and a map of enabled models with their params.
+ */
+export interface ProviderConfig {
+  /** Actual engine type: "openrouter", "openai", "anthropic", etc. */
+  engine: string;
+  /** Optional human-readable label (defaults to engine display name) */
+  display_name?: string;
+  /** Keychain key name for API key */
+  api_key_keychain_name?: string;
+  /** Environment variable name for API key */
+  api_key_env_var_name?: string;
+  /** Custom API base URL (falls back to engine default) */
+  base_url?: string;
+  /** Enabled models: key = virtual model name, value = model config */
+  models?: Record<string, ModelConfig>;
+}
+
+/**
+ * Full configuration file structure.
+ * Keys in `providers` are virtual provider names (user-defined IDs).
  */
 export interface ConfigFile {
   providers?: Record<string, ProviderConfig>;
 }
+
+// ── Path helpers ───────────────────────────────────────────────────────
 
 /**
  * Get user config path (platform-aware via paths.ts)
@@ -49,8 +110,11 @@ export function getWorkspaceConfigPath(workspacePath: string): string {
   return _getWorkspaceConfigPath(workspacePath);
 }
 
+// ── Load / Save ────────────────────────────────────────────────────────
+
 /**
- * Load configuration from a file
+ * Load configuration from a file.
+ * Handles both new schema (engine + models map) and old schema (enabled_models array).
  */
 export function loadConfigFromPath(configPath: string): ConfigFile | null {
   if (!fs.existsSync(configPath)) {
@@ -69,10 +133,56 @@ export function loadConfigFromPath(configPath: string): ConfigFile | null {
     }
     
     const config = raw as ConfigFile;
+    
+    // Migrate old schema if needed
+    if (config.providers) {
+      for (const [provId, provCfg] of Object.entries(config.providers)) {
+        migrateProviderConfig(provId, provCfg as any);
+      }
+    }
+    
     return config || { providers: {} };
   } catch (error) {
     console.error(`Failed to load config from ${configPath}:`, error);
     return null;
+  }
+}
+
+/**
+ * Migrate a provider config from old schema to new schema in-place.
+ * Old: { api_base, enabled_models: string[] }
+ * New: { engine, base_url, models: Record<string, ModelConfig> }
+ * 
+ * If no `engine` field is present, assumes the provider key IS the engine ID
+ * (backward compat with the old 1:1 mapping).
+ */
+function migrateProviderConfig(provId: string, cfg: any): void {
+  // If already new format (has engine field), just rename api_base → base_url
+  if (cfg.engine) {
+    if (cfg.api_base && !cfg.base_url) {
+      cfg.base_url = cfg.api_base;
+      delete cfg.api_base;
+    }
+    return;
+  }
+  
+  // Old format: provider key = engine ID
+  cfg.engine = provId;
+  
+  // Rename api_base → base_url
+  if (cfg.api_base) {
+    cfg.base_url = cfg.api_base;
+    delete cfg.api_base;
+  }
+  
+  // Convert enabled_models: string[] → models: Record<string, ModelConfig>
+  if (cfg.enabled_models && Array.isArray(cfg.enabled_models)) {
+    const models: Record<string, ModelConfig> = {};
+    for (const modelId of cfg.enabled_models) {
+      models[modelId] = {}; // Default params — key IS the engine model ID
+    }
+    cfg.models = models;
+    delete cfg.enabled_models;
   }
 }
 
@@ -124,8 +234,11 @@ export function saveWorkspaceConfig(workspacePath: string, config: ConfigFile): 
   saveConfigToPath(getWorkspaceConfigPath(workspacePath), config);
 }
 
+// ── Merge logic ────────────────────────────────────────────────────────
+
 /**
- * Merge configurations (workspace overrides user)
+ * Merge configurations (workspace overrides user at provider level).
+ * If a workspace defines a provider, it completely replaces that provider's config.
  */
 export function mergeConfigs(userConfig: ConfigFile, workspaceConfig: ConfigFile | null): ConfigFile {
   if (!workspaceConfig) {
@@ -136,13 +249,10 @@ export function mergeConfigs(userConfig: ConfigFile, workspaceConfig: ConfigFile
     providers: { ...userConfig.providers },
   };
   
-  // Workspace providers override user providers
+  // Workspace providers completely replace user providers (provider-level replacement)
   if (workspaceConfig.providers) {
     for (const [providerId, providerConfig] of Object.entries(workspaceConfig.providers)) {
-      merged.providers![providerId] = {
-        ...merged.providers![providerId],
-        ...providerConfig,
-      };
+      merged.providers![providerId] = providerConfig;
     }
   }
   
@@ -154,9 +264,10 @@ export function mergeConfigs(userConfig: ConfigFile, workspaceConfig: ConfigFile
  * 
  * Provider-level replacement: if ANY workspace defines a provider, that
  * provider's config completely replaces the user-level config for it.
- * For multi-root workspaces (multiple workspace paths), `enabled_models`
- * are unioned across workspaces — but the user config's models for that
- * provider are NOT included.
+ * 
+ * For multi-root workspaces (multiple workspace paths), models from the
+ * same provider across workspaces are unioned — but the user config's
+ * models for that provider are NOT included.
  * 
  * Providers not mentioned by any workspace are kept from the user config.
  * If workspacePaths is empty, returns the user config as-is.
@@ -172,9 +283,9 @@ export function mergeMultipleWorkspaceConfigs(workspacePaths: string[]): ConfigF
     providers: { ...userConfig.providers },
   };
   
-  // Track which providers are defined by workspaces, and their enabled_models
+  // Track which providers are defined by workspaces, and their models
   // (unioned across workspaces, but NOT seeded from user config)
-  const wsProviderModels: Record<string, Set<string>> = {};
+  const wsProviderModels: Record<string, Record<string, ModelConfig>> = {};
   
   // Overlay each workspace config — provider-level replacement
   for (const wsPath of workspacePaths) {
@@ -185,36 +296,38 @@ export function mergeMultipleWorkspaceConfigs(workspacePaths: string[]): ConfigF
       if (!(providerId in wsProviderModels)) {
         // First workspace to define this provider replaces the user config entirely
         merged.providers![providerId] = { ...wsCfg };
-        wsProviderModels[providerId] = new Set(wsCfg.enabled_models || []);
+        wsProviderModels[providerId] = { ...(wsCfg.models || {}) };
       } else {
-        // Subsequent workspaces: overlay fields and union enabled_models
-        const { enabled_models: wsModels, ...wsRest } = wsCfg;
+        // Subsequent workspaces: overlay fields and union models
+        const { models: wsModels, ...wsRest } = wsCfg;
         merged.providers![providerId] = {
           ...merged.providers![providerId],
           ...wsRest,
         };
         if (wsModels) {
-          for (const m of wsModels) {
-            wsProviderModels[providerId].add(m);
+          for (const [modelName, modelCfg] of Object.entries(wsModels)) {
+            wsProviderModels[providerId][modelName] = modelCfg;
           }
         }
       }
     }
   }
   
-  // Write final enabled_models back for workspace-defined providers
+  // Write final models back for workspace-defined providers
   for (const [providerId, models] of Object.entries(wsProviderModels)) {
     if (merged.providers![providerId]) {
-      merged.providers![providerId].enabled_models =
-        models.size > 0 ? Array.from(models) : undefined;
+      merged.providers![providerId].models =
+        Object.keys(models).length > 0 ? models : undefined;
     }
   }
   
   return merged;
 }
 
+// ── Helpers ─────────────────────────────────────────────────────────────
+
 /**
- * Get provider configuration
+ * Get provider configuration (merged user + workspace).
  */
 export function getProviderConfig(providerId: string, workspacePath?: string): ProviderConfig | null {
   const userConfig = loadConfig();
@@ -225,7 +338,7 @@ export function getProviderConfig(providerId: string, workspacePath?: string): P
 }
 
 /**
- * Get all configured providers
+ * Get all configured provider IDs (merged user + workspace).
  */
 export function getConfiguredProviders(workspacePath?: string): string[] {
   const userConfig = loadConfig();
@@ -233,4 +346,21 @@ export function getConfiguredProviders(workspacePath?: string): string[] {
   const merged = mergeConfigs(userConfig, workspaceConfig);
   
   return Object.keys(merged.providers || {});
+}
+
+/**
+ * Resolve the engine model ID for a model config entry.
+ * If the entry has model_id, use it. Otherwise, the key itself is the engine model ID.
+ */
+export function resolveEngineModelId(modelName: string, modelConfig: ModelConfig): string {
+  return modelConfig.model_id || modelName;
+}
+
+/**
+ * Get enabled model names for a provider from its config.
+ * Returns the keys of the models map (virtual or raw names).
+ */
+export function getEnabledModelNames(providerConfig: ProviderConfig): string[] {
+  if (!providerConfig.models) return [];
+  return Object.keys(providerConfig.models);
 }

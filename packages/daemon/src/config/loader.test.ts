@@ -1,8 +1,8 @@
 /**
  * Config loader unit tests
  *
- * Tests loadConfigFromPath, mergeConfigs, and mergeMultipleWorkspaceConfigs
- * using real temp YAML files on disk.
+ * Tests loadConfigFromPath, mergeConfigs, mergeMultipleWorkspaceConfigs,
+ * isValidVirtualName, and old-to-new schema migration.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -22,55 +22,106 @@ import {
   loadConfigFromPath,
   mergeConfigs,
   mergeMultipleWorkspaceConfigs,
+  isValidVirtualName,
+  resolveEngineModelId,
   type ConfigFile,
+  type ModelConfig,
 } from './loader.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
 
-/** Create a temp directory for each test */
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openllm-test-'));
 });
 
-/** Clean up temp directory after each test */
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-/** Write a YAML config file and return its path */
 function writeYaml(filePath: string, data: any): string {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, yaml.dump(data));
   return filePath;
 }
 
-/** Write a user config and point the mock to it */
-function setUserConfig(data: ConfigFile): void {
+function setUserConfig(data: any): void {
   mockUserConfigPath = path.join(tmpDir, 'user-config.yaml');
   writeYaml(mockUserConfigPath, data);
 }
 
-/** Write a workspace config at <wsDir>/.config/openllm/config.yaml and return wsDir */
-function createWorkspace(name: string, data: ConfigFile): string {
+function createWorkspace(name: string, data: any): string {
   const wsDir = path.join(tmpDir, name);
   writeYaml(path.join(wsDir, '.config', 'openllm', 'config.yaml'), data);
   return wsDir;
 }
 
-// ── loadConfigFromPath ───────────────────────────────────────────────────────
+// ── isValidVirtualName ────────────────────────────────────────────────────────
 
-describe('loadConfigFromPath', () => {
-  it('should parse valid YAML with enabled_models', () => {
+describe('isValidVirtualName', () => {
+  it('should accept simple lowercase names', () => {
+    expect(isValidVirtualName('openrouter')).toBe(true);
+    expect(isValidVirtualName('openai')).toBe(true);
+    expect(isValidVirtualName('my-provider')).toBe(true);
+    expect(isValidVirtualName('work.openrouter')).toBe(true);
+    expect(isValidVirtualName('my_provider_2')).toBe(true);
+  });
+
+  it('should reject names with slashes', () => {
+    expect(isValidVirtualName('openrouter/anthropic')).toBe(false);
+  });
+
+  it('should reject names with spaces', () => {
+    expect(isValidVirtualName('my provider')).toBe(false);
+  });
+
+  it('should reject names starting with non-alphanumeric', () => {
+    expect(isValidVirtualName('-bad')).toBe(false);
+    expect(isValidVirtualName('.bad')).toBe(false);
+    expect(isValidVirtualName('_bad')).toBe(false);
+  });
+
+  it('should reject empty string', () => {
+    expect(isValidVirtualName('')).toBe(false);
+  });
+
+  it('should accept single character', () => {
+    expect(isValidVirtualName('a')).toBe(true);
+    expect(isValidVirtualName('1')).toBe(true);
+  });
+});
+
+// ── resolveEngineModelId ──────────────────────────────────────────────────────
+
+describe('resolveEngineModelId', () => {
+  it('should return model_id when present', () => {
+    expect(resolveEngineModelId('claude-precise', { model_id: 'anthropic/claude-opus-4.6' })).toBe('anthropic/claude-opus-4.6');
+  });
+
+  it('should return the name when no model_id', () => {
+    expect(resolveEngineModelId('openrouter/anthropic/claude-opus-4.6', {})).toBe('openrouter/anthropic/claude-opus-4.6');
+  });
+});
+
+// ── loadConfigFromPath (new schema) ──────────────────────────────────────────
+
+describe('loadConfigFromPath (new schema)', () => {
+  it('should parse new-format config with engine and models map', () => {
     const filePath = writeYaml(path.join(tmpDir, 'config.yaml'), {
       providers: {
-        openrouter: {
-          enabled_models: [
-            'openrouter/anthropic/claude-opus-4.5',
-            'openrouter/anthropic/claude-opus-4.6',
-          ],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
+        'work-openrouter': {
+          engine: 'openrouter',
+          display_name: 'Work OpenRouter',
+          api_key_keychain_name: 'OPENROUTER_WORK_KEY',
+          models: {
+            'openrouter/anthropic/claude-haiku-3.5': {},
+            'claude-precise': {
+              model_id: 'openrouter/anthropic/claude-opus-4.6',
+              temperature: 0.2,
+              top_p: 0.5,
+            },
+          },
         },
       },
     });
@@ -78,52 +129,43 @@ describe('loadConfigFromPath', () => {
     const config = loadConfigFromPath(filePath);
 
     expect(config).not.toBeNull();
-    expect(config!.providers).toBeDefined();
-    expect(config!.providers!.openrouter).toBeDefined();
-    expect(config!.providers!.openrouter.enabled_models).toEqual([
-      'openrouter/anthropic/claude-opus-4.5',
-      'openrouter/anthropic/claude-opus-4.6',
-    ]);
-    expect(config!.providers!.openrouter.api_key_keychain_name).toBe('OPENROUTER_API_KEY');
+    const prov = config!.providers!['work-openrouter'];
+    expect(prov).toBeDefined();
+    expect(prov.engine).toBe('openrouter');
+    expect(prov.display_name).toBe('Work OpenRouter');
+    expect(prov.models).toBeDefined();
+    expect(Object.keys(prov.models!)).toHaveLength(2);
+    expect(prov.models!['claude-precise'].model_id).toBe('openrouter/anthropic/claude-opus-4.6');
+    expect(prov.models!['claude-precise'].temperature).toBe(0.2);
   });
 
   it('should return { providers: {} } for empty file', () => {
     const filePath = path.join(tmpDir, 'empty.yaml');
     fs.writeFileSync(filePath, '');
-
-    const config = loadConfigFromPath(filePath);
-
-    expect(config).toEqual({ providers: {} });
+    expect(loadConfigFromPath(filePath)).toEqual({ providers: {} });
   });
 
   it('should return null for missing file', () => {
-    const config = loadConfigFromPath(path.join(tmpDir, 'nonexistent.yaml'));
-
-    expect(config).toBeNull();
+    expect(loadConfigFromPath(path.join(tmpDir, 'nonexistent.yaml'))).toBeNull();
   });
 
   it('should reject old array-based providers format', () => {
     const filePath = writeYaml(path.join(tmpDir, 'old.yaml'), {
-      providers: [
-        { name: 'openai', api_key: 'sk-123' },
-      ],
+      providers: [{ name: 'openai', api_key: 'sk-123' }],
     });
-
-    const config = loadConfigFromPath(filePath);
-
-    expect(config).toEqual({ providers: {} });
+    expect(loadConfigFromPath(filePath)).toEqual({ providers: {} });
   });
+});
 
-  it('should parse config with multiple providers', () => {
-    const filePath = writeYaml(path.join(tmpDir, 'multi.yaml'), {
+// ── loadConfigFromPath (old schema migration) ────────────────────────────────
+
+describe('loadConfigFromPath (old schema migration)', () => {
+  it('should migrate enabled_models to models map', () => {
+    const filePath = writeYaml(path.join(tmpDir, 'old-config.yaml'), {
       providers: {
         openrouter: {
+          enabled_models: ['openrouter/anthropic/claude-opus-4.5', 'openrouter/anthropic/claude-opus-4.6'],
           api_key_keychain_name: 'OPENROUTER_API_KEY',
-          enabled_models: ['openrouter/model-a'],
-        },
-        openai: {
-          api_key_env_var_name: 'OPENAI_API_KEY',
-          api_base: 'https://custom.openai.com',
         },
       },
     });
@@ -131,10 +173,31 @@ describe('loadConfigFromPath', () => {
     const config = loadConfigFromPath(filePath);
 
     expect(config).not.toBeNull();
-    expect(Object.keys(config!.providers!)).toHaveLength(2);
-    expect(config!.providers!.openrouter.enabled_models).toEqual(['openrouter/model-a']);
-    expect(config!.providers!.openai.api_key_env_var_name).toBe('OPENAI_API_KEY');
-    expect(config!.providers!.openai.api_base).toBe('https://custom.openai.com');
+    const prov = config!.providers!.openrouter;
+    expect(prov.engine).toBe('openrouter'); // auto-migrated from key
+    expect(prov.models).toBeDefined();
+    expect(Object.keys(prov.models!)).toHaveLength(2);
+    expect(prov.models!['openrouter/anthropic/claude-opus-4.5']).toEqual({});
+    expect(prov.models!['openrouter/anthropic/claude-opus-4.6']).toEqual({});
+    // Old fields should be gone
+    expect((prov as any).enabled_models).toBeUndefined();
+  });
+
+  it('should migrate api_base to base_url', () => {
+    const filePath = writeYaml(path.join(tmpDir, 'old-base.yaml'), {
+      providers: {
+        openai: {
+          api_base: 'https://custom.openai.com',
+          api_key_keychain_name: 'OPENAI_API_KEY',
+        },
+      },
+    });
+
+    const config = loadConfigFromPath(filePath);
+
+    const prov = config!.providers!.openai;
+    expect(prov.base_url).toBe('https://custom.openai.com');
+    expect((prov as any).api_base).toBeUndefined();
   });
 });
 
@@ -144,70 +207,49 @@ describe('mergeConfigs', () => {
   it('should return user config when workspace is null', () => {
     const userConfig: ConfigFile = {
       providers: {
-        openrouter: { api_key_keychain_name: 'KEY' },
+        openrouter: { engine: 'openrouter', api_key_keychain_name: 'KEY' },
       },
     };
-
-    const result = mergeConfigs(userConfig, null);
-
-    expect(result).toBe(userConfig); // Same reference
+    expect(mergeConfigs(userConfig, null)).toBe(userConfig);
   });
 
-  it('should overlay workspace provider fields on user provider', () => {
+  it('should completely replace provider when workspace defines it', () => {
     const userConfig: ConfigFile = {
       providers: {
         openrouter: {
+          engine: 'openrouter',
           api_key_keychain_name: 'USER_KEY',
-          api_base: 'https://user.api.com',
+          models: { 'model-a': {}, 'model-b': {}, 'model-c': {} },
         },
       },
     };
     const wsConfig: ConfigFile = {
       providers: {
         openrouter: {
-          api_base: 'https://workspace.api.com',
+          engine: 'openrouter',
+          api_key_keychain_name: 'WS_KEY',
+          models: { 'model-a': {} },
         },
       },
     };
 
     const result = mergeConfigs(userConfig, wsConfig);
 
-    expect(result.providers!.openrouter.api_key_keychain_name).toBe('USER_KEY');
-    expect(result.providers!.openrouter.api_base).toBe('https://workspace.api.com');
+    // Workspace completely replaces the provider
+    expect(result.providers!.openrouter.api_key_keychain_name).toBe('WS_KEY');
+    expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a']);
   });
 
-  it('should let workspace enabled_models override user enabled_models via spread', () => {
+  it('should preserve user-only providers untouched', () => {
     const userConfig: ConfigFile = {
       providers: {
-        openrouter: {
-          enabled_models: ['model-a', 'model-b', 'model-c'],
-        },
+        openai: { engine: 'openai', api_key_keychain_name: 'OPENAI_KEY' },
+        anthropic: { engine: 'anthropic', api_key_keychain_name: 'ANTHROPIC_KEY' },
       },
     };
     const wsConfig: ConfigFile = {
       providers: {
-        openrouter: {
-          enabled_models: ['model-a'],
-        },
-      },
-    };
-
-    const result = mergeConfigs(userConfig, wsConfig);
-
-    // With spread (...user, ...ws), the ws enabled_models replaces user's
-    expect(result.providers!.openrouter.enabled_models).toEqual(['model-a']);
-  });
-
-  it('should preserve providers only in user config', () => {
-    const userConfig: ConfigFile = {
-      providers: {
-        openai: { api_key_keychain_name: 'OPENAI_KEY' },
-        anthropic: { api_key_keychain_name: 'ANTHROPIC_KEY' },
-      },
-    };
-    const wsConfig: ConfigFile = {
-      providers: {
-        openai: { api_base: 'https://ws.openai.com' },
+        openai: { engine: 'openai', base_url: 'https://ws.openai.com' },
       },
     };
 
@@ -217,15 +259,15 @@ describe('mergeConfigs', () => {
     expect(result.providers!.anthropic.api_key_keychain_name).toBe('ANTHROPIC_KEY');
   });
 
-  it('should add providers only in workspace config', () => {
+  it('should add workspace-only providers', () => {
     const userConfig: ConfigFile = {
       providers: {
-        openai: { api_key_keychain_name: 'OPENAI_KEY' },
+        openai: { engine: 'openai', api_key_keychain_name: 'KEY' },
       },
     };
     const wsConfig: ConfigFile = {
       providers: {
-        ollama: { api_base: 'http://localhost:11434' },
+        ollama: { engine: 'ollama', base_url: 'http://localhost:11434' },
       },
     };
 
@@ -233,7 +275,7 @@ describe('mergeConfigs', () => {
 
     expect(result.providers!.openai).toBeDefined();
     expect(result.providers!.ollama).toBeDefined();
-    expect(result.providers!.ollama.api_base).toBe('http://localhost:11434');
+    expect(result.providers!.ollama.engine).toBe('ollama');
   });
 });
 
@@ -244,7 +286,8 @@ describe('mergeMultipleWorkspaceConfigs', () => {
     setUserConfig({
       providers: {
         openrouter: {
-          enabled_models: ['model-a', 'model-b'],
+          engine: 'openrouter',
+          models: { 'model-a': {}, 'model-b': {} },
           api_key_keychain_name: 'KEY',
         },
       },
@@ -252,88 +295,16 @@ describe('mergeMultipleWorkspaceConfigs', () => {
 
     const result = mergeMultipleWorkspaceConfigs([]);
 
-    expect(result.providers!.openrouter.enabled_models).toEqual(['model-a', 'model-b']);
+    expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a', 'model-b']);
   });
 
-  it('should include workspace enabled_models in result', () => {
+  it('should use workspace models (provider-level replacement)', () => {
     setUserConfig({
       providers: {
         openrouter: {
-          enabled_models: ['model-a'],
+          engine: 'openrouter',
+          models: { 'model-a': {}, 'model-b': {}, 'model-c': {} },
           api_key_keychain_name: 'KEY',
-        },
-      },
-    });
-
-    const wsDir = createWorkspace('ws1', {
-      providers: {
-        openrouter: {
-          enabled_models: ['model-a', 'model-b'],
-          api_key_keychain_name: 'KEY',
-        },
-      },
-    });
-
-    const result = mergeMultipleWorkspaceConfigs([wsDir]);
-
-    expect(result.providers!.openrouter.enabled_models).toBeDefined();
-    const models = result.providers!.openrouter.enabled_models!;
-    expect(models).toContain('model-a');
-    expect(models).toContain('model-b');
-  });
-
-  /**
-   * BUG-EXPOSING TEST: User's actual scenario
-   *
-   * User config:
-   *   openrouter:
-   *     enabled_models: [claude-opus-4.5, claude-opus-4.6]
-   *     api_key_keychain_name: OPENROUTER_API_KEY
-   *
-   * Workspace config (identical):
-   *   openrouter:
-   *     enabled_models: [claude-opus-4.5, claude-opus-4.6]
-   *     api_key_keychain_name: OPENROUTER_API_KEY
-   *
-   * Expected: merged config should have enabled_models = [claude-opus-4.5, claude-opus-4.6]
-   */
-  it('should preserve enabled_models when user and workspace configs are identical', () => {
-    const sharedConfig: ConfigFile = {
-      providers: {
-        openrouter: {
-          enabled_models: [
-            'openrouter/anthropic/claude-opus-4.5',
-            'openrouter/anthropic/claude-opus-4.6',
-          ],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
-      },
-    };
-
-    setUserConfig(sharedConfig);
-    const wsDir = createWorkspace('ws', sharedConfig);
-
-    const result = mergeMultipleWorkspaceConfigs([wsDir]);
-
-    expect(result.providers!.openrouter).toBeDefined();
-    expect(result.providers!.openrouter.enabled_models).toEqual([
-      'openrouter/anthropic/claude-opus-4.5',
-      'openrouter/anthropic/claude-opus-4.6',
-    ]);
-  });
-
-  /**
-   * BUG-EXPOSING TEST: User config has NO enabled_models, workspace has 2.
-   *
-   * If the user config has a provider with no enabled_models, and the workspace
-   * adds enabled_models, the merged result should contain enabled_models.
-   */
-  it('should use workspace enabled_models when user config has none', () => {
-    setUserConfig({
-      providers: {
-        openrouter: {
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-          // NO enabled_models
         },
       },
     });
@@ -341,117 +312,61 @@ describe('mergeMultipleWorkspaceConfigs', () => {
     const wsDir = createWorkspace('ws', {
       providers: {
         openrouter: {
-          enabled_models: ['model-a', 'model-b'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
+          engine: 'openrouter',
+          models: { 'model-a': {} },
+          api_key_keychain_name: 'KEY',
         },
       },
     });
 
     const result = mergeMultipleWorkspaceConfigs([wsDir]);
 
-    expect(result.providers!.openrouter.enabled_models).toBeDefined();
-    expect(result.providers!.openrouter.enabled_models).toEqual(['model-a', 'model-b']);
-  });
-
-  /**
-   * BUG-EXPOSING TEST: Provider-level replacement semantics.
-   *
-   * User config: openrouter has enabled_models [A, B, C]
-   * Workspace:   openrouter has enabled_models [A]
-   *
-   * With provider-level replacement, workspace should win: [A]
-   * With union semantics (current), result would be [A, B, C]
-   *
-   * The user's desired behavior is provider-level replacement.
-   * This test documents the DESIRED behavior (workspace wins).
-   */
-  it('should use workspace enabled_models (provider-level replacement, not union)', () => {
-    setUserConfig({
-      providers: {
-        openrouter: {
-          enabled_models: ['model-a', 'model-b', 'model-c'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
-      },
-    });
-
-    const wsDir = createWorkspace('ws', {
-      providers: {
-        openrouter: {
-          enabled_models: ['model-a'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
-      },
-    });
-
-    const result = mergeMultipleWorkspaceConfigs([wsDir]);
-
-    // DESIRED: workspace replaces user at the provider level
-    // If this test FAILS, it means the union semantics are still in place (bug)
-    expect(result.providers!.openrouter.enabled_models).toEqual(['model-a']);
+    // Workspace replaces user at provider level
+    expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a']);
   });
 
   it('should preserve user-only providers untouched', () => {
     setUserConfig({
       providers: {
-        openrouter: {
-          enabled_models: ['model-a'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
-        openai: {
-          api_key_keychain_name: 'OPENAI_API_KEY',
-        },
+        openrouter: { engine: 'openrouter', models: { 'model-a': {} }, api_key_keychain_name: 'OR_KEY' },
+        openai: { engine: 'openai', api_key_keychain_name: 'OAI_KEY' },
       },
     });
 
     const wsDir = createWorkspace('ws', {
       providers: {
-        openrouter: {
-          enabled_models: ['model-b'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
-        // openai not in workspace
+        openrouter: { engine: 'openrouter', models: { 'model-b': {} }, api_key_keychain_name: 'OR_KEY' },
       },
     });
 
     const result = mergeMultipleWorkspaceConfigs([wsDir]);
 
-    // openai should remain from user config
     expect(result.providers!.openai).toBeDefined();
-    expect(result.providers!.openai.api_key_keychain_name).toBe('OPENAI_API_KEY');
+    expect(result.providers!.openai.api_key_keychain_name).toBe('OAI_KEY');
   });
 
-  it('should union enabled_models across multiple workspaces', () => {
+  it('should union models across multiple workspaces', () => {
     setUserConfig({
       providers: {
-        openrouter: {
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
+        openrouter: { engine: 'openrouter', api_key_keychain_name: 'KEY' },
       },
     });
 
-    const ws1Dir = createWorkspace('ws1', {
+    const ws1 = createWorkspace('ws1', {
       providers: {
-        openrouter: {
-          enabled_models: ['model-a'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
+        openrouter: { engine: 'openrouter', models: { 'model-a': {} }, api_key_keychain_name: 'KEY' },
       },
     });
 
-    const ws2Dir = createWorkspace('ws2', {
+    const ws2 = createWorkspace('ws2', {
       providers: {
-        openrouter: {
-          enabled_models: ['model-b'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
+        openrouter: { engine: 'openrouter', models: { 'model-b': {} }, api_key_keychain_name: 'KEY' },
       },
     });
 
-    const result = mergeMultipleWorkspaceConfigs([ws1Dir, ws2Dir]);
+    const result = mergeMultipleWorkspaceConfigs([ws1, ws2]);
 
-    // With multiple workspaces, enabled_models across workspaces should be unioned
-    const models = result.providers!.openrouter.enabled_models!;
+    const models = Object.keys(result.providers!.openrouter.models!);
     expect(models).toContain('model-a');
     expect(models).toContain('model-b');
     expect(models).toHaveLength(2);
@@ -460,20 +375,77 @@ describe('mergeMultipleWorkspaceConfigs', () => {
   it('should handle workspace with no config file gracefully', () => {
     setUserConfig({
       providers: {
-        openrouter: {
-          enabled_models: ['model-a'],
-          api_key_keychain_name: 'OPENROUTER_API_KEY',
-        },
+        openrouter: { engine: 'openrouter', models: { 'model-a': {} }, api_key_keychain_name: 'KEY' },
       },
     });
 
-    // wsDir exists but has no .config/openllm/config.yaml
     const wsDir = path.join(tmpDir, 'empty-ws');
     fs.mkdirSync(wsDir, { recursive: true });
 
     const result = mergeMultipleWorkspaceConfigs([wsDir]);
 
-    // Should fall back to user config
-    expect(result.providers!.openrouter.enabled_models).toEqual(['model-a']);
+    expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a']);
+  });
+
+  it('should handle old-format workspace configs via migration', () => {
+    setUserConfig({
+      providers: {
+        openrouter: { engine: 'openrouter', models: {}, api_key_keychain_name: 'KEY' },
+      },
+    });
+
+    // Old format workspace config
+    const wsDir = createWorkspace('ws-old', {
+      providers: {
+        openrouter: {
+          enabled_models: ['openrouter/anthropic/claude-opus-4.5'],
+          api_key_keychain_name: 'KEY',
+        },
+      },
+    });
+
+    const result = mergeMultipleWorkspaceConfigs([wsDir]);
+
+    // Migration should convert enabled_models to models map
+    expect(result.providers!.openrouter.models).toBeDefined();
+    expect(result.providers!.openrouter.models!['openrouter/anthropic/claude-opus-4.5']).toEqual({});
+  });
+});
+
+// ── ModelConfig params ───────────────────────────────────────────────────────
+
+describe('ModelConfig', () => {
+  it('should parse all model parameters from YAML', () => {
+    const filePath = writeYaml(path.join(tmpDir, 'params.yaml'), {
+      providers: {
+        'my-provider': {
+          engine: 'openrouter',
+          models: {
+            'custom-model': {
+              model_id: 'openrouter/anthropic/claude-opus-4.6',
+              temperature: 0.3,
+              top_p: 0.8,
+              top_k: 50,
+              max_tokens: 4096,
+              timeout: 30000,
+              system_prompt: 'You are a helpful assistant.',
+              system_prompt_mode: 'prepend',
+            },
+          },
+        },
+      },
+    });
+
+    const config = loadConfigFromPath(filePath);
+    const model = config!.providers!['my-provider'].models!['custom-model'];
+
+    expect(model.model_id).toBe('openrouter/anthropic/claude-opus-4.6');
+    expect(model.temperature).toBe(0.3);
+    expect(model.top_p).toBe(0.8);
+    expect(model.top_k).toBe(50);
+    expect(model.max_tokens).toBe(4096);
+    expect(model.timeout).toBe(30000);
+    expect(model.system_prompt).toBe('You are a helpful assistant.');
+    expect(model.system_prompt_mode).toBe('prepend');
   });
 });

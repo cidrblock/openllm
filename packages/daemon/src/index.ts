@@ -121,19 +121,40 @@ program
 
 program
   .command('list-providers')
-  .description('List supported providers (for build tooling)')
+  .description('List supported providers/engines (for build tooling)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
-    const { getSupportedProviders, getProviderDisplayName } = await import('./providers/adapter.js');
-    const providers = getSupportedProviders().map((id: string) => ({
-      id,
-      displayName: getProviderDisplayName(id),
+    const { getEngines } = await import('./providers/adapter.js');
+    const engines = getEngines().map((e) => ({
+      id: e.id,
+      displayName: e.displayName,
     }));
     if (options.json) {
-      console.log(JSON.stringify(providers));
+      console.log(JSON.stringify(engines));
     } else {
-      for (const p of providers) {
-        console.log(`${p.id}\t${p.displayName}`);
+      for (const e of engines) {
+        console.log(`${e.id}\t${e.displayName}`);
+      }
+    }
+  });
+
+program
+  .command('list-engines')
+  .description('List available engines (API implementations)')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { getEngines } = await import('./providers/adapter.js');
+    const engines = getEngines().map((e) => ({
+      id: e.id,
+      displayName: e.displayName,
+      requiresKey: e.requiresKey,
+      defaultBaseUrl: e.defaultBaseUrl,
+    }));
+    if (options.json) {
+      console.log(JSON.stringify(engines));
+    } else {
+      for (const e of engines) {
+        console.log(`${e.id}\t${e.displayName}\t${e.requiresKey ? 'key-required' : 'keyless'}\t${e.defaultBaseUrl || '-'}`);
       }
     }
   });

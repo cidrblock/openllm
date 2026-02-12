@@ -296,6 +296,9 @@ service OpenLLM {
   // Get provider status (configured, healthy, etc.)
   rpc GetProviderStatus(GetProviderStatusRequest) returns (ProviderStatus);
   
+  // List available engine types (fixed set of API implementations)
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);
+  
   //
   // Tools
   //
@@ -410,6 +413,8 @@ message ChatOptions {
   bool enable_tools = 5;                // Enable tool calling
   int32 max_tool_iterations = 6;        // Max tool call rounds (0 = unlimited)
   repeated string tool_filter = 7;      // Only use these tools (empty = all)
+  optional int32 top_k = 8;            // Top-k sampling (NEW)
+  optional int32 timeout = 9;          // Request timeout in ms (NEW)
 }
 
 message ChatChunk {
@@ -657,7 +662,9 @@ message ListModelsResponse {
 }
 
 message DiscoverModelsRequest {
-  string provider_id = 1;             // Which provider to discover models for
+  string engine_id = 1;               // Which engine to discover models for (was provider_id)
+  optional string api_key = 2;        // API key for authenticated discovery
+  optional string base_url = 3;       // Custom base URL for discovery
 }
 
 message DiscoverModelsResponse {
@@ -665,12 +672,26 @@ message DiscoverModelsResponse {
 }
 
 message Model {
-  string id = 1;                        // e.g., "openai/gpt-4o"
-  string provider = 2;                  // e.g., "openai"
-  string name = 3;                      // e.g., "gpt-4o"
-  string display_name = 4;              // e.g., "GPT-4o"
+  string id = 1;                        // Composite unique ID: "{provider-id}/{model-name}"
+  string provider = 2;                  // Virtual provider ID (back-reference)
+  string name = 3;                      // Virtual model name (unique within provider)
+  string display_name = 4;              // Human-readable display name
   ModelCapabilities capabilities = 5;
   ModelSource source = 6;               // Direct HTTP or via vscode.lm
+  string engine = 8;                    // Actual engine type (NEW)
+  optional ModelParams params = 9;      // Per-model config params (NEW)
+  string engine_model_id = 10;          // Actual engine model ID sent to API (NEW)
+}
+
+// Per-model parameter configuration (virtual model layer)
+message ModelParams {
+  optional float temperature = 1;
+  optional float top_p = 2;
+  optional int32 max_tokens = 3;
+  optional string system_prompt = 4;    // System prompt text
+  optional string system_prompt_mode = 5; // "prepend" | "replace"
+  optional int32 top_k = 6;
+  optional int32 timeout = 7;           // Request timeout in ms
 }
 
 message ModelCapabilities {
@@ -695,13 +716,15 @@ message ListProvidersResponse {
 }
 
 message Provider {
-  string id = 1;                        // e.g., "openai"
+  string id = 1;                        // Virtual provider name = unique ID
   string display_name = 2;
   bool configured = 3;                  // Has API key / is usable
   bool healthy = 4;                     // Last health check passed
   ProviderType provider_type = 5;
   bool requires_key = 6;               // Whether this provider needs an API key
-  optional string default_base_url = 7; // Default API base URL (from multi-llm-ts)
+  optional string default_base_url = 7; // Default API base URL (from engine metadata)
+  string engine = 8;                    // Actual engine type (NEW)
+  optional string base_url = 9;         // Configured base URL override (NEW)
 }
 
 enum ProviderType {
@@ -721,6 +744,21 @@ message ProviderStatus {
   bool healthy = 3;
   optional string error = 4;
   Timestamp last_check = 5;
+}
+
+// Engine = actual API implementation from multi-llm-ts (fixed set)
+message ListEnginesRequest {}
+
+message ListEnginesResponse {
+  repeated Engine engines = 1;
+}
+
+message Engine {
+  string id = 1;                        // Engine type identifier (e.g., "openrouter")
+  string display_name = 2;             // Human-readable name (e.g., "OpenRouter")
+  bool requires_key = 3;               // Whether this engine needs an API key
+  optional string default_base_url = 4; // Default API base URL
+  optional string default_env_var = 5;  // Default environment variable for API key
 }
 
 //

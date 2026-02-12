@@ -391,7 +391,7 @@ class SessionChatRequest(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., message: _Optional[_Union[Message, _Mapping]] = ..., options: _Optional[_Union[ChatOptions, _Mapping]] = ...) -> None: ...
 
 class ChatOptions(_message.Message):
-    __slots__ = ("temperature", "max_tokens", "top_p", "stop", "enable_tools", "max_tool_iterations", "tool_filter")
+    __slots__ = ("temperature", "max_tokens", "top_p", "stop", "enable_tools", "max_tool_iterations", "tool_filter", "top_k", "timeout")
     TEMPERATURE_FIELD_NUMBER: _ClassVar[int]
     MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
     TOP_P_FIELD_NUMBER: _ClassVar[int]
@@ -399,6 +399,8 @@ class ChatOptions(_message.Message):
     ENABLE_TOOLS_FIELD_NUMBER: _ClassVar[int]
     MAX_TOOL_ITERATIONS_FIELD_NUMBER: _ClassVar[int]
     TOOL_FILTER_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     temperature: float
     max_tokens: int
     top_p: float
@@ -406,7 +408,9 @@ class ChatOptions(_message.Message):
     enable_tools: bool
     max_tool_iterations: int
     tool_filter: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, temperature: _Optional[float] = ..., max_tokens: _Optional[int] = ..., top_p: _Optional[float] = ..., stop: _Optional[_Iterable[str]] = ..., enable_tools: bool = ..., max_tool_iterations: _Optional[int] = ..., tool_filter: _Optional[_Iterable[str]] = ...) -> None: ...
+    top_k: int
+    timeout: int
+    def __init__(self, temperature: _Optional[float] = ..., max_tokens: _Optional[int] = ..., top_p: _Optional[float] = ..., stop: _Optional[_Iterable[str]] = ..., enable_tools: bool = ..., max_tool_iterations: _Optional[int] = ..., tool_filter: _Optional[_Iterable[str]] = ..., top_k: _Optional[int] = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class ChatChunk(_message.Message):
     __slots__ = ("text", "tool_call", "tool_result", "prompt", "usage", "error", "done")
@@ -745,10 +749,14 @@ class ListModelsResponse(_message.Message):
     def __init__(self, models: _Optional[_Iterable[_Union[Model, _Mapping]]] = ...) -> None: ...
 
 class DiscoverModelsRequest(_message.Message):
-    __slots__ = ("provider_id",)
-    PROVIDER_ID_FIELD_NUMBER: _ClassVar[int]
-    provider_id: str
-    def __init__(self, provider_id: _Optional[str] = ...) -> None: ...
+    __slots__ = ("engine_id", "api_key", "base_url")
+    ENGINE_ID_FIELD_NUMBER: _ClassVar[int]
+    API_KEY_FIELD_NUMBER: _ClassVar[int]
+    BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    engine_id: str
+    api_key: str
+    base_url: str
+    def __init__(self, engine_id: _Optional[str] = ..., api_key: _Optional[str] = ..., base_url: _Optional[str] = ...) -> None: ...
 
 class DiscoverModelsResponse(_message.Message):
     __slots__ = ("models",)
@@ -757,20 +765,44 @@ class DiscoverModelsResponse(_message.Message):
     def __init__(self, models: _Optional[_Iterable[_Union[Model, _Mapping]]] = ...) -> None: ...
 
 class Model(_message.Message):
-    __slots__ = ("id", "provider", "name", "display_name", "capabilities", "source")
+    __slots__ = ("id", "provider", "name", "display_name", "capabilities", "source", "engine", "params", "engine_model_id")
     ID_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
+    ENGINE_FIELD_NUMBER: _ClassVar[int]
+    PARAMS_FIELD_NUMBER: _ClassVar[int]
+    ENGINE_MODEL_ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     provider: str
     name: str
     display_name: str
     capabilities: ModelCapabilities
     source: ModelSource
-    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., name: _Optional[str] = ..., display_name: _Optional[str] = ..., capabilities: _Optional[_Union[ModelCapabilities, _Mapping]] = ..., source: _Optional[_Union[ModelSource, str]] = ...) -> None: ...
+    engine: str
+    params: ModelParams
+    engine_model_id: str
+    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., name: _Optional[str] = ..., display_name: _Optional[str] = ..., capabilities: _Optional[_Union[ModelCapabilities, _Mapping]] = ..., source: _Optional[_Union[ModelSource, str]] = ..., engine: _Optional[str] = ..., params: _Optional[_Union[ModelParams, _Mapping]] = ..., engine_model_id: _Optional[str] = ...) -> None: ...
+
+class ModelParams(_message.Message):
+    __slots__ = ("temperature", "top_p", "max_tokens", "system_prompt", "system_prompt_mode", "top_k", "timeout")
+    TEMPERATURE_FIELD_NUMBER: _ClassVar[int]
+    TOP_P_FIELD_NUMBER: _ClassVar[int]
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    SYSTEM_PROMPT_FIELD_NUMBER: _ClassVar[int]
+    SYSTEM_PROMPT_MODE_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    temperature: float
+    top_p: float
+    max_tokens: int
+    system_prompt: str
+    system_prompt_mode: str
+    top_k: int
+    timeout: int
+    def __init__(self, temperature: _Optional[float] = ..., top_p: _Optional[float] = ..., max_tokens: _Optional[int] = ..., system_prompt: _Optional[str] = ..., system_prompt_mode: _Optional[str] = ..., top_k: _Optional[int] = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class ModelCapabilities(_message.Message):
     __slots__ = ("supports_streaming", "supports_tools", "supports_vision", "context_window")
@@ -797,7 +829,7 @@ class ListProvidersResponse(_message.Message):
     def __init__(self, providers: _Optional[_Iterable[_Union[Provider, _Mapping]]] = ...) -> None: ...
 
 class Provider(_message.Message):
-    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type", "requires_key", "default_base_url")
+    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type", "requires_key", "default_base_url", "engine", "base_url")
     ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     CONFIGURED_FIELD_NUMBER: _ClassVar[int]
@@ -805,6 +837,8 @@ class Provider(_message.Message):
     PROVIDER_TYPE_FIELD_NUMBER: _ClassVar[int]
     REQUIRES_KEY_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    ENGINE_FIELD_NUMBER: _ClassVar[int]
+    BASE_URL_FIELD_NUMBER: _ClassVar[int]
     id: str
     display_name: str
     configured: bool
@@ -812,7 +846,9 @@ class Provider(_message.Message):
     provider_type: ProviderType
     requires_key: bool
     default_base_url: str
-    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ..., requires_key: bool = ..., default_base_url: _Optional[str] = ...) -> None: ...
+    engine: str
+    base_url: str
+    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ..., requires_key: bool = ..., default_base_url: _Optional[str] = ..., engine: _Optional[str] = ..., base_url: _Optional[str] = ...) -> None: ...
 
 class GetProviderStatusRequest(_message.Message):
     __slots__ = ("provider_id",)
@@ -833,6 +869,30 @@ class ProviderStatus(_message.Message):
     error: str
     last_check: Timestamp
     def __init__(self, provider_id: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., error: _Optional[str] = ..., last_check: _Optional[_Union[Timestamp, _Mapping]] = ...) -> None: ...
+
+class ListEnginesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListEnginesResponse(_message.Message):
+    __slots__ = ("engines",)
+    ENGINES_FIELD_NUMBER: _ClassVar[int]
+    engines: _containers.RepeatedCompositeFieldContainer[Engine]
+    def __init__(self, engines: _Optional[_Iterable[_Union[Engine, _Mapping]]] = ...) -> None: ...
+
+class Engine(_message.Message):
+    __slots__ = ("id", "display_name", "requires_key", "default_base_url", "default_env_var")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    REQUIRES_KEY_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_BASE_URL_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_ENV_VAR_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    display_name: str
+    requires_key: bool
+    default_base_url: str
+    default_env_var: str
+    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., requires_key: bool = ..., default_base_url: _Optional[str] = ..., default_env_var: _Optional[str] = ...) -> None: ...
 
 class ListToolsRequest(_message.Message):
     __slots__ = ("server_filter",)

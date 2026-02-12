@@ -21,7 +21,20 @@
  *   model = "mock/error:timeout"  → sends to mock provider, throws "timeout"
  */
 
-import type { ModelInfo } from '../state.js';
+/**
+ * Basic model info returned by getMockModels().
+ * This is a simple shape that adapter.ts maps to DiscoveredModel.
+ */
+export interface MockModelInfo {
+  id: string;
+  provider: string;
+  displayName: string;
+  contextWindow: number;
+  capabilities?: {
+    supportsTools?: boolean;
+    supportsVision?: boolean;
+  };
+}
 
 /**
  * Default chunk size for splitting text into streaming chunks
@@ -173,7 +186,7 @@ export async function* mockStreamChat(
 /**
  * Return the list of mock models (static, no API call needed).
  */
-export function getMockModels(): ModelInfo[] {
+export function getMockModels(): MockModelInfo[] {
   return [
     {
       id: 'mock/echo',

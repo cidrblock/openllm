@@ -615,6 +615,12 @@ export interface ChatOptions {
   maxToolIterations: number;
   /** Only use these tools (empty = all) */
   toolFilter: string[];
+  /** Top-k sampling (NEW) */
+  topK?:
+    | number
+    | undefined;
+  /** Request timeout in ms (NEW) */
+  timeout?: number | undefined;
 }
 
 export interface ChatChunk {
@@ -868,8 +874,14 @@ export interface ListModelsResponse {
 }
 
 export interface DiscoverModelsRequest {
-  /** Which provider to discover models for */
-  providerId: string;
+  /** Which engine to discover models for (was provider_id) */
+  engineId: string;
+  /** API key for authenticated discovery */
+  apiKey?:
+    | string
+    | undefined;
+  /** Custom base URL for discovery */
+  baseUrl?: string | undefined;
 }
 
 export interface DiscoverModelsResponse {
@@ -877,19 +889,47 @@ export interface DiscoverModelsResponse {
 }
 
 export interface Model {
-  /** e.g., "openai/gpt-4o" */
+  /** Composite unique ID: "{provider-id}/{model-name}" */
   id: string;
-  /** e.g., "openai" */
+  /** Virtual provider ID (back-reference) */
   provider: string;
-  /** e.g., "gpt-4o" */
+  /** Virtual model name (unique within provider) */
   name: string;
-  /** e.g., "GPT-4o" */
+  /** Human-readable display name */
   displayName: string;
   capabilities:
     | ModelCapabilities
     | undefined;
   /** Direct HTTP or via vscode.lm */
   source: ModelSource;
+  /** Actual engine type (NEW) */
+  engine: string;
+  /** Per-model config params (NEW) */
+  params?:
+    | ModelParams
+    | undefined;
+  /** Actual engine model ID sent to API (NEW) */
+  engineModelId: string;
+}
+
+/** Per-model parameter configuration (virtual model layer) */
+export interface ModelParams {
+  temperature?: number | undefined;
+  topP?: number | undefined;
+  maxTokens?:
+    | number
+    | undefined;
+  /** System prompt text */
+  systemPrompt?:
+    | string
+    | undefined;
+  /** "prepend" | "replace" */
+  systemPromptMode?: string | undefined;
+  topK?:
+    | number
+    | undefined;
+  /** Request timeout in ms */
+  timeout?: number | undefined;
 }
 
 export interface ModelCapabilities {
@@ -909,7 +949,7 @@ export interface ListProvidersResponse {
 }
 
 export interface Provider {
-  /** e.g., "openai" */
+  /** Virtual provider name = unique ID */
   id: string;
   displayName: string;
   /** Has API key / is usable */
@@ -919,8 +959,14 @@ export interface Provider {
   providerType: ProviderType;
   /** Whether this provider needs an API key */
   requiresKey: boolean;
-  /** Default API base URL (from multi-llm-ts) */
-  defaultBaseUrl?: string | undefined;
+  /** Default API base URL (from engine metadata) */
+  defaultBaseUrl?:
+    | string
+    | undefined;
+  /** Actual engine type (NEW) */
+  engine: string;
+  /** Configured base URL override (NEW) */
+  baseUrl?: string | undefined;
 }
 
 export interface GetProviderStatusRequest {
@@ -933,6 +979,29 @@ export interface ProviderStatus {
   healthy: boolean;
   error?: string | undefined;
   lastCheck: Timestamp | undefined;
+}
+
+/** Engine = actual API implementation from multi-llm-ts (fixed set) */
+export interface ListEnginesRequest {
+}
+
+export interface ListEnginesResponse {
+  engines: Engine[];
+}
+
+export interface Engine {
+  /** Engine type identifier (e.g., "openrouter") */
+  id: string;
+  /** Human-readable name (e.g., "OpenRouter") */
+  displayName: string;
+  /** Whether this engine needs an API key */
+  requiresKey: boolean;
+  /** Default API base URL */
+  defaultBaseUrl?:
+    | string
+    | undefined;
+  /** Default environment variable for API key */
+  defaultEnvVar?: string | undefined;
 }
 
 export interface ListToolsRequest {
@@ -4272,6 +4341,8 @@ function createBaseChatOptions(): ChatOptions {
     enableTools: false,
     maxToolIterations: 0,
     toolFilter: [],
+    topK: undefined,
+    timeout: undefined,
   };
 }
 
@@ -4297,6 +4368,12 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     }
     for (const v of message.toolFilter) {
       writer.uint32(58).string(v!);
+    }
+    if (message.topK !== undefined) {
+      writer.uint32(64).int32(message.topK);
+    }
+    if (message.timeout !== undefined) {
+      writer.uint32(72).int32(message.timeout);
     }
     return writer;
   },
@@ -4364,6 +4441,22 @@ export const ChatOptions: MessageFns<ChatOptions> = {
           message.toolFilter.push(reader.string());
           continue;
         }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.topK = reader.int32();
+          continue;
+        }
+        case 9: {
+          if (tag !== 72) {
+            break;
+          }
+
+          message.timeout = reader.int32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4402,6 +4495,12 @@ export const ChatOptions: MessageFns<ChatOptions> = {
         : globalThis.Array.isArray(object?.tool_filter)
         ? object.tool_filter.map((e: any) => globalThis.String(e))
         : [],
+      topK: isSet(object.topK)
+        ? globalThis.Number(object.topK)
+        : isSet(object.top_k)
+        ? globalThis.Number(object.top_k)
+        : undefined,
+      timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
     };
   },
 
@@ -4428,6 +4527,12 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     if (message.toolFilter?.length) {
       obj.toolFilter = message.toolFilter;
     }
+    if (message.topK !== undefined) {
+      obj.topK = Math.round(message.topK);
+    }
+    if (message.timeout !== undefined) {
+      obj.timeout = Math.round(message.timeout);
+    }
     return obj;
   },
 
@@ -4443,6 +4548,8 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     message.enableTools = object.enableTools ?? false;
     message.maxToolIterations = object.maxToolIterations ?? 0;
     message.toolFilter = object.toolFilter?.map((e) => e) || [];
+    message.topK = object.topK ?? undefined;
+    message.timeout = object.timeout ?? undefined;
     return message;
   },
 };
@@ -7904,13 +8011,19 @@ export const ListModelsResponse: MessageFns<ListModelsResponse> = {
 };
 
 function createBaseDiscoverModelsRequest(): DiscoverModelsRequest {
-  return { providerId: "" };
+  return { engineId: "", apiKey: undefined, baseUrl: undefined };
 }
 
 export const DiscoverModelsRequest: MessageFns<DiscoverModelsRequest> = {
   encode(message: DiscoverModelsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.providerId !== "") {
-      writer.uint32(10).string(message.providerId);
+    if (message.engineId !== "") {
+      writer.uint32(10).string(message.engineId);
+    }
+    if (message.apiKey !== undefined) {
+      writer.uint32(18).string(message.apiKey);
+    }
+    if (message.baseUrl !== undefined) {
+      writer.uint32(26).string(message.baseUrl);
     }
     return writer;
   },
@@ -7927,7 +8040,23 @@ export const DiscoverModelsRequest: MessageFns<DiscoverModelsRequest> = {
             break;
           }
 
-          message.providerId = reader.string();
+          message.engineId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.apiKey = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.baseUrl = reader.string();
           continue;
         }
       }
@@ -7941,18 +8070,34 @@ export const DiscoverModelsRequest: MessageFns<DiscoverModelsRequest> = {
 
   fromJSON(object: any): DiscoverModelsRequest {
     return {
-      providerId: isSet(object.providerId)
-        ? globalThis.String(object.providerId)
-        : isSet(object.provider_id)
-        ? globalThis.String(object.provider_id)
+      engineId: isSet(object.engineId)
+        ? globalThis.String(object.engineId)
+        : isSet(object.engine_id)
+        ? globalThis.String(object.engine_id)
         : "",
+      apiKey: isSet(object.apiKey)
+        ? globalThis.String(object.apiKey)
+        : isSet(object.api_key)
+        ? globalThis.String(object.api_key)
+        : undefined,
+      baseUrl: isSet(object.baseUrl)
+        ? globalThis.String(object.baseUrl)
+        : isSet(object.base_url)
+        ? globalThis.String(object.base_url)
+        : undefined,
     };
   },
 
   toJSON(message: DiscoverModelsRequest): unknown {
     const obj: any = {};
-    if (message.providerId !== "") {
-      obj.providerId = message.providerId;
+    if (message.engineId !== "") {
+      obj.engineId = message.engineId;
+    }
+    if (message.apiKey !== undefined) {
+      obj.apiKey = message.apiKey;
+    }
+    if (message.baseUrl !== undefined) {
+      obj.baseUrl = message.baseUrl;
     }
     return obj;
   },
@@ -7962,7 +8107,9 @@ export const DiscoverModelsRequest: MessageFns<DiscoverModelsRequest> = {
   },
   fromPartial(object: DeepPartial<DiscoverModelsRequest>): DiscoverModelsRequest {
     const message = createBaseDiscoverModelsRequest();
-    message.providerId = object.providerId ?? "";
+    message.engineId = object.engineId ?? "";
+    message.apiKey = object.apiKey ?? undefined;
+    message.baseUrl = object.baseUrl ?? undefined;
     return message;
   },
 };
@@ -8026,7 +8173,17 @@ export const DiscoverModelsResponse: MessageFns<DiscoverModelsResponse> = {
 };
 
 function createBaseModel(): Model {
-  return { id: "", provider: "", name: "", displayName: "", capabilities: undefined, source: 0 };
+  return {
+    id: "",
+    provider: "",
+    name: "",
+    displayName: "",
+    capabilities: undefined,
+    source: 0,
+    engine: "",
+    params: undefined,
+    engineModelId: "",
+  };
 }
 
 export const Model: MessageFns<Model> = {
@@ -8048,6 +8205,15 @@ export const Model: MessageFns<Model> = {
     }
     if (message.source !== 0) {
       writer.uint32(48).int32(message.source);
+    }
+    if (message.engine !== "") {
+      writer.uint32(66).string(message.engine);
+    }
+    if (message.params !== undefined) {
+      ModelParams.encode(message.params, writer.uint32(74).fork()).join();
+    }
+    if (message.engineModelId !== "") {
+      writer.uint32(82).string(message.engineModelId);
     }
     return writer;
   },
@@ -8107,6 +8273,30 @@ export const Model: MessageFns<Model> = {
           message.source = reader.int32() as any;
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.engine = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.params = ModelParams.decode(reader, reader.uint32());
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.engineModelId = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8128,6 +8318,13 @@ export const Model: MessageFns<Model> = {
         : "",
       capabilities: isSet(object.capabilities) ? ModelCapabilities.fromJSON(object.capabilities) : undefined,
       source: isSet(object.source) ? modelSourceFromJSON(object.source) : 0,
+      engine: isSet(object.engine) ? globalThis.String(object.engine) : "",
+      params: isSet(object.params) ? ModelParams.fromJSON(object.params) : undefined,
+      engineModelId: isSet(object.engineModelId)
+        ? globalThis.String(object.engineModelId)
+        : isSet(object.engine_model_id)
+        ? globalThis.String(object.engine_model_id)
+        : "",
     };
   },
 
@@ -8151,6 +8348,15 @@ export const Model: MessageFns<Model> = {
     if (message.source !== 0) {
       obj.source = modelSourceToJSON(message.source);
     }
+    if (message.engine !== "") {
+      obj.engine = message.engine;
+    }
+    if (message.params !== undefined) {
+      obj.params = ModelParams.toJSON(message.params);
+    }
+    if (message.engineModelId !== "") {
+      obj.engineModelId = message.engineModelId;
+    }
     return obj;
   },
 
@@ -8167,6 +8373,195 @@ export const Model: MessageFns<Model> = {
       ? ModelCapabilities.fromPartial(object.capabilities)
       : undefined;
     message.source = object.source ?? 0;
+    message.engine = object.engine ?? "";
+    message.params = (object.params !== undefined && object.params !== null)
+      ? ModelParams.fromPartial(object.params)
+      : undefined;
+    message.engineModelId = object.engineModelId ?? "";
+    return message;
+  },
+};
+
+function createBaseModelParams(): ModelParams {
+  return {
+    temperature: undefined,
+    topP: undefined,
+    maxTokens: undefined,
+    systemPrompt: undefined,
+    systemPromptMode: undefined,
+    topK: undefined,
+    timeout: undefined,
+  };
+}
+
+export const ModelParams: MessageFns<ModelParams> = {
+  encode(message: ModelParams, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.temperature !== undefined) {
+      writer.uint32(13).float(message.temperature);
+    }
+    if (message.topP !== undefined) {
+      writer.uint32(21).float(message.topP);
+    }
+    if (message.maxTokens !== undefined) {
+      writer.uint32(24).int32(message.maxTokens);
+    }
+    if (message.systemPrompt !== undefined) {
+      writer.uint32(34).string(message.systemPrompt);
+    }
+    if (message.systemPromptMode !== undefined) {
+      writer.uint32(42).string(message.systemPromptMode);
+    }
+    if (message.topK !== undefined) {
+      writer.uint32(48).int32(message.topK);
+    }
+    if (message.timeout !== undefined) {
+      writer.uint32(56).int32(message.timeout);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ModelParams {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseModelParams();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 13) {
+            break;
+          }
+
+          message.temperature = reader.float();
+          continue;
+        }
+        case 2: {
+          if (tag !== 21) {
+            break;
+          }
+
+          message.topP = reader.float();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.maxTokens = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.systemPrompt = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.systemPromptMode = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.topK = reader.int32();
+          continue;
+        }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.timeout = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ModelParams {
+    return {
+      temperature: isSet(object.temperature) ? globalThis.Number(object.temperature) : undefined,
+      topP: isSet(object.topP)
+        ? globalThis.Number(object.topP)
+        : isSet(object.top_p)
+        ? globalThis.Number(object.top_p)
+        : undefined,
+      maxTokens: isSet(object.maxTokens)
+        ? globalThis.Number(object.maxTokens)
+        : isSet(object.max_tokens)
+        ? globalThis.Number(object.max_tokens)
+        : undefined,
+      systemPrompt: isSet(object.systemPrompt)
+        ? globalThis.String(object.systemPrompt)
+        : isSet(object.system_prompt)
+        ? globalThis.String(object.system_prompt)
+        : undefined,
+      systemPromptMode: isSet(object.systemPromptMode)
+        ? globalThis.String(object.systemPromptMode)
+        : isSet(object.system_prompt_mode)
+        ? globalThis.String(object.system_prompt_mode)
+        : undefined,
+      topK: isSet(object.topK)
+        ? globalThis.Number(object.topK)
+        : isSet(object.top_k)
+        ? globalThis.Number(object.top_k)
+        : undefined,
+      timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
+    };
+  },
+
+  toJSON(message: ModelParams): unknown {
+    const obj: any = {};
+    if (message.temperature !== undefined) {
+      obj.temperature = message.temperature;
+    }
+    if (message.topP !== undefined) {
+      obj.topP = message.topP;
+    }
+    if (message.maxTokens !== undefined) {
+      obj.maxTokens = Math.round(message.maxTokens);
+    }
+    if (message.systemPrompt !== undefined) {
+      obj.systemPrompt = message.systemPrompt;
+    }
+    if (message.systemPromptMode !== undefined) {
+      obj.systemPromptMode = message.systemPromptMode;
+    }
+    if (message.topK !== undefined) {
+      obj.topK = Math.round(message.topK);
+    }
+    if (message.timeout !== undefined) {
+      obj.timeout = Math.round(message.timeout);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ModelParams>): ModelParams {
+    return ModelParams.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ModelParams>): ModelParams {
+    const message = createBaseModelParams();
+    message.temperature = object.temperature ?? undefined;
+    message.topP = object.topP ?? undefined;
+    message.maxTokens = object.maxTokens ?? undefined;
+    message.systemPrompt = object.systemPrompt ?? undefined;
+    message.systemPromptMode = object.systemPromptMode ?? undefined;
+    message.topK = object.topK ?? undefined;
+    message.timeout = object.timeout ?? undefined;
     return message;
   },
 };
@@ -8430,6 +8825,8 @@ function createBaseProvider(): Provider {
     providerType: 0,
     requiresKey: false,
     defaultBaseUrl: undefined,
+    engine: "",
+    baseUrl: undefined,
   };
 }
 
@@ -8455,6 +8852,12 @@ export const Provider: MessageFns<Provider> = {
     }
     if (message.defaultBaseUrl !== undefined) {
       writer.uint32(58).string(message.defaultBaseUrl);
+    }
+    if (message.engine !== "") {
+      writer.uint32(66).string(message.engine);
+    }
+    if (message.baseUrl !== undefined) {
+      writer.uint32(74).string(message.baseUrl);
     }
     return writer;
   },
@@ -8522,6 +8925,22 @@ export const Provider: MessageFns<Provider> = {
           message.defaultBaseUrl = reader.string();
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.engine = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.baseUrl = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8556,6 +8975,12 @@ export const Provider: MessageFns<Provider> = {
         : isSet(object.default_base_url)
         ? globalThis.String(object.default_base_url)
         : undefined,
+      engine: isSet(object.engine) ? globalThis.String(object.engine) : "",
+      baseUrl: isSet(object.baseUrl)
+        ? globalThis.String(object.baseUrl)
+        : isSet(object.base_url)
+        ? globalThis.String(object.base_url)
+        : undefined,
     };
   },
 
@@ -8582,6 +9007,12 @@ export const Provider: MessageFns<Provider> = {
     if (message.defaultBaseUrl !== undefined) {
       obj.defaultBaseUrl = message.defaultBaseUrl;
     }
+    if (message.engine !== "") {
+      obj.engine = message.engine;
+    }
+    if (message.baseUrl !== undefined) {
+      obj.baseUrl = message.baseUrl;
+    }
     return obj;
   },
 
@@ -8597,6 +9028,8 @@ export const Provider: MessageFns<Provider> = {
     message.providerType = object.providerType ?? 0;
     message.requiresKey = object.requiresKey ?? false;
     message.defaultBaseUrl = object.defaultBaseUrl ?? undefined;
+    message.engine = object.engine ?? "";
+    message.baseUrl = object.baseUrl ?? undefined;
     return message;
   },
 };
@@ -8795,6 +9228,249 @@ export const ProviderStatus: MessageFns<ProviderStatus> = {
     message.lastCheck = (object.lastCheck !== undefined && object.lastCheck !== null)
       ? Timestamp.fromPartial(object.lastCheck)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseListEnginesRequest(): ListEnginesRequest {
+  return {};
+}
+
+export const ListEnginesRequest: MessageFns<ListEnginesRequest> = {
+  encode(_: ListEnginesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListEnginesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListEnginesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListEnginesRequest {
+    return {};
+  },
+
+  toJSON(_: ListEnginesRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListEnginesRequest>): ListEnginesRequest {
+    return ListEnginesRequest.fromPartial(base ?? {});
+  },
+  fromPartial(_: DeepPartial<ListEnginesRequest>): ListEnginesRequest {
+    const message = createBaseListEnginesRequest();
+    return message;
+  },
+};
+
+function createBaseListEnginesResponse(): ListEnginesResponse {
+  return { engines: [] };
+}
+
+export const ListEnginesResponse: MessageFns<ListEnginesResponse> = {
+  encode(message: ListEnginesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.engines) {
+      Engine.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListEnginesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListEnginesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.engines.push(Engine.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListEnginesResponse {
+    return {
+      engines: globalThis.Array.isArray(object?.engines) ? object.engines.map((e: any) => Engine.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ListEnginesResponse): unknown {
+    const obj: any = {};
+    if (message.engines?.length) {
+      obj.engines = message.engines.map((e) => Engine.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListEnginesResponse>): ListEnginesResponse {
+    return ListEnginesResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ListEnginesResponse>): ListEnginesResponse {
+    const message = createBaseListEnginesResponse();
+    message.engines = object.engines?.map((e) => Engine.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseEngine(): Engine {
+  return { id: "", displayName: "", requiresKey: false, defaultBaseUrl: undefined, defaultEnvVar: undefined };
+}
+
+export const Engine: MessageFns<Engine> = {
+  encode(message: Engine, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.id !== "") {
+      writer.uint32(10).string(message.id);
+    }
+    if (message.displayName !== "") {
+      writer.uint32(18).string(message.displayName);
+    }
+    if (message.requiresKey !== false) {
+      writer.uint32(24).bool(message.requiresKey);
+    }
+    if (message.defaultBaseUrl !== undefined) {
+      writer.uint32(34).string(message.defaultBaseUrl);
+    }
+    if (message.defaultEnvVar !== undefined) {
+      writer.uint32(42).string(message.defaultEnvVar);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Engine {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEngine();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.id = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.displayName = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.requiresKey = reader.bool();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.defaultBaseUrl = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.defaultEnvVar = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Engine {
+    return {
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
+      displayName: isSet(object.displayName)
+        ? globalThis.String(object.displayName)
+        : isSet(object.display_name)
+        ? globalThis.String(object.display_name)
+        : "",
+      requiresKey: isSet(object.requiresKey)
+        ? globalThis.Boolean(object.requiresKey)
+        : isSet(object.requires_key)
+        ? globalThis.Boolean(object.requires_key)
+        : false,
+      defaultBaseUrl: isSet(object.defaultBaseUrl)
+        ? globalThis.String(object.defaultBaseUrl)
+        : isSet(object.default_base_url)
+        ? globalThis.String(object.default_base_url)
+        : undefined,
+      defaultEnvVar: isSet(object.defaultEnvVar)
+        ? globalThis.String(object.defaultEnvVar)
+        : isSet(object.default_env_var)
+        ? globalThis.String(object.default_env_var)
+        : undefined,
+    };
+  },
+
+  toJSON(message: Engine): unknown {
+    const obj: any = {};
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
+    if (message.displayName !== "") {
+      obj.displayName = message.displayName;
+    }
+    if (message.requiresKey !== false) {
+      obj.requiresKey = message.requiresKey;
+    }
+    if (message.defaultBaseUrl !== undefined) {
+      obj.defaultBaseUrl = message.defaultBaseUrl;
+    }
+    if (message.defaultEnvVar !== undefined) {
+      obj.defaultEnvVar = message.defaultEnvVar;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<Engine>): Engine {
+    return Engine.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<Engine>): Engine {
+    const message = createBaseEngine();
+    message.id = object.id ?? "";
+    message.displayName = object.displayName ?? "";
+    message.requiresKey = object.requiresKey ?? false;
+    message.defaultBaseUrl = object.defaultBaseUrl ?? undefined;
+    message.defaultEnvVar = object.defaultEnvVar ?? undefined;
     return message;
   },
 };
@@ -13312,6 +13988,15 @@ export const OpenLLMDefinition = {
       responseStream: false,
       options: {},
     },
+    /** List available engine types (fixed set of API implementations) */
+    listEngines: {
+      name: "ListEngines",
+      requestType: ListEnginesRequest,
+      requestStream: false,
+      responseType: ListEnginesResponse,
+      responseStream: false,
+      options: {},
+    },
     /** List available tools (from MCP servers) */
     listTools: {
       name: "ListTools",
@@ -13552,6 +14237,11 @@ export interface OpenLLMServiceImplementation<CallContextExt = {}> {
     request: GetProviderStatusRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ProviderStatus>>;
+  /** List available engine types (fixed set of API implementations) */
+  listEngines(
+    request: ListEnginesRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<ListEnginesResponse>>;
   /** List available tools (from MCP servers) */
   listTools(request: ListToolsRequest, context: CallContext & CallContextExt): Promise<DeepPartial<ListToolsResponse>>;
   /** Execute a tool directly */
@@ -13679,6 +14369,11 @@ export interface OpenLLMClient<CallOptionsExt = {}> {
     request: DeepPartial<GetProviderStatusRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ProviderStatus>;
+  /** List available engine types (fixed set of API implementations) */
+  listEngines(
+    request: DeepPartial<ListEnginesRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<ListEnginesResponse>;
   /** List available tools (from MCP servers) */
   listTools(request: DeepPartial<ListToolsRequest>, options?: CallOptions & CallOptionsExt): Promise<ListToolsResponse>;
   /** Execute a tool directly */
