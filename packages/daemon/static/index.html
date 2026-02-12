@@ -501,6 +501,7 @@
                   <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Engine</th>
                   <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Params</th>
                   <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Capabilities</th>
+                  <th style="width: 48px; padding: 0.75rem 0.5rem; border-bottom: 1px solid #d2d2d2;"></th>
                 </tr>
               </thead>
               <tbody>
@@ -513,6 +514,11 @@
                     <td style="padding: 0.5rem 1rem;">
                       <span x-show="model.capabilities?.tools" class="cap-tag tools">Tools</span>
                       <span x-show="model.capabilities?.vision" class="cap-tag vision">Vision</span>
+                    </td>
+                    <td style="padding: 0.5rem 0.5rem; text-align: center;">
+                      <button @click="openModelConfig(model)" title="Configure model parameters"
+                              style="background: none; border: none; cursor: pointer; padding: 4px; color: #6a6e73; font-size: 1rem; line-height: 1; transition: color 0.15s;"
+                              onmouseover="this.style.color='#06c'" onmouseout="this.style.color='#6a6e73'">&#9881;</button>
                     </td>
                   </tr>
                 </template>
@@ -570,8 +576,8 @@
   <div class="modal-backdrop" x-show="wizardOpen" x-cloak @click.self="wizardOpen = false">
     <div class="modal" @click.stop>
       <div class="modal-header">
-        <h2 x-text="wizardStep === 3 && wizardEditingModel ? 'Configure Model' : wizardEditMode ? (wizardStep === 2 ? 'Edit Provider' : 'Select Models') : (wizardStep === 1 ? 'Choose Engine' : wizardStep === 2 ? 'Configure Provider' : 'Select Models')"></h2>
-        <div class="step-indicators">
+        <h2 x-text="wizardFromModelsTab ? 'Configure Model' : (wizardStep === 3 && wizardEditingModel ? 'Configure Model' : wizardEditMode ? (wizardStep === 2 ? 'Edit Provider' : 'Select Models') : (wizardStep === 1 ? 'Choose Engine' : wizardStep === 2 ? 'Configure Provider' : 'Select Models'))"></h2>
+        <div class="step-indicators" x-show="!wizardFromModelsTab">
           <div class="step-dot" x-show="!wizardEditMode" :class="{ active: wizardStep === 1, completed: wizardStep > 1 }"></div>
           <div class="step-dot" :class="{ active: wizardStep === 2, completed: wizardStep > 2 }"></div>
           <div class="step-dot" :class="{ active: wizardStep === 3 }"></div>
@@ -697,9 +703,10 @@
             <template x-if="wizardEditingModel">
               <div>
                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #d2d2d2;">
-                  <button class="btn btn-secondary btn-sm" @click="wizardEditingModel = null" 
+                  <button class="btn btn-secondary btn-sm" 
+                          @click="wizardFromModelsTab ? (wizardOpen = false, wizardFromModelsTab = false, wizardEditingModel = null) : (wizardEditingModel = null)" 
                           style="display: flex; align-items: center; gap: 4px;">
-                    &larr; Back to models
+                    &larr; <span x-text="wizardFromModelsTab ? 'Back to Models tab' : 'Back to models'"></span>
                   </button>
                   <h3 style="margin: 0; font-size: 1rem; font-weight: 600;" x-text="'Configure: ' + wizardEditingModel"></h3>
                 </div>
@@ -841,14 +848,19 @@
       </div>
       
       <div class="modal-footer">
-        <span style="flex: 1; font-size: 0.85rem; color: #6a6e73;" x-show="wizardStep === 3 && !wizardEditingModel"
+        <span style="flex: 1; font-size: 0.85rem; color: #6a6e73;" x-show="wizardStep === 3 && !wizardEditingModel && !wizardFromModelsTab"
               x-text="Object.keys(wizardEnabledModels).length + ' model(s) enabled'"></span>
-        <button class="btn btn-secondary" @click="wizardEditingModel ? (wizardEditingModel = null) : (wizardOpen = false)" 
-                x-text="wizardEditingModel ? '← Back to models' : 'Cancel'"></button>
-        <button class="btn btn-secondary" x-show="wizardStep > 1 && !(wizardEditMode && wizardStep === 2) && !wizardEditingModel" @click="wizardStep--">Back</button>
-        <button class="btn btn-primary" x-show="wizardStep < 3 && !wizardEditingModel" @click="wizardNext()" 
+        <!-- Cancel / Back to models button -->
+        <button class="btn btn-secondary" 
+                @click="wizardFromModelsTab ? (wizardOpen = false, wizardFromModelsTab = false, wizardEditingModel = null) : (wizardEditingModel ? (wizardEditingModel = null) : (wizardOpen = false))" 
+                x-text="wizardFromModelsTab ? (wizardEditingModel ? '← Back to Models tab' : 'Close') : (wizardEditingModel ? '← Back to models' : 'Cancel')"></button>
+        <!-- Back (step navigation) — hidden when from Models tab -->
+        <button class="btn btn-secondary" x-show="!wizardFromModelsTab && wizardStep > 1 && !(wizardEditMode && wizardStep === 2) && !wizardEditingModel" @click="wizardStep--">Back</button>
+        <!-- Next — hidden when from Models tab -->
+        <button class="btn btn-primary" x-show="!wizardFromModelsTab && wizardStep < 3 && !wizardEditingModel" @click="wizardNext()" 
                 :disabled="wizardStep === 1 && !wizardEngine">Next</button>
-        <button class="btn btn-primary" x-show="wizardStep === 3 && !wizardEditingModel" @click="wizardSave()">Save</button>
+        <!-- Save — show in wizard flow (step 3, not editing model) OR from Models tab when editing a model -->
+        <button class="btn btn-primary" x-show="(wizardStep === 3 && !wizardEditingModel && !wizardFromModelsTab) || (wizardFromModelsTab && wizardEditingModel)" @click="wizardSave()">Save</button>
     </div>
   </div>
 
@@ -949,6 +961,7 @@ function dashboard() {
     // ── Edit mode (reuses wizard) ──
     wizardEditMode: false,    // true when editing existing provider (vs creating new)
     wizardEditId: '',         // provider ID being edited
+    wizardFromModelsTab: false,  // true when opened from Models tab (configure icon)
     
     // ── Init ──
     async init() {
@@ -1057,6 +1070,7 @@ function dashboard() {
       this.wizardStep = 1;
       this.wizardEditMode = false;
       this.wizardEditId = '';
+      this.wizardFromModelsTab = false;
       this.wizardEngine = '';
       this.wizardName = '';
       this.wizardDisplayName = '';
@@ -1080,6 +1094,7 @@ function dashboard() {
       this.wizardStep = 2;  // Skip engine selection — go straight to provider config
       this.wizardEditMode = true;
       this.wizardEditId = provId;
+      this.wizardFromModelsTab = false;
       this.wizardEngine = cfg.engine || provId;
       this.wizardName = provId;
       this.wizardDisplayName = cfg.display_name || '';
@@ -1095,6 +1110,25 @@ function dashboard() {
       this.wizardLeftSelected = new Set();
       this.wizardRightSelected = new Set();
       this.wizardEditingModel = null;
+    },
+    
+    async openModelConfig(model) {
+      // Reuse openEditWizard to load the provider's config into wizard state
+      await this.openEditWizard(model.provider);
+      // Jump directly to step 3 model config view
+      this.wizardStep = 3;
+      // The model's virtual name is model.name; find it in the enabled models
+      this.wizardEditingModel = model.name;
+      this.wizardFromModelsTab = true;
+      // Discover models so the dual-list has data if user clicks "Back to models"
+      try {
+        const params = new URLSearchParams();
+        params.set('providerId', model.provider);
+        const url = `/api/discover-models/${encodeURIComponent(model.engine)}?${params}`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        this.wizardDiscoveredModels = data.models || [];
+      } catch (e) { console.error('Discovery failed:', e); }
     },
     
     async wizardNext() {
