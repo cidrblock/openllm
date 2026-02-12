@@ -28,5 +28,6 @@ packages/daemon/dist/
 __pycache__/
 *.pyc
 .venv/
+.build-venv/
 *.egg-info/
 .pytest_cache/

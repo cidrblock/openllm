@@ -1,17 +1,11 @@
 #!/usr/bin/env node
 /**
  * Bundle the OpenLLM daemon for the VS Code extension.
- * 
- * Uses esbuild to create a single self-contained JS file from the daemon's
- * TypeScript source, then copies proto and static assets alongside it.
- * 
- * Output layout:
- *   bin/
- *     openllm-daemon.js    ← esbuild single-file bundle (ESM)
- *     proto/
- *       openllm/v1/service.proto
- *     static/
- *       index.html
+ *
+ * Delegates to packages/daemon/build.js which handles the entire pipeline:
+ * esbuild bundle -> SEA injection -> sidecar copy.
+ *
+ * Then copies the output into the extension's bin/ directory.
  */
 
 const fs = require('fs');
@@ -20,8 +14,8 @@ const { execSync } = require('child_process');
 
 const EXTENSION_ROOT = path.resolve(__dirname, '..');
 const DAEMON_ROOT = path.resolve(EXTENSION_ROOT, '..', 'daemon');
-const REPO_ROOT = path.resolve(EXTENSION_ROOT, '..', '..');
 const BIN_DIR = path.join(EXTENSION_ROOT, 'bin');
+const SEA_OUTPUT = path.join(DAEMON_ROOT, 'dist', 'sea');
 
 function ensureDir(dir) {
     if (!fs.existsSync(dir)) {
@@ -43,104 +37,44 @@ function copyDirRecursive(src, dest) {
 }
 
 function bundleDaemon() {
-    console.log('Building OpenLLM daemon bundle with esbuild...');
+    console.log('Building OpenLLM daemon for VS Code extension...');
     ensureDir(BIN_DIR);
-    
-    // First, build the daemon with tsc so type-checking passes
+
+    // Run the unified build script (--skip-zip since we embed in the VSIX)
     try {
-        execSync('npm run build', {
+        execSync('node build.js --skip-zip', {
             cwd: DAEMON_ROOT,
             stdio: 'inherit',
+            env: {
+                ...process.env,
+                // Pass through NODE_SEA_BASE if set
+                NODE_SEA_BASE: process.env.NODE_SEA_BASE || '',
+            },
         });
     } catch (e) {
-        console.error('Failed to build daemon:', e.message);
+        console.error('SEA build failed:', e.message);
         process.exit(1);
     }
-    
-    // Bundle with esbuild into a single file
-    // - platform: node (Node.js APIs available)
-    // - format: esm (daemon uses ESM)
-    // - external: keytar (native addon, optional — daemon gracefully degrades)
-    const outFile = path.join(BIN_DIR, 'openllm-daemon.js');
-    
-    try {
-        const esbuildBin = path.join(DAEMON_ROOT, 'node_modules', '.bin', 'esbuild');
-        const entryPoint = path.join(DAEMON_ROOT, 'src', 'index.ts');
-        
-        execSync(
-            `"${esbuildBin}" "${entryPoint}" ` +
-            `--bundle ` +
-            `--platform=node ` +
-            `--format=esm ` +
-            `--target=node20 ` +
-            `--outfile="${outFile}" ` +
-            `--external:keytar ` +
-            `--banner:js="import{createRequire}from'module';const require=createRequire(import.meta.url);"`,
-            {
-                cwd: DAEMON_ROOT,
-                stdio: 'inherit',
+
+    // Copy build output to extension bin/
+    if (fs.existsSync(SEA_OUTPUT)) {
+        const entries = fs.readdirSync(SEA_OUTPUT, { withFileTypes: true });
+        for (const entry of entries) {
+            const src = path.join(SEA_OUTPUT, entry.name);
+            const dest = path.join(BIN_DIR, entry.name);
+            if (entry.isDirectory()) {
+                copyDirRecursive(src, dest);
+            } else {
+                fs.copyFileSync(src, dest);
+                // Preserve executable permission on binaries
+                if (entry.name.startsWith('openllm-daemon-') || entry.name.endsWith('.node')) {
+                    fs.chmodSync(dest, 0o755);
+                }
             }
-        );
-        console.log(`Bundled daemon to: ${outFile}`);
-    } catch (e) {
-        console.error('esbuild bundle failed:', e.message);
-        process.exit(1);
-    }
-    
-    // Copy proto files
-    const protoSrc = path.join(REPO_ROOT, 'proto');
-    const protoDest = path.join(BIN_DIR, 'proto');
-    if (fs.existsSync(protoSrc)) {
-        copyDirRecursive(protoSrc, protoDest);
-        console.log('Copied proto files');
-    } else {
-        console.error(`Proto directory not found: ${protoSrc}`);
-        process.exit(1);
-    }
-    
-    // Copy static assets (dashboard HTML)
-    const staticSrc = path.join(DAEMON_ROOT, 'static');
-    const staticDest = path.join(BIN_DIR, 'static');
-    if (fs.existsSync(staticSrc)) {
-        ensureDir(staticDest);
-        const files = fs.readdirSync(staticSrc);
-        for (const file of files) {
-            fs.copyFileSync(path.join(staticSrc, file), path.join(staticDest, file));
         }
-        console.log(`Copied ${files.length} static file(s)`);
+        console.log('Copied daemon build output to extension bin/');
     }
-    
-    // Copy keytar native module (external in esbuild, needs node_modules structure)
-    // keytar is a native C++ addon that can't be bundled by esbuild.
-    // We copy the minimal files needed: package.json, lib/keytar.js, build/Release/keytar.node
-    const keytarSrc = path.join(REPO_ROOT, 'node_modules', 'keytar');
-    const keytarDest = path.join(BIN_DIR, 'node_modules', 'keytar');
-    if (fs.existsSync(keytarSrc)) {
-        ensureDir(path.join(keytarDest, 'lib'));
-        ensureDir(path.join(keytarDest, 'build', 'Release'));
-        
-        fs.copyFileSync(
-            path.join(keytarSrc, 'package.json'),
-            path.join(keytarDest, 'package.json')
-        );
-        fs.copyFileSync(
-            path.join(keytarSrc, 'lib', 'keytar.js'),
-            path.join(keytarDest, 'lib', 'keytar.js')
-        );
-        const nativeAddon = path.join(keytarSrc, 'build', 'Release', 'keytar.node');
-        if (fs.existsSync(nativeAddon)) {
-            fs.copyFileSync(
-                nativeAddon,
-                path.join(keytarDest, 'build', 'Release', 'keytar.node')
-            );
-            console.log('Copied keytar native module');
-        } else {
-            console.warn('WARNING: keytar.node not found — keychain storage will be unavailable');
-        }
-    } else {
-        console.warn('WARNING: keytar not found in node_modules — keychain storage will be unavailable');
-    }
-    
+
     console.log('Done!');
 }
 

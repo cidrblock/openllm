@@ -339,7 +339,7 @@ describe('Web API - Config Endpoints', () => {
     expect(body).toHaveProperty('config');
     expect(body).toHaveProperty('path');
     expect(typeof body.path).toBe('string');
-    expect(body.path).toContain('.openllm');
+    expect(body.path).toContain('openllm');
   });
 
   it('GET /api/config?location=user should return user config', async () => {

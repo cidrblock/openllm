@@ -127,13 +127,14 @@ export function createOpenLLMService(state: DaemonState) {
     },
     
     /**
-     * List models (dynamic from provider APIs)
+     * List models (dynamic from provider APIs, workspace-aware)
      */
     ListModels(
       call: grpc.ServerUnaryCall<any, any>,
       callback: grpc.sendUnaryData<any>
     ): void {
-      state.listModels().then((models) => {
+      const workspacePaths = call.request.workspace_paths || call.request.workspacePaths || [];
+      state.listModels(workspacePaths).then((models) => {
         callback(null, {
           models: models.map((m) => ({
             id: m.id,
@@ -226,6 +227,8 @@ export function createOpenLLMService(state: DaemonState) {
       
       state.secretStore.set(key, value).then(() => {
         callback(null, {});
+        // Notify VS Code that models may have changed (new API key)
+        state.notifyModelsChanged('secret_updated');
       }).catch((error) => {
         callback({
           code: grpc.status.INTERNAL,
@@ -415,6 +418,8 @@ export function createOpenLLMService(state: DaemonState) {
         session_ttl_days: 0,
         log_level: 3,
       });
+      // Notify VS Code that models may have changed
+      state.notifyModelsChanged('config_changed');
     },
     
     /**

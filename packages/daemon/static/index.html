@@ -1563,6 +1563,10 @@ function dashboard() {
         
         this.configPath = data.path || '';
         
+        // Reset state before loading — prevents stale data leaking across config locations
+        this.providerConfig = {};
+        this.enabledModelsByProvider = {};
+        
         // Load providers from config - this determines "configured" status
         if (data.config?.providers) {
           this.providerConfig = data.config.providers;
@@ -1575,9 +1579,6 @@ function dashboard() {
               this.enabledModelsByProvider[providerId] = new Set();
             }
           }
-          this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
-        } else {
-          this.providerConfig = {};
         }
       } catch (e) {
         console.error('Failed to load config:', e);

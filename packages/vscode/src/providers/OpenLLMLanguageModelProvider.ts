@@ -5,93 +5,32 @@ import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
 
-// Vendor ID must match the one declared in package.json
-const VENDOR_ID = 'openllm';
-
 /**
- * Implements the VS Code LanguageModelChatProvider interface.
- * This allows other extensions (like Copilot Chat) to use OpenLLM models.
+ * Per-provider handler that implements LanguageModelChatProvider for a single
+ * backend provider (e.g. openrouter, openai, anthropic).
+ * 
+ * Registered with VS Code under vendor ID `openllm-{providerId}`.
  */
-export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatProvider {
-    private disposable: vscode.Disposable | null = null;
-    private cachedModels: proto.Model[] = [];
-    private refreshInterval: NodeJS.Timeout | null = null;
+class PerProviderHandler implements vscode.LanguageModelChatProvider {
+    constructor(
+        private providerId: string,
+        private models: proto.Model[],
+        private client: DaemonClient,
+    ) {}
 
-    constructor(private client: DaemonClient) {}
-
-    /**
-     * Start the provider - registers with VS Code and begins model refresh
-     */
-    async start(): Promise<void> {
-        logger.info('[LMProvider] Starting OpenLLM Language Model Provider');
-        
-        // Initial model fetch
-        await this.refreshModels();
-        
-        // Register the provider with VS Code
-        try {
-            this.disposable = vscode.lm.registerLanguageModelChatProvider(VENDOR_ID, this);
-            logger.info(`[LMProvider] Registered as vendor: ${VENDOR_ID}`);
-        } catch (e) {
-            logger.error('[LMProvider] Failed to register:', e);
-        }
-        
-        // Periodically refresh models (every 60 seconds)
-        this.refreshInterval = setInterval(() => {
-            this.refreshModels().catch(e => {
-                logger.warn('[LMProvider] Failed to refresh models:', e);
-            });
-        }, 60000);
+    /** Replace the cached model list (called on refresh) */
+    updateModels(models: proto.Model[]): void {
+        this.models = models;
     }
 
-    /**
-     * Stop the provider and clean up
-     */
-    stop(): void {
-        logger.info('[LMProvider] Stopping OpenLLM Language Model Provider');
-        
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-            this.refreshInterval = null;
-        }
-        
-        if (this.disposable) {
-            this.disposable.dispose();
-            this.disposable = null;
-        }
-    }
-
-    /**
-     * Refresh the list of models from the daemon
-     */
-    async refreshModels(): Promise<void> {
-        try {
-            this.cachedModels = await this.client.listModels();
-            logger.info(`[LMProvider] Cached ${this.cachedModels.length} models from daemon`);
-        } catch (e) {
-            logger.error('[LMProvider] Failed to list models:', e);
-        }
-    }
-
-    /**
-     * Provide information about available models.
-     * Called by VS Code to get the list of models this provider offers.
-     */
     async provideLanguageModelChatInformation(
-        options: { silent: boolean },
+        _options: { silent: boolean },
         _token: vscode.CancellationToken
     ): Promise<vscode.LanguageModelChatInformation[]> {
-        logger.debug(`[LMProvider] provideLanguageModelChatInformation called (silent: ${options.silent})`);
-        
-        // Refresh models if cache is empty and not silent mode
-        if (this.cachedModels.length === 0 && !options.silent) {
-            await this.refreshModels();
-        }
-
-        return this.cachedModels.map(model => {
+        return this.models.map(model => {
             const modelId = model.id || `${model.provider}/${model.name}`;
             const contextWindow = model.capabilities?.contextWindow || 128000;
-            
+
             return {
                 id: modelId,
                 name: model.displayName || model.name || modelId,
@@ -107,10 +46,6 @@ export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatPro
         });
     }
 
-    /**
-     * Handle a chat request.
-     * Called by VS Code when an extension wants to use one of our models.
-     */
     async provideLanguageModelChatResponse(
         model: vscode.LanguageModelChatInformation,
         messages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -119,12 +54,10 @@ export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatPro
         token: vscode.CancellationToken
     ): Promise<void> {
         const modelId = model.id;
-        logger.debug(`[LMProvider] Chat request for model: ${modelId}`);
-        
-        // Convert VS Code messages to proto format
-        const protoMessages = this.convertMessages(messages);
-        
-        // Build chat request
+        logger.debug(`[LMProvider:${this.providerId}] Chat request for model: ${modelId}`);
+
+        const protoMessages = convertMessages(messages);
+
         const request: proto.DeepPartial<proto.ChatRequest> = {
             model: modelId,
             messages: protoMessages,
@@ -134,12 +67,10 @@ export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatPro
             }
         };
 
-        // Stream response from daemon
         const stream = this.client.chat(request);
-        
-        // Handle cancellation
+
         token.onCancellationRequested(() => {
-            logger.debug('[LMProvider] Request cancelled');
+            logger.debug(`[LMProvider:${this.providerId}] Request cancelled`);
         });
 
         try {
@@ -147,8 +78,7 @@ export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatPro
                 if (token.isCancellationRequested) {
                     break;
                 }
-                
-                // Handle different chunk types
+
                 if (chunk.text) {
                     const text = chunk.text.text || '';
                     progress.report(new vscode.LanguageModelTextPart(text));
@@ -160,72 +90,170 @@ export class OpenLLMLanguageModelProvider implements vscode.LanguageModelChatPro
                         JSON.parse(tc.arguments || '{}')
                     ));
                 } else if (chunk.usage) {
-                    logger.debug(`[LMProvider] Usage: ${JSON.stringify(chunk.usage)}`);
+                    logger.debug(`[LMProvider:${this.providerId}] Usage: ${JSON.stringify(chunk.usage)}`);
                 }
             }
         } catch (e) {
             if (!token.isCancellationRequested) {
-                logger.error(`[LMProvider] Chat error:`, e);
+                logger.error(`[LMProvider:${this.providerId}] Chat error:`, e);
                 throw e;
             }
         }
     }
 
-    /**
-     * Provide token count for messages.
-     * Called by VS Code to help manage context windows.
-     */
     async provideTokenCount(
         _model: vscode.LanguageModelChatInformation,
         text: string | vscode.LanguageModelChatRequestMessage,
         _token: vscode.CancellationToken
     ): Promise<number> {
-        // Rough estimation: ~4 characters per token on average
         let totalChars = 0;
-        
         if (typeof text === 'string') {
             totalChars = text.length;
         } else {
-            // It's a LanguageModelChatRequestMessage
             for (const part of text.content) {
                 if (part instanceof vscode.LanguageModelTextPart) {
                     totalChars += part.value.length;
                 }
             }
         }
-        
         return Math.ceil(totalChars / 4);
+    }
+}
+
+/**
+ * Manages per-provider Language Model registrations with VS Code.
+ * 
+ * Each backend provider (openrouter, openai, anthropic, etc.) is registered
+ * as a separate vendor: `openllm-openrouter`, `openllm-openai`, etc.
+ * This lets users see which underlying provider a model comes from in the
+ * VS Code model picker.
+ * 
+ * Model refresh is driven by backchannel push notifications from the daemon
+ * (no polling timer).
+ */
+export class OpenLLMLanguageModelProvider {
+    /** vendorId → { handler, disposable } */
+    private registrations = new Map<string, {
+        handler: PerProviderHandler;
+        disposable: vscode.Disposable;
+    }>();
+
+    constructor(private client: DaemonClient) {}
+
+    /**
+     * Start the provider - fetches models and registers per-provider vendors.
+     * No polling timer is created; refresh is triggered externally via refreshModels().
+     */
+    async start(): Promise<void> {
+        logger.info('[LMProvider] Starting OpenLLM Language Model Provider (per-provider vendors)');
+        await this.refreshModels();
     }
 
     /**
-     * Convert VS Code messages to proto format
+     * Stop the provider and clean up all registrations
      */
-    private convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): proto.Message[] {
-        return messages.map(m => {
-            let role: proto.Role;
-            if (m.role === vscode.LanguageModelChatMessageRole.User) {
-                role = proto.Role.ROLE_USER;
-            } else if (m.role === vscode.LanguageModelChatMessageRole.Assistant) {
-                role = proto.Role.ROLE_ASSISTANT;
-            } else {
-                role = proto.Role.ROLE_USER;
-            }
+    stop(): void {
+        logger.info('[LMProvider] Stopping OpenLLM Language Model Provider');
+        for (const [vendorId, reg] of this.registrations) {
+            logger.info(`[LMProvider] Disposing vendor: ${vendorId}`);
+            reg.disposable.dispose();
+        }
+        this.registrations.clear();
+    }
 
-            // Extract text content
-            let textContent = '';
-            for (const part of m.content) {
-                if (part instanceof vscode.LanguageModelTextPart) {
-                    textContent += part.value;
+    /**
+     * Refresh the list of models from the daemon and update registrations.
+     * Called on startup and whenever the daemon sends a ModelsChanged notification.
+     */
+    async refreshModels(): Promise<void> {
+        try {
+            const allModels = await this.client.listModels();
+            logger.info(`[LMProvider] Fetched ${allModels.length} models from daemon`);
+            this.updateRegistrations(allModels);
+        } catch (e) {
+            logger.error('[LMProvider] Failed to list models:', e);
+        }
+    }
+
+    /**
+     * Group models by provider and register/update/remove vendor registrations.
+     */
+    private updateRegistrations(allModels: proto.Model[]): void {
+        // Group models by provider
+        const byProvider = new Map<string, proto.Model[]>();
+        for (const model of allModels) {
+            const providerId = model.provider || 'unknown';
+            if (!byProvider.has(providerId)) {
+                byProvider.set(providerId, []);
+            }
+            byProvider.get(providerId)!.push(model);
+        }
+
+        // Track which vendors are still active
+        const activeVendors = new Set<string>();
+
+        for (const [providerId, models] of byProvider) {
+            const vendorId = `openllm-${providerId}`;
+            activeVendors.add(vendorId);
+
+            const existing = this.registrations.get(vendorId);
+            if (existing) {
+                // Update existing handler's model list
+                existing.handler.updateModels(models);
+                logger.debug(`[LMProvider] Updated vendor ${vendorId} with ${models.length} models`);
+            } else {
+                // Register new per-provider handler
+                try {
+                    const handler = new PerProviderHandler(providerId, models, this.client);
+                    const disposable = vscode.lm.registerLanguageModelChatProvider(vendorId, handler);
+                    this.registrations.set(vendorId, { handler, disposable });
+                    logger.info(`[LMProvider] Registered new vendor: ${vendorId} (${models.length} models)`);
+                } catch (e) {
+                    logger.error(`[LMProvider] Failed to register vendor ${vendorId}:`, e);
                 }
             }
+        }
 
-            return {
-                role,
-                content: textContent,
-                toolCalls: [],
-                toolCallId: '',
-                name: m.name || '',
-            };
-        });
+        // Dispose vendors that no longer have any models
+        for (const [vendorId, reg] of this.registrations) {
+            if (!activeVendors.has(vendorId)) {
+                logger.info(`[LMProvider] Disposing stale vendor: ${vendorId}`);
+                reg.disposable.dispose();
+                this.registrations.delete(vendorId);
+            }
+        }
+
+        logger.info(`[LMProvider] Active vendors: ${Array.from(activeVendors).join(', ')}`);
     }
+}
+
+/**
+ * Convert VS Code messages to proto format
+ */
+function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): proto.Message[] {
+    return messages.map(m => {
+        let role: proto.Role;
+        if (m.role === vscode.LanguageModelChatMessageRole.User) {
+            role = proto.Role.ROLE_USER;
+        } else if (m.role === vscode.LanguageModelChatMessageRole.Assistant) {
+            role = proto.Role.ROLE_ASSISTANT;
+        } else {
+            role = proto.Role.ROLE_USER;
+        }
+
+        let textContent = '';
+        for (const part of m.content) {
+            if (part instanceof vscode.LanguageModelTextPart) {
+                textContent += part.value;
+            }
+        }
+
+        return {
+            role,
+            content: textContent,
+            toolCalls: [],
+            toolCallId: '',
+            name: m.name || '',
+        };
+    });
 }

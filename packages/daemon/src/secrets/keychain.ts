@@ -3,8 +3,23 @@
  */
 
 import type { SecretStore } from './types.js';
+import * as path from 'node:path';
+import { createRequire } from 'node:module';
 
 const SERVICE_NAME = 'openllm';
+
+/**
+ * Check if we are running inside a Node.js Single Executable Application (SEA).
+ */
+function isSea(): boolean {
+  try {
+    // node:sea module is only available inside a SEA binary
+    const sea = require('node:sea');
+    return typeof sea.isSea === 'function' ? sea.isSea() : false;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Keychain-based secret store using system keyring
@@ -13,6 +28,9 @@ const SERVICE_NAME = 'openllm';
  * - macOS: Keychain
  * - Linux: libsecret (GNOME Keyring / KDE Wallet)
  * - Windows: Credential Vault
+ * 
+ * When running as a SEA binary, loads keytar.node from alongside the executable.
+ * When running normally, uses the standard import('keytar') path.
  */
 export class KeychainSecretStore implements SecretStore {
   private keytar: typeof import('keytar') | null = null;
@@ -28,17 +46,38 @@ export class KeychainSecretStore implements SecretStore {
     if (this.loadError) return null;
     
     try {
-      const mod = await import('keytar');
-      // Handle ESM/CJS interop — keytar puts functions on .default
-      this.keytar = (mod.default && typeof mod.default.getPassword === 'function')
-        ? mod.default as any
-        : mod;
+      if (isSea()) {
+        // SEA mode: keytar.node ships alongside the executable
+        this.keytar = this.loadKeytarFromSea();
+      } else {
+        // Normal mode: import from node_modules
+        const mod = await import('keytar');
+        // Handle ESM/CJS interop — keytar puts functions on .default
+        this.keytar = (mod.default && typeof mod.default.getPassword === 'function')
+          ? mod.default as any
+          : mod;
+      }
       return this.keytar;
     } catch (error: any) {
       this.loadError = error.message;
       console.warn(`[Secrets] keytar not available: ${error.message}. Keychain storage disabled.`);
       return null;
     }
+  }
+  
+  /**
+   * Load keytar native addon when running inside a SEA binary.
+   * The keytar.node file is shipped alongside the SEA executable.
+   */
+  private loadKeytarFromSea(): typeof import('keytar') {
+    const exeDir = path.dirname(process.execPath);
+    const keytarNodePath = path.join(exeDir, 'keytar.node');
+    
+    // Create a minimal module and load the native addon via process.dlopen
+    const keytarModule = { exports: {} } as any;
+    process.dlopen(keytarModule, keytarNodePath);
+    
+    return keytarModule.exports as typeof import('keytar');
   }
   
   async get(key: string): Promise<string | null> {

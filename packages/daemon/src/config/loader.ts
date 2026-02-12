@@ -2,14 +2,17 @@
  * Configuration loader
  * 
  * Loads and saves YAML configuration from:
- * - User level: ~/.config/openllm/config.yaml (XDG standard)
- * - Workspace level: <workspace>/.openllm/config.yaml
+ * - User level:      <configDir>/config.yaml   (platform-aware via paths.ts)
+ * - Workspace level:  <workspace>/.config/openllm/config.yaml
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import yaml from 'js-yaml';
+import {
+  getUserConfigPath as _getUserConfigPath,
+  getWorkspaceConfigPath as _getWorkspaceConfigPath,
+} from '../paths.js';
 
 /**
  * Provider configuration
@@ -33,18 +36,17 @@ export interface ConfigFile {
 }
 
 /**
- * Get user config path (XDG Base Directory: ~/.config/openllm/config.yaml)
+ * Get user config path (platform-aware via paths.ts)
  */
 export function getUserConfigPath(): string {
-  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(xdgConfig, 'openllm', 'config.yaml');
+  return _getUserConfigPath();
 }
 
 /**
- * Get workspace config path
+ * Get workspace config path: <workspace>/.config/openllm/config.yaml
  */
 export function getWorkspaceConfigPath(workspacePath: string): string {
-  return path.join(workspacePath, '.openllm', 'config.yaml');
+  return _getWorkspaceConfigPath(workspacePath);
 }
 
 /**
@@ -141,6 +143,70 @@ export function mergeConfigs(userConfig: ConfigFile, workspaceConfig: ConfigFile
         ...merged.providers![providerId],
         ...providerConfig,
       };
+    }
+  }
+  
+  return merged;
+}
+
+/**
+ * Merge user config with multiple workspace configs.
+ * 
+ * Provider-level replacement: if ANY workspace defines a provider, that
+ * provider's config completely replaces the user-level config for it.
+ * For multi-root workspaces (multiple workspace paths), `enabled_models`
+ * are unioned across workspaces — but the user config's models for that
+ * provider are NOT included.
+ * 
+ * Providers not mentioned by any workspace are kept from the user config.
+ * If workspacePaths is empty, returns the user config as-is.
+ */
+export function mergeMultipleWorkspaceConfigs(workspacePaths: string[]): ConfigFile {
+  const userConfig = loadConfig();
+  
+  if (workspacePaths.length === 0) {
+    return userConfig;
+  }
+  
+  const merged: ConfigFile = {
+    providers: { ...userConfig.providers },
+  };
+  
+  // Track which providers are defined by workspaces, and their enabled_models
+  // (unioned across workspaces, but NOT seeded from user config)
+  const wsProviderModels: Record<string, Set<string>> = {};
+  
+  // Overlay each workspace config — provider-level replacement
+  for (const wsPath of workspacePaths) {
+    const wsConfig = loadWorkspaceConfig(wsPath);
+    if (!wsConfig?.providers) continue;
+    
+    for (const [providerId, wsCfg] of Object.entries(wsConfig.providers)) {
+      if (!(providerId in wsProviderModels)) {
+        // First workspace to define this provider replaces the user config entirely
+        merged.providers![providerId] = { ...wsCfg };
+        wsProviderModels[providerId] = new Set(wsCfg.enabled_models || []);
+      } else {
+        // Subsequent workspaces: overlay fields and union enabled_models
+        const { enabled_models: wsModels, ...wsRest } = wsCfg;
+        merged.providers![providerId] = {
+          ...merged.providers![providerId],
+          ...wsRest,
+        };
+        if (wsModels) {
+          for (const m of wsModels) {
+            wsProviderModels[providerId].add(m);
+          }
+        }
+      }
+    }
+  }
+  
+  // Write final enabled_models back for workspace-defined providers
+  for (const [providerId, models] of Object.entries(wsProviderModels)) {
+    if (merged.providers![providerId]) {
+      merged.providers![providerId].enabled_models =
+        models.size > 0 ? Array.from(models) : undefined;
     }
   }
   

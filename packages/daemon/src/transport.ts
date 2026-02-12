@@ -2,12 +2,17 @@
  * Transport layer for daemon communication
  * 
  * Handles Unix socket (Linux/macOS) and named pipe (Windows) transport.
+ * All paths come from ./paths.ts for platform-aware consistency.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import * as net from 'node:net';
+import {
+  getRuntimeDir,
+  getSocketPath,
+  getPidPath,
+} from './paths.js';
 
 export interface Transport {
   type: 'unix' | 'tcp';
@@ -20,31 +25,21 @@ export interface Transport {
  * Get the default socket path for the current platform
  */
 export function getDefaultSocketPath(): string {
-  if (process.platform === 'win32') {
-    // Windows: use named pipe
-    return '\\\\.\\pipe\\openllm-daemon';
-  }
-  
-  // Linux/macOS: use Unix socket in XDG_RUNTIME_DIR or /tmp
-  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${os.userInfo().uid}`;
-  const socketDir = path.join(runtimeDir, 'openllm');
-  return path.join(socketDir, 'daemon.sock');
+  return getSocketPath();
 }
 
 /**
  * Get the PID file path
  */
 export function getPidFilePath(): string {
-  const homeDir = os.homedir();
-  return path.join(homeDir, '.openllm', 'openllm.pid');
+  return getPidPath();
 }
 
 /**
  * Ensure the socket directory exists
  */
 export function ensureSocketDir(): void {
-  const socketPath = getDefaultSocketPath();
-  const socketDir = path.dirname(socketPath);
+  const socketDir = path.dirname(getSocketPath());
   
   if (!fs.existsSync(socketDir)) {
     fs.mkdirSync(socketDir, { recursive: true, mode: 0o700 });
@@ -52,14 +47,13 @@ export function ensureSocketDir(): void {
 }
 
 /**
- * Ensure the config directory exists
+ * Ensure the runtime directory exists (for PID, socket, lock)
  */
-export function ensureConfigDir(): void {
-  const homeDir = os.homedir();
-  const configDir = path.join(homeDir, '.openllm');
+export function ensureRuntimeDir(): void {
+  const runtimeDir = getRuntimeDir();
   
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  if (!fs.existsSync(runtimeDir)) {
+    fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
   }
 }
 
@@ -67,7 +61,7 @@ export function ensureConfigDir(): void {
  * Clean up stale socket file
  */
 export function cleanupSocket(): void {
-  const socketPath = getDefaultSocketPath();
+  const socketPath = getSocketPath();
   
   if (fs.existsSync(socketPath)) {
     try {
@@ -82,8 +76,8 @@ export function cleanupSocket(): void {
  * Write PID file
  */
 export function writePidFile(): void {
-  ensureConfigDir();
-  const pidPath = getPidFilePath();
+  ensureRuntimeDir();
+  const pidPath = getPidPath();
   fs.writeFileSync(pidPath, process.pid.toString(), { mode: 0o600 });
 }
 
@@ -91,7 +85,7 @@ export function writePidFile(): void {
  * Read PID from file
  */
 export function readPidFile(): number | null {
-  const pidPath = getPidFilePath();
+  const pidPath = getPidPath();
   
   if (!fs.existsSync(pidPath)) {
     return null;
@@ -109,7 +103,7 @@ export function readPidFile(): number | null {
  * Remove PID file
  */
 export function removePidFile(): void {
-  const pidPath = getPidFilePath();
+  const pidPath = getPidPath();
   
   if (fs.existsSync(pidPath)) {
     try {
@@ -137,7 +131,7 @@ export function isProcessRunning(pid: number): boolean {
  * Check if daemon is running by testing socket connection
  */
 export function isDaemonRunning(): boolean {
-  const socketPath = getDefaultSocketPath();
+  const socketPath = getSocketPath();
   
   // First check PID file
   const pid = readPidFile();
@@ -234,6 +228,6 @@ export function killDaemon(): boolean {
 export function getTransport(): Transport {
   return {
     type: 'unix',
-    socketPath: getDefaultSocketPath(),
+    socketPath: getSocketPath(),
   };
 }

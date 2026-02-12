@@ -646,6 +646,7 @@ message ImportSessionRequest {
 
 message ListModelsRequest {
   optional string provider_filter = 1;  // Filter by provider
+  repeated string workspace_paths = 2;  // Workspace paths for config-aware filtering
 }
 
 message ListModelsResponse {
@@ -674,7 +675,9 @@ enum ModelSource {
   MODEL_SOURCE_VSCODE_LM = 2;           // Via vscode.lm MCP
 }
 
-message ListProvidersRequest {}
+message ListProvidersRequest {
+  repeated string workspace_paths = 1;  // Workspace paths for config-aware filtering
+}
 
 message ListProvidersResponse {
   repeated Provider providers = 1;
@@ -818,7 +821,8 @@ message SecretInfo {
 message RegisterRequest {
   ClientInfo client = 1;
   bool is_spawner = 2;                  // Did this client start the daemon?
-  string workspace_path = 3;            // Workspace/project path from client
+  string workspace_path = 3;            // Primary workspace path (backward compat)
+  repeated string workspace_paths = 4;  // All workspace folder paths (multi-root)
 }
 
 message RegisterResponse {
@@ -905,7 +909,14 @@ message VSCodeRequest {
     SendVSCodeChatRequest send_chat = 4;
     GetWorkspaceRequest get_workspace = 6;
     // Note: field 5 (get_secret) removed - secrets managed by daemon
+    ModelsChangedNotification models_changed = 7;  // Push: daemon tells VS Code models changed
   }
+}
+
+// Notification from daemon that available models have changed
+// (e.g. config saved, API key stored, provider toggled)
+message ModelsChangedNotification {
+  string reason = 1;  // e.g. "config_changed", "secret_updated"
 }
 
 // Response from VS Code to daemon

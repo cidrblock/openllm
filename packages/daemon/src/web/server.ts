@@ -182,6 +182,7 @@ export function createWebApp(state: DaemonState): Express {
       }
       
       res.json({ success: true, path: savedPath });
+      state.notifyModelsChanged('config_changed');
     } catch (err: any) {
       console.error('[Web] /api/config POST error:', err.message);
       res.status(500).json({ error: err.message });
@@ -289,6 +290,7 @@ export function createWebApp(state: DaemonState): Express {
       }
       await state.secretStore.set(key, value);
       res.json({ success: true });
+      state.notifyModelsChanged('secret_updated');
     } catch (err: any) {
       console.error('[Web] /api/secrets POST error:', err.message);
       res.status(500).json({ error: err.message });
@@ -308,6 +310,7 @@ export function createWebApp(state: DaemonState): Express {
       }
       await state.secretStore.set(key, value);
       res.json({ success: true });
+      state.notifyModelsChanged('secret_updated');
     } catch (err: any) {
       console.error('[Web] /api/secrets POST error:', err.message);
       res.status(500).json({ error: err.message });
@@ -321,6 +324,7 @@ export function createWebApp(state: DaemonState): Express {
     try {
       await state.secretStore.delete(req.params.key);
       res.json({ success: true });
+      state.notifyModelsChanged('secret_deleted');
     } catch (err: any) {
       console.error('[Web] /api/secrets DELETE error:', err.message);
       res.status(500).json({ error: err.message });
@@ -466,6 +470,7 @@ export function createWebApp(state: DaemonState): Express {
       }
       
       res.json({ success: true });
+      state.notifyModelsChanged('provider_configured');
     } catch (err: any) {
       console.error('[Web] /api/provider configure error:', err.message);
       res.status(500).json({ error: err.message });
@@ -501,6 +506,7 @@ export function createWebApp(state: DaemonState): Express {
       }
       
       res.json({ success: true });
+      state.notifyModelsChanged('provider_removed');
     } catch (err: any) {
       console.error('[Web] /api/provider delete error:', err.message);
       res.status(500).json({ error: err.message });

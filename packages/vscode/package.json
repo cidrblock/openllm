@@ -37,12 +37,6 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "languageModelChatProviders": [
-      {
-        "vendor": "openllm",
-        "displayName": "OpenLLM"
-      }
-    ],
     "commands": [
       {
         "command": "openLLM.daemonStatus",
@@ -66,15 +60,78 @@
       "properties": {
         "openLLM.logLevel": {
           "type": "string",
-          "enum": ["debug", "info", "warn", "error"],
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "default": "info",
           "description": "Logging level for the extension"
         }
       }
-    }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "openllm-mock",
+        "displayName": "OpenLLM (Mock (Testing))"
+      },
+      {
+        "vendor": "openllm-openai",
+        "displayName": "OpenLLM (OpenAI)"
+      },
+      {
+        "vendor": "openllm-anthropic",
+        "displayName": "OpenLLM (Anthropic)"
+      },
+      {
+        "vendor": "openllm-gemini",
+        "displayName": "OpenLLM (Google Gemini)"
+      },
+      {
+        "vendor": "openllm-mistral",
+        "displayName": "OpenLLM (Mistral)"
+      },
+      {
+        "vendor": "openllm-ollama",
+        "displayName": "OpenLLM (Ollama)"
+      },
+      {
+        "vendor": "openllm-azure",
+        "displayName": "OpenLLM (Azure OpenAI)"
+      },
+      {
+        "vendor": "openllm-openrouter",
+        "displayName": "OpenLLM (OpenRouter)"
+      },
+      {
+        "vendor": "openllm-deepseek",
+        "displayName": "OpenLLM (DeepSeek)"
+      },
+      {
+        "vendor": "openllm-groq",
+        "displayName": "OpenLLM (Groq)"
+      },
+      {
+        "vendor": "openllm-xai",
+        "displayName": "OpenLLM (xAI (Grok))"
+      },
+      {
+        "vendor": "openllm-cerebras",
+        "displayName": "OpenLLM (Cerebras)"
+      },
+      {
+        "vendor": "openllm-lmstudio",
+        "displayName": "OpenLLM (LM Studio)"
+      },
+      {
+        "vendor": "openllm-meta",
+        "displayName": "OpenLLM (Meta (Llama))"
+      }
+    ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle && npm run bundle:daemon",
+    "vscode:prepublish": "npm run bundle",
     "build": "npm run bundle",
     "bundle": "node esbuild.js --production",
     "bundle:daemon": "node scripts/bundle-daemon.js",
@@ -86,8 +143,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "package": "npm run bundle && npm run bundle:daemon && vsce package --no-dependencies",
-    "package:all-platforms": "npm run bundle && npm run bundle:daemon:all && vsce package --no-dependencies"
+    "package": "npm run bundle && vsce package --no-dependencies",
+    "package:all-platforms": "npm run bundle && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

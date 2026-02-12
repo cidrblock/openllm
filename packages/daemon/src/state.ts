@@ -9,6 +9,7 @@ import {
   loadConfig,
   loadWorkspaceConfig,
   mergeConfigs,
+  mergeMultipleWorkspaceConfigs,
   type ConfigFile,
   type ProviderConfig,
 } from './config/loader.js';
@@ -42,6 +43,7 @@ export interface ConnectedClient {
   connectedAt: Date;
   isSpawner: boolean;
   workspacePath?: string;
+  workspacePaths: string[];
 }
 
 /**
@@ -174,10 +176,16 @@ export class DaemonState {
   }
   
   /**
-   * List models dynamically from provider APIs
+   * List models dynamically from provider APIs.
+   * 
+   * When workspacePaths are provided, workspace config(s) are overlayed on top
+   * of user config. Only configured/enabled models are returned.
    */
-  async listModels(): Promise<ModelInfo[]> {
-    const config = this.loadProviderConfig();
+  async listModels(workspacePaths: string[] = []): Promise<ModelInfo[]> {
+    // Overlay workspace config(s) on top of user config
+    const config = workspacePaths.length > 0
+      ? (mergeMultipleWorkspaceConfigs(workspacePaths).providers || {})
+      : this.loadProviderConfig();
     const allModels: ModelInfo[] = [];
     
     for (const providerId of getSupportedProviders()) {
@@ -194,7 +202,18 @@ export class DaemonState {
       }
       
       try {
-        const models = await fetchModels(providerId, apiKey || undefined, providerCfg?.api_base);
+        let models = await fetchModels(providerId, apiKey || undefined, providerCfg?.api_base);
+        
+        // Filter by enabled_models if the list is set
+        const enabledModels = providerCfg?.enabled_models;
+        if (enabledModels && enabledModels.length > 0) {
+          const enabledSet = new Set(enabledModels);
+          models = models.filter(m => {
+            const bareId = m.id.replace(`${providerId}/`, '');
+            return enabledSet.has(m.id) || enabledSet.has(bareId);
+          });
+        }
+        
         allModels.push(...models);
       } catch (error) {
         console.error(`[State] Failed to list models for ${providerId}:`, error);
@@ -253,6 +272,7 @@ export class DaemonState {
       connectedAt: new Date(),
       isSpawner,
       workspacePath,
+      workspacePaths: workspacePath ? [workspacePath] : [],
     });
     
     console.log(`[State] Client registered: ${clientId} (${clientType})`);
@@ -450,6 +470,26 @@ export class DaemonState {
       if (conn.stream) return id;
     }
     return null;
+  }
+  
+  /**
+   * Notify all connected VS Code instances that models have changed.
+   * This triggers a model refresh on the VS Code side.
+   */
+  notifyModelsChanged(reason: string): void {
+    for (const conn of this.vscodeConnections.values()) {
+      if (conn.stream) {
+        try {
+          conn.stream.write({
+            request_id: `notify-${Date.now()}`,
+            models_changed: { reason },
+          });
+          console.log(`[State] Sent ModelsChanged notification to VS Code (reason: ${reason})`);
+        } catch (err: any) {
+          console.error(`[State] Failed to send ModelsChanged notification: ${err.message}`);
+        }
+      }
+    }
   }
   
   /**

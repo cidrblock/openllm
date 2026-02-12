@@ -9,14 +9,15 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:sea": "node build.js",
+    "build:sea:js-only": "node build.js --js-only",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "daemon": "tsx src/index.ts daemon",
     "web": "tsx src/index.ts web",
     "status": "tsx src/index.ts status",
     "test": "vitest",
-    "lint": "eslint src/",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --outfile=dist/daemon.js --format=esm"
+    "lint": "eslint src/"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.0",
@@ -34,6 +35,7 @@
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
     "esbuild": "^0.23.0",
+    "postject": "^1.0.0-alpha.6",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"

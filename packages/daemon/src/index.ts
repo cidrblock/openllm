@@ -119,6 +119,25 @@ program
     }
   });
 
+program
+  .command('list-providers')
+  .description('List supported providers (for build tooling)')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { getSupportedProviders, getProviderDisplayName } = await import('./providers/adapter.js');
+    const providers = getSupportedProviders().map((id: string) => ({
+      id,
+      displayName: getProviderDisplayName(id),
+    }));
+    if (options.json) {
+      console.log(JSON.stringify(providers));
+    } else {
+      for (const p of providers) {
+        console.log(`${p.id}\t${p.displayName}`);
+      }
+    }
+  });
+
 // Default: show help
 if (process.argv.length <= 2) {
   program.help();

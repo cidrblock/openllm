@@ -6,6 +6,7 @@
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
+import Long from "long";
 import type { CallContext, CallOptions } from "nice-grpc-common";
 
 export const protobufPackage = "openllm.v1";
@@ -364,7 +365,7 @@ export interface Empty {
 
 /** Timestamp (equivalent to Timestamp) */
 export interface Timestamp {
-  seconds: number;
+  seconds: Long;
   nanos: number;
 }
 
@@ -408,28 +409,26 @@ export interface CallToolRequest_ContextEntry {
 
 export interface ToolResponseChunk {
   requestId: string;
-  /** Live progress updates */
-  progress?:
-    | ToolProgress
+  result?:
+    | //
+    /** Live progress updates */
+    { $case: "progress"; progress: ToolProgress }
+    | //
+    /** Streaming text output */
+    { $case: "textDelta"; textDelta: ToolTextDelta }
+    | //
+    /** Partial structured result */
+    { $case: "partial"; partial: ToolPartialResult }
+    | //
+    /** Complete result */
+    { $case: "finalResult"; finalResult: ToolFinalResult }
+    | //
+    /** Error occurred */
+    { $case: "error"; error: ToolError }
+    | //
+    /** Tool needs user input */
+    { $case: "prompt"; prompt: ToolPrompt }
     | undefined;
-  /** Streaming text output */
-  textDelta?:
-    | ToolTextDelta
-    | undefined;
-  /** Partial structured result */
-  partial?:
-    | ToolPartialResult
-    | undefined;
-  /** Complete result */
-  finalResult?:
-    | ToolFinalResult
-    | undefined;
-  /** Error occurred */
-  error?:
-    | ToolError
-    | undefined;
-  /** Tool needs user input */
-  prompt?: ToolPrompt | undefined;
 }
 
 export interface ToolProgress {
@@ -438,7 +437,7 @@ export interface ToolProgress {
   /** Human-readable status */
   message: string;
   /** Estimated time remaining */
-  etaSeconds?: number | undefined;
+  etaSeconds?: Long | undefined;
 }
 
 export interface ToolTextDelta {
@@ -467,7 +466,7 @@ export interface ToolContent {
   /** For binary content */
   mimeType: string;
   /** For binary content */
-  data: Uint8Array;
+  data: Buffer;
   /** For resource references */
   uri: string;
 }
@@ -493,16 +492,17 @@ export interface ToolPrompt {
 
 /** For bidirectional interactive tool calls */
 export interface ToolInteractiveRequest {
-  /** Initial call */
-  call?:
-    | CallToolRequest
+  request?:
+    | //
+    /** Initial call */
+    { $case: "call"; call: CallToolRequest }
+    | //
+    /** User's answer to prompt */
+    { $case: "response"; response: ToolPromptResponse }
+    | //
+    /** Cancel the operation */
+    { $case: "cancel"; cancel: ToolCancel }
     | undefined;
-  /** User's answer to prompt */
-  response?:
-    | ToolPromptResponse
-    | undefined;
-  /** Cancel the operation */
-  cancel?: ToolCancel | undefined;
 }
 
 export interface ToolPromptResponse {
@@ -618,16 +618,17 @@ export interface ChatOptions {
 }
 
 export interface ChatChunk {
-  text?: TextChunk | undefined;
-  toolCall?: ToolCallChunk | undefined;
-  toolResult?:
-    | ToolResultChunk
+  chunk?:
+    | { $case: "text"; text: TextChunk }
+    | { $case: "toolCall"; toolCall: ToolCallChunk }
+    | { $case: "toolResult"; toolResult: ToolResultChunk }
+    | //
+    /** Request user input for tool */
+    { $case: "prompt"; prompt: PromptChunk }
+    | { $case: "usage"; usage: UsageChunk }
+    | { $case: "error"; error: ErrorChunk }
+    | { $case: "done"; done: DoneChunk }
     | undefined;
-  /** Request user input for tool */
-  prompt?: PromptChunk | undefined;
-  usage?: UsageChunk | undefined;
-  error?: ErrorChunk | undefined;
-  done?: DoneChunk | undefined;
 }
 
 export interface TextChunk {
@@ -780,9 +781,10 @@ export interface WatchSessionsRequest {
 
 export interface SessionEvent {
   sessionId: string;
-  created?: SessionCreated | undefined;
-  updated?: SessionUpdated | undefined;
-  deleted?: SessionDeleted | undefined;
+  event?: { $case: "created"; created: SessionCreated } | { $case: "updated"; updated: SessionUpdated } | {
+    $case: "deleted";
+    deleted: SessionDeleted;
+  } | undefined;
 }
 
 export interface SessionCreated {
@@ -854,7 +856,11 @@ export interface ImportSessionRequest {
 
 export interface ListModelsRequest {
   /** Filter by provider */
-  providerFilter?: string | undefined;
+  providerFilter?:
+    | string
+    | undefined;
+  /** Workspace paths for config-aware filtering */
+  workspacePaths: string[];
 }
 
 export interface ListModelsResponse {
@@ -885,6 +891,8 @@ export interface ModelCapabilities {
 }
 
 export interface ListProvidersRequest {
+  /** Workspace paths for config-aware filtering */
+  workspacePaths: string[];
 }
 
 export interface ListProvidersResponse {
@@ -1018,8 +1026,10 @@ export interface RegisterRequest {
     | undefined;
   /** Did this client start the daemon? */
   isSpawner: boolean;
-  /** Workspace/project path from client */
+  /** Primary workspace path (backward compat) */
   workspacePath: string;
+  /** All workspace folder paths (multi-root) */
+  workspacePaths: string[];
 }
 
 export interface RegisterResponse {
@@ -1077,29 +1087,60 @@ export interface HealthCheckResponse {
   version: string;
 }
 
+export interface StartWebServerRequest {
+  /** HTTP port (default 8787) */
+  port: number;
+}
+
+export interface StartWebServerResponse {
+  /** True if newly started */
+  started: boolean;
+  /** True if was already running */
+  alreadyRunning: boolean;
+  /** Actual port the server is on */
+  port: number;
+  /** Full URL (e.g. "http://localhost:8787") */
+  url: string;
+}
+
+export interface StopWebServerRequest {
+}
+
 /** Request from daemon to VS Code */
 export interface VSCodeRequest {
   requestId: string;
-  invokeTool?: InvokeToolRequest | undefined;
-  listModels?: ListVSCodeModelsRequest | undefined;
-  sendChat?:
-    | SendVSCodeChatRequest
+  request?:
+    | { $case: "invokeTool"; invokeTool: InvokeToolRequest }
+    | { $case: "listModels"; listModels: ListVSCodeModelsRequest }
+    | { $case: "sendChat"; sendChat: SendVSCodeChatRequest }
+    | { $case: "getWorkspace"; getWorkspace: GetWorkspaceRequest }
+    | //
+    /** Note: field 5 (get_secret) removed - secrets managed by daemon */
+    { $case: "modelsChanged"; modelsChanged: ModelsChangedNotification }
     | undefined;
-  /** Note: field 5 (get_secret) removed - secrets managed by daemon */
-  getWorkspace?: GetWorkspaceRequest | undefined;
+}
+
+/**
+ * Notification from daemon that available models have changed
+ * (e.g. config saved, API key stored, provider toggled)
+ */
+export interface ModelsChangedNotification {
+  /** e.g. "config_changed", "secret_updated" */
+  reason: string;
 }
 
 /** Response from VS Code to daemon */
 export interface VSCodeResponse {
   requestId: string;
-  invokeTool?: InvokeToolResponse | undefined;
-  listModels?: ListVSCodeModelsResponse | undefined;
-  sendChat?: SendVSCodeChatResponse | undefined;
-  error?:
-    | VSCodeError
+  response?:
+    | { $case: "invokeTool"; invokeTool: InvokeToolResponse }
+    | { $case: "listModels"; listModels: ListVSCodeModelsResponse }
+    | { $case: "sendChat"; sendChat: SendVSCodeChatResponse }
+    | { $case: "error"; error: VSCodeError }
+    | //
+    /** Note: field 5 (get_secret) removed - secrets managed by daemon */
+    { $case: "getWorkspace"; getWorkspace: GetWorkspaceResponse }
     | undefined;
-  /** Note: field 5 (get_secret) removed - secrets managed by daemon */
-  getWorkspace?: GetWorkspaceResponse | undefined;
 }
 
 /** Get workspace path from VS Code */
@@ -1160,8 +1201,7 @@ export interface SendVSCodeChatResponse {
 }
 
 export interface VSCodeChatChunk {
-  text?: string | undefined;
-  toolCall?: VSCodeToolCall | undefined;
+  chunk?: { $case: "text"; text: string } | { $case: "toolCall"; toolCall: VSCodeToolCall } | undefined;
 }
 
 export interface VSCodeToolCall {
@@ -1227,13 +1267,13 @@ export const Empty: MessageFns<Empty> = {
 };
 
 function createBaseTimestamp(): Timestamp {
-  return { seconds: 0, nanos: 0 };
+  return { seconds: Long.ZERO, nanos: 0 };
 }
 
 export const Timestamp: MessageFns<Timestamp> = {
   encode(message: Timestamp, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.seconds !== 0) {
-      writer.uint32(8).int64(message.seconds);
+    if (!message.seconds.equals(Long.ZERO)) {
+      writer.uint32(8).int64(message.seconds.toString());
     }
     if (message.nanos !== 0) {
       writer.uint32(16).int32(message.nanos);
@@ -1253,7 +1293,7 @@ export const Timestamp: MessageFns<Timestamp> = {
             break;
           }
 
-          message.seconds = longToNumber(reader.int64());
+          message.seconds = Long.fromString(reader.int64().toString());
           continue;
         }
         case 2: {
@@ -1275,15 +1315,15 @@ export const Timestamp: MessageFns<Timestamp> = {
 
   fromJSON(object: any): Timestamp {
     return {
-      seconds: isSet(object.seconds) ? globalThis.Number(object.seconds) : 0,
+      seconds: isSet(object.seconds) ? Long.fromValue(object.seconds) : Long.ZERO,
       nanos: isSet(object.nanos) ? globalThis.Number(object.nanos) : 0,
     };
   },
 
   toJSON(message: Timestamp): unknown {
     const obj: any = {};
-    if (message.seconds !== 0) {
-      obj.seconds = Math.round(message.seconds);
+    if (!message.seconds.equals(Long.ZERO)) {
+      obj.seconds = (message.seconds || Long.ZERO).toString();
     }
     if (message.nanos !== 0) {
       obj.nanos = Math.round(message.nanos);
@@ -1296,7 +1336,9 @@ export const Timestamp: MessageFns<Timestamp> = {
   },
   fromPartial(object: DeepPartial<Timestamp>): Timestamp {
     const message = createBaseTimestamp();
-    message.seconds = object.seconds ?? 0;
+    message.seconds = (object.seconds !== undefined && object.seconds !== null)
+      ? Long.fromValue(object.seconds)
+      : Long.ZERO;
     message.nanos = object.nanos ?? 0;
     return message;
   },
@@ -1780,15 +1822,7 @@ export const CallToolRequest_ContextEntry: MessageFns<CallToolRequest_ContextEnt
 };
 
 function createBaseToolResponseChunk(): ToolResponseChunk {
-  return {
-    requestId: "",
-    progress: undefined,
-    textDelta: undefined,
-    partial: undefined,
-    finalResult: undefined,
-    error: undefined,
-    prompt: undefined,
-  };
+  return { requestId: "", result: undefined };
 }
 
 export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
@@ -1796,23 +1830,25 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
     if (message.requestId !== "") {
       writer.uint32(10).string(message.requestId);
     }
-    if (message.progress !== undefined) {
-      ToolProgress.encode(message.progress, writer.uint32(18).fork()).join();
-    }
-    if (message.textDelta !== undefined) {
-      ToolTextDelta.encode(message.textDelta, writer.uint32(26).fork()).join();
-    }
-    if (message.partial !== undefined) {
-      ToolPartialResult.encode(message.partial, writer.uint32(34).fork()).join();
-    }
-    if (message.finalResult !== undefined) {
-      ToolFinalResult.encode(message.finalResult, writer.uint32(42).fork()).join();
-    }
-    if (message.error !== undefined) {
-      ToolError.encode(message.error, writer.uint32(50).fork()).join();
-    }
-    if (message.prompt !== undefined) {
-      ToolPrompt.encode(message.prompt, writer.uint32(58).fork()).join();
+    switch (message.result?.$case) {
+      case "progress":
+        ToolProgress.encode(message.result.progress, writer.uint32(18).fork()).join();
+        break;
+      case "textDelta":
+        ToolTextDelta.encode(message.result.textDelta, writer.uint32(26).fork()).join();
+        break;
+      case "partial":
+        ToolPartialResult.encode(message.result.partial, writer.uint32(34).fork()).join();
+        break;
+      case "finalResult":
+        ToolFinalResult.encode(message.result.finalResult, writer.uint32(42).fork()).join();
+        break;
+      case "error":
+        ToolError.encode(message.result.error, writer.uint32(50).fork()).join();
+        break;
+      case "prompt":
+        ToolPrompt.encode(message.result.prompt, writer.uint32(58).fork()).join();
+        break;
     }
     return writer;
   },
@@ -1837,7 +1873,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.progress = ToolProgress.decode(reader, reader.uint32());
+          message.result = { $case: "progress", progress: ToolProgress.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -1845,7 +1881,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.textDelta = ToolTextDelta.decode(reader, reader.uint32());
+          message.result = { $case: "textDelta", textDelta: ToolTextDelta.decode(reader, reader.uint32()) };
           continue;
         }
         case 4: {
@@ -1853,7 +1889,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.partial = ToolPartialResult.decode(reader, reader.uint32());
+          message.result = { $case: "partial", partial: ToolPartialResult.decode(reader, reader.uint32()) };
           continue;
         }
         case 5: {
@@ -1861,7 +1897,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.finalResult = ToolFinalResult.decode(reader, reader.uint32());
+          message.result = { $case: "finalResult", finalResult: ToolFinalResult.decode(reader, reader.uint32()) };
           continue;
         }
         case 6: {
@@ -1869,7 +1905,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.error = ToolError.decode(reader, reader.uint32());
+          message.result = { $case: "error", error: ToolError.decode(reader, reader.uint32()) };
           continue;
         }
         case 7: {
@@ -1877,7 +1913,7 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
             break;
           }
 
-          message.prompt = ToolPrompt.decode(reader, reader.uint32());
+          message.result = { $case: "prompt", prompt: ToolPrompt.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -1896,20 +1932,23 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
         : isSet(object.request_id)
         ? globalThis.String(object.request_id)
         : "",
-      progress: isSet(object.progress) ? ToolProgress.fromJSON(object.progress) : undefined,
-      textDelta: isSet(object.textDelta)
-        ? ToolTextDelta.fromJSON(object.textDelta)
+      result: isSet(object.progress)
+        ? { $case: "progress", progress: ToolProgress.fromJSON(object.progress) }
+        : isSet(object.textDelta)
+        ? { $case: "textDelta", textDelta: ToolTextDelta.fromJSON(object.textDelta) }
         : isSet(object.text_delta)
-        ? ToolTextDelta.fromJSON(object.text_delta)
-        : undefined,
-      partial: isSet(object.partial) ? ToolPartialResult.fromJSON(object.partial) : undefined,
-      finalResult: isSet(object.finalResult)
-        ? ToolFinalResult.fromJSON(object.finalResult)
+        ? { $case: "textDelta", textDelta: ToolTextDelta.fromJSON(object.text_delta) }
+        : isSet(object.partial)
+        ? { $case: "partial", partial: ToolPartialResult.fromJSON(object.partial) }
+        : isSet(object.finalResult)
+        ? { $case: "finalResult", finalResult: ToolFinalResult.fromJSON(object.finalResult) }
         : isSet(object.final_result)
-        ? ToolFinalResult.fromJSON(object.final_result)
+        ? { $case: "finalResult", finalResult: ToolFinalResult.fromJSON(object.final_result) }
+        : isSet(object.error)
+        ? { $case: "error", error: ToolError.fromJSON(object.error) }
+        : isSet(object.prompt)
+        ? { $case: "prompt", prompt: ToolPrompt.fromJSON(object.prompt) }
         : undefined,
-      error: isSet(object.error) ? ToolError.fromJSON(object.error) : undefined,
-      prompt: isSet(object.prompt) ? ToolPrompt.fromJSON(object.prompt) : undefined,
     };
   },
 
@@ -1918,23 +1957,18 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
     if (message.requestId !== "") {
       obj.requestId = message.requestId;
     }
-    if (message.progress !== undefined) {
-      obj.progress = ToolProgress.toJSON(message.progress);
-    }
-    if (message.textDelta !== undefined) {
-      obj.textDelta = ToolTextDelta.toJSON(message.textDelta);
-    }
-    if (message.partial !== undefined) {
-      obj.partial = ToolPartialResult.toJSON(message.partial);
-    }
-    if (message.finalResult !== undefined) {
-      obj.finalResult = ToolFinalResult.toJSON(message.finalResult);
-    }
-    if (message.error !== undefined) {
-      obj.error = ToolError.toJSON(message.error);
-    }
-    if (message.prompt !== undefined) {
-      obj.prompt = ToolPrompt.toJSON(message.prompt);
+    if (message.result?.$case === "progress") {
+      obj.progress = ToolProgress.toJSON(message.result.progress);
+    } else if (message.result?.$case === "textDelta") {
+      obj.textDelta = ToolTextDelta.toJSON(message.result.textDelta);
+    } else if (message.result?.$case === "partial") {
+      obj.partial = ToolPartialResult.toJSON(message.result.partial);
+    } else if (message.result?.$case === "finalResult") {
+      obj.finalResult = ToolFinalResult.toJSON(message.result.finalResult);
+    } else if (message.result?.$case === "error") {
+      obj.error = ToolError.toJSON(message.result.error);
+    } else if (message.result?.$case === "prompt") {
+      obj.prompt = ToolPrompt.toJSON(message.result.prompt);
     }
     return obj;
   },
@@ -1945,24 +1979,47 @@ export const ToolResponseChunk: MessageFns<ToolResponseChunk> = {
   fromPartial(object: DeepPartial<ToolResponseChunk>): ToolResponseChunk {
     const message = createBaseToolResponseChunk();
     message.requestId = object.requestId ?? "";
-    message.progress = (object.progress !== undefined && object.progress !== null)
-      ? ToolProgress.fromPartial(object.progress)
-      : undefined;
-    message.textDelta = (object.textDelta !== undefined && object.textDelta !== null)
-      ? ToolTextDelta.fromPartial(object.textDelta)
-      : undefined;
-    message.partial = (object.partial !== undefined && object.partial !== null)
-      ? ToolPartialResult.fromPartial(object.partial)
-      : undefined;
-    message.finalResult = (object.finalResult !== undefined && object.finalResult !== null)
-      ? ToolFinalResult.fromPartial(object.finalResult)
-      : undefined;
-    message.error = (object.error !== undefined && object.error !== null)
-      ? ToolError.fromPartial(object.error)
-      : undefined;
-    message.prompt = (object.prompt !== undefined && object.prompt !== null)
-      ? ToolPrompt.fromPartial(object.prompt)
-      : undefined;
+    switch (object.result?.$case) {
+      case "progress": {
+        if (object.result?.progress !== undefined && object.result?.progress !== null) {
+          message.result = { $case: "progress", progress: ToolProgress.fromPartial(object.result.progress) };
+        }
+        break;
+      }
+      case "textDelta": {
+        if (object.result?.textDelta !== undefined && object.result?.textDelta !== null) {
+          message.result = { $case: "textDelta", textDelta: ToolTextDelta.fromPartial(object.result.textDelta) };
+        }
+        break;
+      }
+      case "partial": {
+        if (object.result?.partial !== undefined && object.result?.partial !== null) {
+          message.result = { $case: "partial", partial: ToolPartialResult.fromPartial(object.result.partial) };
+        }
+        break;
+      }
+      case "finalResult": {
+        if (object.result?.finalResult !== undefined && object.result?.finalResult !== null) {
+          message.result = {
+            $case: "finalResult",
+            finalResult: ToolFinalResult.fromPartial(object.result.finalResult),
+          };
+        }
+        break;
+      }
+      case "error": {
+        if (object.result?.error !== undefined && object.result?.error !== null) {
+          message.result = { $case: "error", error: ToolError.fromPartial(object.result.error) };
+        }
+        break;
+      }
+      case "prompt": {
+        if (object.result?.prompt !== undefined && object.result?.prompt !== null) {
+          message.result = { $case: "prompt", prompt: ToolPrompt.fromPartial(object.result.prompt) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -1980,7 +2037,7 @@ export const ToolProgress: MessageFns<ToolProgress> = {
       writer.uint32(18).string(message.message);
     }
     if (message.etaSeconds !== undefined) {
-      writer.uint32(24).int64(message.etaSeconds);
+      writer.uint32(24).int64(message.etaSeconds.toString());
     }
     return writer;
   },
@@ -2013,7 +2070,7 @@ export const ToolProgress: MessageFns<ToolProgress> = {
             break;
           }
 
-          message.etaSeconds = longToNumber(reader.int64());
+          message.etaSeconds = Long.fromString(reader.int64().toString());
           continue;
         }
       }
@@ -2030,9 +2087,9 @@ export const ToolProgress: MessageFns<ToolProgress> = {
       percentage: isSet(object.percentage) ? globalThis.Number(object.percentage) : 0,
       message: isSet(object.message) ? globalThis.String(object.message) : "",
       etaSeconds: isSet(object.etaSeconds)
-        ? globalThis.Number(object.etaSeconds)
+        ? Long.fromValue(object.etaSeconds)
         : isSet(object.eta_seconds)
-        ? globalThis.Number(object.eta_seconds)
+        ? Long.fromValue(object.eta_seconds)
         : undefined,
     };
   },
@@ -2046,7 +2103,7 @@ export const ToolProgress: MessageFns<ToolProgress> = {
       obj.message = message.message;
     }
     if (message.etaSeconds !== undefined) {
-      obj.etaSeconds = Math.round(message.etaSeconds);
+      obj.etaSeconds = (message.etaSeconds || Long.ZERO).toString();
     }
     return obj;
   },
@@ -2058,7 +2115,9 @@ export const ToolProgress: MessageFns<ToolProgress> = {
     const message = createBaseToolProgress();
     message.percentage = object.percentage ?? 0;
     message.message = object.message ?? "";
-    message.etaSeconds = object.etaSeconds ?? undefined;
+    message.etaSeconds = (object.etaSeconds !== undefined && object.etaSeconds !== null)
+      ? Long.fromValue(object.etaSeconds)
+      : undefined;
     return message;
   },
 };
@@ -2286,7 +2345,7 @@ export const ToolFinalResult: MessageFns<ToolFinalResult> = {
 };
 
 function createBaseToolContent(): ToolContent {
-  return { type: "", text: "", mimeType: "", data: new Uint8Array(0), uri: "" };
+  return { type: "", text: "", mimeType: "", data: Buffer.alloc(0), uri: "" };
 }
 
 export const ToolContent: MessageFns<ToolContent> = {
@@ -2345,7 +2404,7 @@ export const ToolContent: MessageFns<ToolContent> = {
             break;
           }
 
-          message.data = reader.bytes();
+          message.data = Buffer.from(reader.bytes());
           continue;
         }
         case 5: {
@@ -2374,7 +2433,7 @@ export const ToolContent: MessageFns<ToolContent> = {
         : isSet(object.mime_type)
         ? globalThis.String(object.mime_type)
         : "",
-      data: isSet(object.data) ? bytesFromBase64(object.data) : new Uint8Array(0),
+      data: isSet(object.data) ? Buffer.from(bytesFromBase64(object.data)) : Buffer.alloc(0),
       uri: isSet(object.uri) ? globalThis.String(object.uri) : "",
     };
   },
@@ -2407,7 +2466,7 @@ export const ToolContent: MessageFns<ToolContent> = {
     message.type = object.type ?? "";
     message.text = object.text ?? "";
     message.mimeType = object.mimeType ?? "";
-    message.data = object.data ?? new Uint8Array(0);
+    message.data = object.data ?? Buffer.alloc(0);
     message.uri = object.uri ?? "";
     return message;
   },
@@ -2626,19 +2685,21 @@ export const ToolPrompt: MessageFns<ToolPrompt> = {
 };
 
 function createBaseToolInteractiveRequest(): ToolInteractiveRequest {
-  return { call: undefined, response: undefined, cancel: undefined };
+  return { request: undefined };
 }
 
 export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
   encode(message: ToolInteractiveRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.call !== undefined) {
-      CallToolRequest.encode(message.call, writer.uint32(10).fork()).join();
-    }
-    if (message.response !== undefined) {
-      ToolPromptResponse.encode(message.response, writer.uint32(18).fork()).join();
-    }
-    if (message.cancel !== undefined) {
-      ToolCancel.encode(message.cancel, writer.uint32(26).fork()).join();
+    switch (message.request?.$case) {
+      case "call":
+        CallToolRequest.encode(message.request.call, writer.uint32(10).fork()).join();
+        break;
+      case "response":
+        ToolPromptResponse.encode(message.request.response, writer.uint32(18).fork()).join();
+        break;
+      case "cancel":
+        ToolCancel.encode(message.request.cancel, writer.uint32(26).fork()).join();
+        break;
     }
     return writer;
   },
@@ -2655,7 +2716,7 @@ export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
             break;
           }
 
-          message.call = CallToolRequest.decode(reader, reader.uint32());
+          message.request = { $case: "call", call: CallToolRequest.decode(reader, reader.uint32()) };
           continue;
         }
         case 2: {
@@ -2663,7 +2724,7 @@ export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
             break;
           }
 
-          message.response = ToolPromptResponse.decode(reader, reader.uint32());
+          message.request = { $case: "response", response: ToolPromptResponse.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -2671,7 +2732,7 @@ export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
             break;
           }
 
-          message.cancel = ToolCancel.decode(reader, reader.uint32());
+          message.request = { $case: "cancel", cancel: ToolCancel.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -2685,22 +2746,24 @@ export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
 
   fromJSON(object: any): ToolInteractiveRequest {
     return {
-      call: isSet(object.call) ? CallToolRequest.fromJSON(object.call) : undefined,
-      response: isSet(object.response) ? ToolPromptResponse.fromJSON(object.response) : undefined,
-      cancel: isSet(object.cancel) ? ToolCancel.fromJSON(object.cancel) : undefined,
+      request: isSet(object.call)
+        ? { $case: "call", call: CallToolRequest.fromJSON(object.call) }
+        : isSet(object.response)
+        ? { $case: "response", response: ToolPromptResponse.fromJSON(object.response) }
+        : isSet(object.cancel)
+        ? { $case: "cancel", cancel: ToolCancel.fromJSON(object.cancel) }
+        : undefined,
     };
   },
 
   toJSON(message: ToolInteractiveRequest): unknown {
     const obj: any = {};
-    if (message.call !== undefined) {
-      obj.call = CallToolRequest.toJSON(message.call);
-    }
-    if (message.response !== undefined) {
-      obj.response = ToolPromptResponse.toJSON(message.response);
-    }
-    if (message.cancel !== undefined) {
-      obj.cancel = ToolCancel.toJSON(message.cancel);
+    if (message.request?.$case === "call") {
+      obj.call = CallToolRequest.toJSON(message.request.call);
+    } else if (message.request?.$case === "response") {
+      obj.response = ToolPromptResponse.toJSON(message.request.response);
+    } else if (message.request?.$case === "cancel") {
+      obj.cancel = ToolCancel.toJSON(message.request.cancel);
     }
     return obj;
   },
@@ -2710,15 +2773,26 @@ export const ToolInteractiveRequest: MessageFns<ToolInteractiveRequest> = {
   },
   fromPartial(object: DeepPartial<ToolInteractiveRequest>): ToolInteractiveRequest {
     const message = createBaseToolInteractiveRequest();
-    message.call = (object.call !== undefined && object.call !== null)
-      ? CallToolRequest.fromPartial(object.call)
-      : undefined;
-    message.response = (object.response !== undefined && object.response !== null)
-      ? ToolPromptResponse.fromPartial(object.response)
-      : undefined;
-    message.cancel = (object.cancel !== undefined && object.cancel !== null)
-      ? ToolCancel.fromPartial(object.cancel)
-      : undefined;
+    switch (object.request?.$case) {
+      case "call": {
+        if (object.request?.call !== undefined && object.request?.call !== null) {
+          message.request = { $case: "call", call: CallToolRequest.fromPartial(object.request.call) };
+        }
+        break;
+      }
+      case "response": {
+        if (object.request?.response !== undefined && object.request?.response !== null) {
+          message.request = { $case: "response", response: ToolPromptResponse.fromPartial(object.request.response) };
+        }
+        break;
+      }
+      case "cancel": {
+        if (object.request?.cancel !== undefined && object.request?.cancel !== null) {
+          message.request = { $case: "cancel", cancel: ToolCancel.fromPartial(object.request.cancel) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -4361,39 +4435,33 @@ export const ChatOptions: MessageFns<ChatOptions> = {
 };
 
 function createBaseChatChunk(): ChatChunk {
-  return {
-    text: undefined,
-    toolCall: undefined,
-    toolResult: undefined,
-    prompt: undefined,
-    usage: undefined,
-    error: undefined,
-    done: undefined,
-  };
+  return { chunk: undefined };
 }
 
 export const ChatChunk: MessageFns<ChatChunk> = {
   encode(message: ChatChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.text !== undefined) {
-      TextChunk.encode(message.text, writer.uint32(10).fork()).join();
-    }
-    if (message.toolCall !== undefined) {
-      ToolCallChunk.encode(message.toolCall, writer.uint32(18).fork()).join();
-    }
-    if (message.toolResult !== undefined) {
-      ToolResultChunk.encode(message.toolResult, writer.uint32(26).fork()).join();
-    }
-    if (message.prompt !== undefined) {
-      PromptChunk.encode(message.prompt, writer.uint32(34).fork()).join();
-    }
-    if (message.usage !== undefined) {
-      UsageChunk.encode(message.usage, writer.uint32(42).fork()).join();
-    }
-    if (message.error !== undefined) {
-      ErrorChunk.encode(message.error, writer.uint32(50).fork()).join();
-    }
-    if (message.done !== undefined) {
-      DoneChunk.encode(message.done, writer.uint32(58).fork()).join();
+    switch (message.chunk?.$case) {
+      case "text":
+        TextChunk.encode(message.chunk.text, writer.uint32(10).fork()).join();
+        break;
+      case "toolCall":
+        ToolCallChunk.encode(message.chunk.toolCall, writer.uint32(18).fork()).join();
+        break;
+      case "toolResult":
+        ToolResultChunk.encode(message.chunk.toolResult, writer.uint32(26).fork()).join();
+        break;
+      case "prompt":
+        PromptChunk.encode(message.chunk.prompt, writer.uint32(34).fork()).join();
+        break;
+      case "usage":
+        UsageChunk.encode(message.chunk.usage, writer.uint32(42).fork()).join();
+        break;
+      case "error":
+        ErrorChunk.encode(message.chunk.error, writer.uint32(50).fork()).join();
+        break;
+      case "done":
+        DoneChunk.encode(message.chunk.done, writer.uint32(58).fork()).join();
+        break;
     }
     return writer;
   },
@@ -4410,7 +4478,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.text = TextChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "text", text: TextChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 2: {
@@ -4418,7 +4486,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.toolCall = ToolCallChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "toolCall", toolCall: ToolCallChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -4426,7 +4494,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.toolResult = ToolResultChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "toolResult", toolResult: ToolResultChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 4: {
@@ -4434,7 +4502,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.prompt = PromptChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "prompt", prompt: PromptChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 5: {
@@ -4442,7 +4510,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.usage = UsageChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "usage", usage: UsageChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 6: {
@@ -4450,7 +4518,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.error = ErrorChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "error", error: ErrorChunk.decode(reader, reader.uint32()) };
           continue;
         }
         case 7: {
@@ -4458,7 +4526,7 @@ export const ChatChunk: MessageFns<ChatChunk> = {
             break;
           }
 
-          message.done = DoneChunk.decode(reader, reader.uint32());
+          message.chunk = { $case: "done", done: DoneChunk.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -4472,46 +4540,44 @@ export const ChatChunk: MessageFns<ChatChunk> = {
 
   fromJSON(object: any): ChatChunk {
     return {
-      text: isSet(object.text) ? TextChunk.fromJSON(object.text) : undefined,
-      toolCall: isSet(object.toolCall)
-        ? ToolCallChunk.fromJSON(object.toolCall)
+      chunk: isSet(object.text)
+        ? { $case: "text", text: TextChunk.fromJSON(object.text) }
+        : isSet(object.toolCall)
+        ? { $case: "toolCall", toolCall: ToolCallChunk.fromJSON(object.toolCall) }
         : isSet(object.tool_call)
-        ? ToolCallChunk.fromJSON(object.tool_call)
-        : undefined,
-      toolResult: isSet(object.toolResult)
-        ? ToolResultChunk.fromJSON(object.toolResult)
+        ? { $case: "toolCall", toolCall: ToolCallChunk.fromJSON(object.tool_call) }
+        : isSet(object.toolResult)
+        ? { $case: "toolResult", toolResult: ToolResultChunk.fromJSON(object.toolResult) }
         : isSet(object.tool_result)
-        ? ToolResultChunk.fromJSON(object.tool_result)
+        ? { $case: "toolResult", toolResult: ToolResultChunk.fromJSON(object.tool_result) }
+        : isSet(object.prompt)
+        ? { $case: "prompt", prompt: PromptChunk.fromJSON(object.prompt) }
+        : isSet(object.usage)
+        ? { $case: "usage", usage: UsageChunk.fromJSON(object.usage) }
+        : isSet(object.error)
+        ? { $case: "error", error: ErrorChunk.fromJSON(object.error) }
+        : isSet(object.done)
+        ? { $case: "done", done: DoneChunk.fromJSON(object.done) }
         : undefined,
-      prompt: isSet(object.prompt) ? PromptChunk.fromJSON(object.prompt) : undefined,
-      usage: isSet(object.usage) ? UsageChunk.fromJSON(object.usage) : undefined,
-      error: isSet(object.error) ? ErrorChunk.fromJSON(object.error) : undefined,
-      done: isSet(object.done) ? DoneChunk.fromJSON(object.done) : undefined,
     };
   },
 
   toJSON(message: ChatChunk): unknown {
     const obj: any = {};
-    if (message.text !== undefined) {
-      obj.text = TextChunk.toJSON(message.text);
-    }
-    if (message.toolCall !== undefined) {
-      obj.toolCall = ToolCallChunk.toJSON(message.toolCall);
-    }
-    if (message.toolResult !== undefined) {
-      obj.toolResult = ToolResultChunk.toJSON(message.toolResult);
-    }
-    if (message.prompt !== undefined) {
-      obj.prompt = PromptChunk.toJSON(message.prompt);
-    }
-    if (message.usage !== undefined) {
-      obj.usage = UsageChunk.toJSON(message.usage);
-    }
-    if (message.error !== undefined) {
-      obj.error = ErrorChunk.toJSON(message.error);
-    }
-    if (message.done !== undefined) {
-      obj.done = DoneChunk.toJSON(message.done);
+    if (message.chunk?.$case === "text") {
+      obj.text = TextChunk.toJSON(message.chunk.text);
+    } else if (message.chunk?.$case === "toolCall") {
+      obj.toolCall = ToolCallChunk.toJSON(message.chunk.toolCall);
+    } else if (message.chunk?.$case === "toolResult") {
+      obj.toolResult = ToolResultChunk.toJSON(message.chunk.toolResult);
+    } else if (message.chunk?.$case === "prompt") {
+      obj.prompt = PromptChunk.toJSON(message.chunk.prompt);
+    } else if (message.chunk?.$case === "usage") {
+      obj.usage = UsageChunk.toJSON(message.chunk.usage);
+    } else if (message.chunk?.$case === "error") {
+      obj.error = ErrorChunk.toJSON(message.chunk.error);
+    } else if (message.chunk?.$case === "done") {
+      obj.done = DoneChunk.toJSON(message.chunk.done);
     }
     return obj;
   },
@@ -4521,23 +4587,50 @@ export const ChatChunk: MessageFns<ChatChunk> = {
   },
   fromPartial(object: DeepPartial<ChatChunk>): ChatChunk {
     const message = createBaseChatChunk();
-    message.text = (object.text !== undefined && object.text !== null) ? TextChunk.fromPartial(object.text) : undefined;
-    message.toolCall = (object.toolCall !== undefined && object.toolCall !== null)
-      ? ToolCallChunk.fromPartial(object.toolCall)
-      : undefined;
-    message.toolResult = (object.toolResult !== undefined && object.toolResult !== null)
-      ? ToolResultChunk.fromPartial(object.toolResult)
-      : undefined;
-    message.prompt = (object.prompt !== undefined && object.prompt !== null)
-      ? PromptChunk.fromPartial(object.prompt)
-      : undefined;
-    message.usage = (object.usage !== undefined && object.usage !== null)
-      ? UsageChunk.fromPartial(object.usage)
-      : undefined;
-    message.error = (object.error !== undefined && object.error !== null)
-      ? ErrorChunk.fromPartial(object.error)
-      : undefined;
-    message.done = (object.done !== undefined && object.done !== null) ? DoneChunk.fromPartial(object.done) : undefined;
+    switch (object.chunk?.$case) {
+      case "text": {
+        if (object.chunk?.text !== undefined && object.chunk?.text !== null) {
+          message.chunk = { $case: "text", text: TextChunk.fromPartial(object.chunk.text) };
+        }
+        break;
+      }
+      case "toolCall": {
+        if (object.chunk?.toolCall !== undefined && object.chunk?.toolCall !== null) {
+          message.chunk = { $case: "toolCall", toolCall: ToolCallChunk.fromPartial(object.chunk.toolCall) };
+        }
+        break;
+      }
+      case "toolResult": {
+        if (object.chunk?.toolResult !== undefined && object.chunk?.toolResult !== null) {
+          message.chunk = { $case: "toolResult", toolResult: ToolResultChunk.fromPartial(object.chunk.toolResult) };
+        }
+        break;
+      }
+      case "prompt": {
+        if (object.chunk?.prompt !== undefined && object.chunk?.prompt !== null) {
+          message.chunk = { $case: "prompt", prompt: PromptChunk.fromPartial(object.chunk.prompt) };
+        }
+        break;
+      }
+      case "usage": {
+        if (object.chunk?.usage !== undefined && object.chunk?.usage !== null) {
+          message.chunk = { $case: "usage", usage: UsageChunk.fromPartial(object.chunk.usage) };
+        }
+        break;
+      }
+      case "error": {
+        if (object.chunk?.error !== undefined && object.chunk?.error !== null) {
+          message.chunk = { $case: "error", error: ErrorChunk.fromPartial(object.chunk.error) };
+        }
+        break;
+      }
+      case "done": {
+        if (object.chunk?.done !== undefined && object.chunk?.done !== null) {
+          message.chunk = { $case: "done", done: DoneChunk.fromPartial(object.chunk.done) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -6614,7 +6707,7 @@ export const WatchSessionsRequest: MessageFns<WatchSessionsRequest> = {
 };
 
 function createBaseSessionEvent(): SessionEvent {
-  return { sessionId: "", created: undefined, updated: undefined, deleted: undefined };
+  return { sessionId: "", event: undefined };
 }
 
 export const SessionEvent: MessageFns<SessionEvent> = {
@@ -6622,14 +6715,16 @@ export const SessionEvent: MessageFns<SessionEvent> = {
     if (message.sessionId !== "") {
       writer.uint32(10).string(message.sessionId);
     }
-    if (message.created !== undefined) {
-      SessionCreated.encode(message.created, writer.uint32(18).fork()).join();
-    }
-    if (message.updated !== undefined) {
-      SessionUpdated.encode(message.updated, writer.uint32(26).fork()).join();
-    }
-    if (message.deleted !== undefined) {
-      SessionDeleted.encode(message.deleted, writer.uint32(34).fork()).join();
+    switch (message.event?.$case) {
+      case "created":
+        SessionCreated.encode(message.event.created, writer.uint32(18).fork()).join();
+        break;
+      case "updated":
+        SessionUpdated.encode(message.event.updated, writer.uint32(26).fork()).join();
+        break;
+      case "deleted":
+        SessionDeleted.encode(message.event.deleted, writer.uint32(34).fork()).join();
+        break;
     }
     return writer;
   },
@@ -6654,7 +6749,7 @@ export const SessionEvent: MessageFns<SessionEvent> = {
             break;
           }
 
-          message.created = SessionCreated.decode(reader, reader.uint32());
+          message.event = { $case: "created", created: SessionCreated.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -6662,7 +6757,7 @@ export const SessionEvent: MessageFns<SessionEvent> = {
             break;
           }
 
-          message.updated = SessionUpdated.decode(reader, reader.uint32());
+          message.event = { $case: "updated", updated: SessionUpdated.decode(reader, reader.uint32()) };
           continue;
         }
         case 4: {
@@ -6670,7 +6765,7 @@ export const SessionEvent: MessageFns<SessionEvent> = {
             break;
           }
 
-          message.deleted = SessionDeleted.decode(reader, reader.uint32());
+          message.event = { $case: "deleted", deleted: SessionDeleted.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -6689,9 +6784,13 @@ export const SessionEvent: MessageFns<SessionEvent> = {
         : isSet(object.session_id)
         ? globalThis.String(object.session_id)
         : "",
-      created: isSet(object.created) ? SessionCreated.fromJSON(object.created) : undefined,
-      updated: isSet(object.updated) ? SessionUpdated.fromJSON(object.updated) : undefined,
-      deleted: isSet(object.deleted) ? SessionDeleted.fromJSON(object.deleted) : undefined,
+      event: isSet(object.created)
+        ? { $case: "created", created: SessionCreated.fromJSON(object.created) }
+        : isSet(object.updated)
+        ? { $case: "updated", updated: SessionUpdated.fromJSON(object.updated) }
+        : isSet(object.deleted)
+        ? { $case: "deleted", deleted: SessionDeleted.fromJSON(object.deleted) }
+        : undefined,
     };
   },
 
@@ -6700,14 +6799,12 @@ export const SessionEvent: MessageFns<SessionEvent> = {
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
     }
-    if (message.created !== undefined) {
-      obj.created = SessionCreated.toJSON(message.created);
-    }
-    if (message.updated !== undefined) {
-      obj.updated = SessionUpdated.toJSON(message.updated);
-    }
-    if (message.deleted !== undefined) {
-      obj.deleted = SessionDeleted.toJSON(message.deleted);
+    if (message.event?.$case === "created") {
+      obj.created = SessionCreated.toJSON(message.event.created);
+    } else if (message.event?.$case === "updated") {
+      obj.updated = SessionUpdated.toJSON(message.event.updated);
+    } else if (message.event?.$case === "deleted") {
+      obj.deleted = SessionDeleted.toJSON(message.event.deleted);
     }
     return obj;
   },
@@ -6718,15 +6815,26 @@ export const SessionEvent: MessageFns<SessionEvent> = {
   fromPartial(object: DeepPartial<SessionEvent>): SessionEvent {
     const message = createBaseSessionEvent();
     message.sessionId = object.sessionId ?? "";
-    message.created = (object.created !== undefined && object.created !== null)
-      ? SessionCreated.fromPartial(object.created)
-      : undefined;
-    message.updated = (object.updated !== undefined && object.updated !== null)
-      ? SessionUpdated.fromPartial(object.updated)
-      : undefined;
-    message.deleted = (object.deleted !== undefined && object.deleted !== null)
-      ? SessionDeleted.fromPartial(object.deleted)
-      : undefined;
+    switch (object.event?.$case) {
+      case "created": {
+        if (object.event?.created !== undefined && object.event?.created !== null) {
+          message.event = { $case: "created", created: SessionCreated.fromPartial(object.event.created) };
+        }
+        break;
+      }
+      case "updated": {
+        if (object.event?.updated !== undefined && object.event?.updated !== null) {
+          message.event = { $case: "updated", updated: SessionUpdated.fromPartial(object.event.updated) };
+        }
+        break;
+      }
+      case "deleted": {
+        if (object.event?.deleted !== undefined && object.event?.deleted !== null) {
+          message.event = { $case: "deleted", deleted: SessionDeleted.fromPartial(object.event.deleted) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -7641,13 +7749,16 @@ export const ImportSessionRequest: MessageFns<ImportSessionRequest> = {
 };
 
 function createBaseListModelsRequest(): ListModelsRequest {
-  return { providerFilter: undefined };
+  return { providerFilter: undefined, workspacePaths: [] };
 }
 
 export const ListModelsRequest: MessageFns<ListModelsRequest> = {
   encode(message: ListModelsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.providerFilter !== undefined) {
       writer.uint32(10).string(message.providerFilter);
+    }
+    for (const v of message.workspacePaths) {
+      writer.uint32(18).string(v!);
     }
     return writer;
   },
@@ -7667,6 +7778,14 @@ export const ListModelsRequest: MessageFns<ListModelsRequest> = {
           message.providerFilter = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.workspacePaths.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -7683,6 +7802,11 @@ export const ListModelsRequest: MessageFns<ListModelsRequest> = {
         : isSet(object.provider_filter)
         ? globalThis.String(object.provider_filter)
         : undefined,
+      workspacePaths: globalThis.Array.isArray(object?.workspacePaths)
+        ? object.workspacePaths.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.workspace_paths)
+        ? object.workspace_paths.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -7690,6 +7814,9 @@ export const ListModelsRequest: MessageFns<ListModelsRequest> = {
     const obj: any = {};
     if (message.providerFilter !== undefined) {
       obj.providerFilter = message.providerFilter;
+    }
+    if (message.workspacePaths?.length) {
+      obj.workspacePaths = message.workspacePaths;
     }
     return obj;
   },
@@ -7700,6 +7827,7 @@ export const ListModelsRequest: MessageFns<ListModelsRequest> = {
   fromPartial(object: DeepPartial<ListModelsRequest>): ListModelsRequest {
     const message = createBaseListModelsRequest();
     message.providerFilter = object.providerFilter ?? undefined;
+    message.workspacePaths = object.workspacePaths?.map((e) => e) || [];
     return message;
   },
 };
@@ -8033,11 +8161,14 @@ export const ModelCapabilities: MessageFns<ModelCapabilities> = {
 };
 
 function createBaseListProvidersRequest(): ListProvidersRequest {
-  return {};
+  return { workspacePaths: [] };
 }
 
 export const ListProvidersRequest: MessageFns<ListProvidersRequest> = {
-  encode(_: ListProvidersRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+  encode(message: ListProvidersRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.workspacePaths) {
+      writer.uint32(10).string(v!);
+    }
     return writer;
   },
 
@@ -8048,6 +8179,14 @@ export const ListProvidersRequest: MessageFns<ListProvidersRequest> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.workspacePaths.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8057,20 +8196,30 @@ export const ListProvidersRequest: MessageFns<ListProvidersRequest> = {
     return message;
   },
 
-  fromJSON(_: any): ListProvidersRequest {
-    return {};
+  fromJSON(object: any): ListProvidersRequest {
+    return {
+      workspacePaths: globalThis.Array.isArray(object?.workspacePaths)
+        ? object.workspacePaths.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.workspace_paths)
+        ? object.workspace_paths.map((e: any) => globalThis.String(e))
+        : [],
+    };
   },
 
-  toJSON(_: ListProvidersRequest): unknown {
+  toJSON(message: ListProvidersRequest): unknown {
     const obj: any = {};
+    if (message.workspacePaths?.length) {
+      obj.workspacePaths = message.workspacePaths;
+    }
     return obj;
   },
 
   create(base?: DeepPartial<ListProvidersRequest>): ListProvidersRequest {
     return ListProvidersRequest.fromPartial(base ?? {});
   },
-  fromPartial(_: DeepPartial<ListProvidersRequest>): ListProvidersRequest {
+  fromPartial(object: DeepPartial<ListProvidersRequest>): ListProvidersRequest {
     const message = createBaseListProvidersRequest();
+    message.workspacePaths = object.workspacePaths?.map((e) => e) || [];
     return message;
   },
 };
@@ -9888,7 +10037,7 @@ export const SecretInfo: MessageFns<SecretInfo> = {
 };
 
 function createBaseRegisterRequest(): RegisterRequest {
-  return { client: undefined, isSpawner: false, workspacePath: "" };
+  return { client: undefined, isSpawner: false, workspacePath: "", workspacePaths: [] };
 }
 
 export const RegisterRequest: MessageFns<RegisterRequest> = {
@@ -9901,6 +10050,9 @@ export const RegisterRequest: MessageFns<RegisterRequest> = {
     }
     if (message.workspacePath !== "") {
       writer.uint32(26).string(message.workspacePath);
+    }
+    for (const v of message.workspacePaths) {
+      writer.uint32(34).string(v!);
     }
     return writer;
   },
@@ -9936,6 +10088,14 @@ export const RegisterRequest: MessageFns<RegisterRequest> = {
           message.workspacePath = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.workspacePaths.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -9958,6 +10118,11 @@ export const RegisterRequest: MessageFns<RegisterRequest> = {
         : isSet(object.workspace_path)
         ? globalThis.String(object.workspace_path)
         : "",
+      workspacePaths: globalThis.Array.isArray(object?.workspacePaths)
+        ? object.workspacePaths.map((e: any) => globalThis.String(e))
+        : globalThis.Array.isArray(object?.workspace_paths)
+        ? object.workspace_paths.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -9972,6 +10137,9 @@ export const RegisterRequest: MessageFns<RegisterRequest> = {
     if (message.workspacePath !== "") {
       obj.workspacePath = message.workspacePath;
     }
+    if (message.workspacePaths?.length) {
+      obj.workspacePaths = message.workspacePaths;
+    }
     return obj;
   },
 
@@ -9985,6 +10153,7 @@ export const RegisterRequest: MessageFns<RegisterRequest> = {
       : undefined;
     message.isSpawner = object.isSpawner ?? false;
     message.workspacePath = object.workspacePath ?? "";
+    message.workspacePaths = object.workspacePaths?.map((e) => e) || [];
     return message;
   },
 };
@@ -10797,8 +10966,221 @@ export const HealthCheckResponse: MessageFns<HealthCheckResponse> = {
   },
 };
 
+function createBaseStartWebServerRequest(): StartWebServerRequest {
+  return { port: 0 };
+}
+
+export const StartWebServerRequest: MessageFns<StartWebServerRequest> = {
+  encode(message: StartWebServerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.port !== 0) {
+      writer.uint32(8).int32(message.port);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StartWebServerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStartWebServerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.port = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StartWebServerRequest {
+    return { port: isSet(object.port) ? globalThis.Number(object.port) : 0 };
+  },
+
+  toJSON(message: StartWebServerRequest): unknown {
+    const obj: any = {};
+    if (message.port !== 0) {
+      obj.port = Math.round(message.port);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<StartWebServerRequest>): StartWebServerRequest {
+    return StartWebServerRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<StartWebServerRequest>): StartWebServerRequest {
+    const message = createBaseStartWebServerRequest();
+    message.port = object.port ?? 0;
+    return message;
+  },
+};
+
+function createBaseStartWebServerResponse(): StartWebServerResponse {
+  return { started: false, alreadyRunning: false, port: 0, url: "" };
+}
+
+export const StartWebServerResponse: MessageFns<StartWebServerResponse> = {
+  encode(message: StartWebServerResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.started !== false) {
+      writer.uint32(8).bool(message.started);
+    }
+    if (message.alreadyRunning !== false) {
+      writer.uint32(16).bool(message.alreadyRunning);
+    }
+    if (message.port !== 0) {
+      writer.uint32(24).int32(message.port);
+    }
+    if (message.url !== "") {
+      writer.uint32(34).string(message.url);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StartWebServerResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStartWebServerResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.started = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.alreadyRunning = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.port = reader.int32();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.url = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StartWebServerResponse {
+    return {
+      started: isSet(object.started) ? globalThis.Boolean(object.started) : false,
+      alreadyRunning: isSet(object.alreadyRunning)
+        ? globalThis.Boolean(object.alreadyRunning)
+        : isSet(object.already_running)
+        ? globalThis.Boolean(object.already_running)
+        : false,
+      port: isSet(object.port) ? globalThis.Number(object.port) : 0,
+      url: isSet(object.url) ? globalThis.String(object.url) : "",
+    };
+  },
+
+  toJSON(message: StartWebServerResponse): unknown {
+    const obj: any = {};
+    if (message.started !== false) {
+      obj.started = message.started;
+    }
+    if (message.alreadyRunning !== false) {
+      obj.alreadyRunning = message.alreadyRunning;
+    }
+    if (message.port !== 0) {
+      obj.port = Math.round(message.port);
+    }
+    if (message.url !== "") {
+      obj.url = message.url;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<StartWebServerResponse>): StartWebServerResponse {
+    return StartWebServerResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<StartWebServerResponse>): StartWebServerResponse {
+    const message = createBaseStartWebServerResponse();
+    message.started = object.started ?? false;
+    message.alreadyRunning = object.alreadyRunning ?? false;
+    message.port = object.port ?? 0;
+    message.url = object.url ?? "";
+    return message;
+  },
+};
+
+function createBaseStopWebServerRequest(): StopWebServerRequest {
+  return {};
+}
+
+export const StopWebServerRequest: MessageFns<StopWebServerRequest> = {
+  encode(_: StopWebServerRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): StopWebServerRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStopWebServerRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): StopWebServerRequest {
+    return {};
+  },
+
+  toJSON(_: StopWebServerRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create(base?: DeepPartial<StopWebServerRequest>): StopWebServerRequest {
+    return StopWebServerRequest.fromPartial(base ?? {});
+  },
+  fromPartial(_: DeepPartial<StopWebServerRequest>): StopWebServerRequest {
+    const message = createBaseStopWebServerRequest();
+    return message;
+  },
+};
+
 function createBaseVSCodeRequest(): VSCodeRequest {
-  return { requestId: "", invokeTool: undefined, listModels: undefined, sendChat: undefined, getWorkspace: undefined };
+  return { requestId: "", request: undefined };
 }
 
 export const VSCodeRequest: MessageFns<VSCodeRequest> = {
@@ -10806,17 +11188,22 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
     if (message.requestId !== "") {
       writer.uint32(10).string(message.requestId);
     }
-    if (message.invokeTool !== undefined) {
-      InvokeToolRequest.encode(message.invokeTool, writer.uint32(18).fork()).join();
-    }
-    if (message.listModels !== undefined) {
-      ListVSCodeModelsRequest.encode(message.listModels, writer.uint32(26).fork()).join();
-    }
-    if (message.sendChat !== undefined) {
-      SendVSCodeChatRequest.encode(message.sendChat, writer.uint32(34).fork()).join();
-    }
-    if (message.getWorkspace !== undefined) {
-      GetWorkspaceRequest.encode(message.getWorkspace, writer.uint32(50).fork()).join();
+    switch (message.request?.$case) {
+      case "invokeTool":
+        InvokeToolRequest.encode(message.request.invokeTool, writer.uint32(18).fork()).join();
+        break;
+      case "listModels":
+        ListVSCodeModelsRequest.encode(message.request.listModels, writer.uint32(26).fork()).join();
+        break;
+      case "sendChat":
+        SendVSCodeChatRequest.encode(message.request.sendChat, writer.uint32(34).fork()).join();
+        break;
+      case "getWorkspace":
+        GetWorkspaceRequest.encode(message.request.getWorkspace, writer.uint32(50).fork()).join();
+        break;
+      case "modelsChanged":
+        ModelsChangedNotification.encode(message.request.modelsChanged, writer.uint32(58).fork()).join();
+        break;
     }
     return writer;
   },
@@ -10841,7 +11228,7 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
             break;
           }
 
-          message.invokeTool = InvokeToolRequest.decode(reader, reader.uint32());
+          message.request = { $case: "invokeTool", invokeTool: InvokeToolRequest.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -10849,7 +11236,10 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
             break;
           }
 
-          message.listModels = ListVSCodeModelsRequest.decode(reader, reader.uint32());
+          message.request = {
+            $case: "listModels",
+            listModels: ListVSCodeModelsRequest.decode(reader, reader.uint32()),
+          };
           continue;
         }
         case 4: {
@@ -10857,7 +11247,7 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
             break;
           }
 
-          message.sendChat = SendVSCodeChatRequest.decode(reader, reader.uint32());
+          message.request = { $case: "sendChat", sendChat: SendVSCodeChatRequest.decode(reader, reader.uint32()) };
           continue;
         }
         case 6: {
@@ -10865,7 +11255,21 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
             break;
           }
 
-          message.getWorkspace = GetWorkspaceRequest.decode(reader, reader.uint32());
+          message.request = {
+            $case: "getWorkspace",
+            getWorkspace: GetWorkspaceRequest.decode(reader, reader.uint32()),
+          };
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.request = {
+            $case: "modelsChanged",
+            modelsChanged: ModelsChangedNotification.decode(reader, reader.uint32()),
+          };
           continue;
         }
       }
@@ -10884,25 +11288,26 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
         : isSet(object.request_id)
         ? globalThis.String(object.request_id)
         : "",
-      invokeTool: isSet(object.invokeTool)
-        ? InvokeToolRequest.fromJSON(object.invokeTool)
+      request: isSet(object.invokeTool)
+        ? { $case: "invokeTool", invokeTool: InvokeToolRequest.fromJSON(object.invokeTool) }
         : isSet(object.invoke_tool)
-        ? InvokeToolRequest.fromJSON(object.invoke_tool)
-        : undefined,
-      listModels: isSet(object.listModels)
-        ? ListVSCodeModelsRequest.fromJSON(object.listModels)
+        ? { $case: "invokeTool", invokeTool: InvokeToolRequest.fromJSON(object.invoke_tool) }
+        : isSet(object.listModels)
+        ? { $case: "listModels", listModels: ListVSCodeModelsRequest.fromJSON(object.listModels) }
         : isSet(object.list_models)
-        ? ListVSCodeModelsRequest.fromJSON(object.list_models)
-        : undefined,
-      sendChat: isSet(object.sendChat)
-        ? SendVSCodeChatRequest.fromJSON(object.sendChat)
+        ? { $case: "listModels", listModels: ListVSCodeModelsRequest.fromJSON(object.list_models) }
+        : isSet(object.sendChat)
+        ? { $case: "sendChat", sendChat: SendVSCodeChatRequest.fromJSON(object.sendChat) }
         : isSet(object.send_chat)
-        ? SendVSCodeChatRequest.fromJSON(object.send_chat)
-        : undefined,
-      getWorkspace: isSet(object.getWorkspace)
-        ? GetWorkspaceRequest.fromJSON(object.getWorkspace)
+        ? { $case: "sendChat", sendChat: SendVSCodeChatRequest.fromJSON(object.send_chat) }
+        : isSet(object.getWorkspace)
+        ? { $case: "getWorkspace", getWorkspace: GetWorkspaceRequest.fromJSON(object.getWorkspace) }
         : isSet(object.get_workspace)
-        ? GetWorkspaceRequest.fromJSON(object.get_workspace)
+        ? { $case: "getWorkspace", getWorkspace: GetWorkspaceRequest.fromJSON(object.get_workspace) }
+        : isSet(object.modelsChanged)
+        ? { $case: "modelsChanged", modelsChanged: ModelsChangedNotification.fromJSON(object.modelsChanged) }
+        : isSet(object.models_changed)
+        ? { $case: "modelsChanged", modelsChanged: ModelsChangedNotification.fromJSON(object.models_changed) }
         : undefined,
     };
   },
@@ -10912,17 +11317,16 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
     if (message.requestId !== "") {
       obj.requestId = message.requestId;
     }
-    if (message.invokeTool !== undefined) {
-      obj.invokeTool = InvokeToolRequest.toJSON(message.invokeTool);
-    }
-    if (message.listModels !== undefined) {
-      obj.listModels = ListVSCodeModelsRequest.toJSON(message.listModels);
-    }
-    if (message.sendChat !== undefined) {
-      obj.sendChat = SendVSCodeChatRequest.toJSON(message.sendChat);
-    }
-    if (message.getWorkspace !== undefined) {
-      obj.getWorkspace = GetWorkspaceRequest.toJSON(message.getWorkspace);
+    if (message.request?.$case === "invokeTool") {
+      obj.invokeTool = InvokeToolRequest.toJSON(message.request.invokeTool);
+    } else if (message.request?.$case === "listModels") {
+      obj.listModels = ListVSCodeModelsRequest.toJSON(message.request.listModels);
+    } else if (message.request?.$case === "sendChat") {
+      obj.sendChat = SendVSCodeChatRequest.toJSON(message.request.sendChat);
+    } else if (message.request?.$case === "getWorkspace") {
+      obj.getWorkspace = GetWorkspaceRequest.toJSON(message.request.getWorkspace);
+    } else if (message.request?.$case === "modelsChanged") {
+      obj.modelsChanged = ModelsChangedNotification.toJSON(message.request.modelsChanged);
     }
     return obj;
   },
@@ -10933,31 +11337,114 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
   fromPartial(object: DeepPartial<VSCodeRequest>): VSCodeRequest {
     const message = createBaseVSCodeRequest();
     message.requestId = object.requestId ?? "";
-    message.invokeTool = (object.invokeTool !== undefined && object.invokeTool !== null)
-      ? InvokeToolRequest.fromPartial(object.invokeTool)
-      : undefined;
-    message.listModels = (object.listModels !== undefined && object.listModels !== null)
-      ? ListVSCodeModelsRequest.fromPartial(object.listModels)
-      : undefined;
-    message.sendChat = (object.sendChat !== undefined && object.sendChat !== null)
-      ? SendVSCodeChatRequest.fromPartial(object.sendChat)
-      : undefined;
-    message.getWorkspace = (object.getWorkspace !== undefined && object.getWorkspace !== null)
-      ? GetWorkspaceRequest.fromPartial(object.getWorkspace)
-      : undefined;
+    switch (object.request?.$case) {
+      case "invokeTool": {
+        if (object.request?.invokeTool !== undefined && object.request?.invokeTool !== null) {
+          message.request = {
+            $case: "invokeTool",
+            invokeTool: InvokeToolRequest.fromPartial(object.request.invokeTool),
+          };
+        }
+        break;
+      }
+      case "listModels": {
+        if (object.request?.listModels !== undefined && object.request?.listModels !== null) {
+          message.request = {
+            $case: "listModels",
+            listModels: ListVSCodeModelsRequest.fromPartial(object.request.listModels),
+          };
+        }
+        break;
+      }
+      case "sendChat": {
+        if (object.request?.sendChat !== undefined && object.request?.sendChat !== null) {
+          message.request = { $case: "sendChat", sendChat: SendVSCodeChatRequest.fromPartial(object.request.sendChat) };
+        }
+        break;
+      }
+      case "getWorkspace": {
+        if (object.request?.getWorkspace !== undefined && object.request?.getWorkspace !== null) {
+          message.request = {
+            $case: "getWorkspace",
+            getWorkspace: GetWorkspaceRequest.fromPartial(object.request.getWorkspace),
+          };
+        }
+        break;
+      }
+      case "modelsChanged": {
+        if (object.request?.modelsChanged !== undefined && object.request?.modelsChanged !== null) {
+          message.request = {
+            $case: "modelsChanged",
+            modelsChanged: ModelsChangedNotification.fromPartial(object.request.modelsChanged),
+          };
+        }
+        break;
+      }
+    }
+    return message;
+  },
+};
+
+function createBaseModelsChangedNotification(): ModelsChangedNotification {
+  return { reason: "" };
+}
+
+export const ModelsChangedNotification: MessageFns<ModelsChangedNotification> = {
+  encode(message: ModelsChangedNotification, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.reason !== "") {
+      writer.uint32(10).string(message.reason);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ModelsChangedNotification {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseModelsChangedNotification();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.reason = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ModelsChangedNotification {
+    return { reason: isSet(object.reason) ? globalThis.String(object.reason) : "" };
+  },
+
+  toJSON(message: ModelsChangedNotification): unknown {
+    const obj: any = {};
+    if (message.reason !== "") {
+      obj.reason = message.reason;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ModelsChangedNotification>): ModelsChangedNotification {
+    return ModelsChangedNotification.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ModelsChangedNotification>): ModelsChangedNotification {
+    const message = createBaseModelsChangedNotification();
+    message.reason = object.reason ?? "";
     return message;
   },
 };
 
 function createBaseVSCodeResponse(): VSCodeResponse {
-  return {
-    requestId: "",
-    invokeTool: undefined,
-    listModels: undefined,
-    sendChat: undefined,
-    error: undefined,
-    getWorkspace: undefined,
-  };
+  return { requestId: "", response: undefined };
 }
 
 export const VSCodeResponse: MessageFns<VSCodeResponse> = {
@@ -10965,20 +11452,22 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
     if (message.requestId !== "") {
       writer.uint32(10).string(message.requestId);
     }
-    if (message.invokeTool !== undefined) {
-      InvokeToolResponse.encode(message.invokeTool, writer.uint32(18).fork()).join();
-    }
-    if (message.listModels !== undefined) {
-      ListVSCodeModelsResponse.encode(message.listModels, writer.uint32(26).fork()).join();
-    }
-    if (message.sendChat !== undefined) {
-      SendVSCodeChatResponse.encode(message.sendChat, writer.uint32(34).fork()).join();
-    }
-    if (message.error !== undefined) {
-      VSCodeError.encode(message.error, writer.uint32(50).fork()).join();
-    }
-    if (message.getWorkspace !== undefined) {
-      GetWorkspaceResponse.encode(message.getWorkspace, writer.uint32(58).fork()).join();
+    switch (message.response?.$case) {
+      case "invokeTool":
+        InvokeToolResponse.encode(message.response.invokeTool, writer.uint32(18).fork()).join();
+        break;
+      case "listModels":
+        ListVSCodeModelsResponse.encode(message.response.listModels, writer.uint32(26).fork()).join();
+        break;
+      case "sendChat":
+        SendVSCodeChatResponse.encode(message.response.sendChat, writer.uint32(34).fork()).join();
+        break;
+      case "error":
+        VSCodeError.encode(message.response.error, writer.uint32(50).fork()).join();
+        break;
+      case "getWorkspace":
+        GetWorkspaceResponse.encode(message.response.getWorkspace, writer.uint32(58).fork()).join();
+        break;
     }
     return writer;
   },
@@ -11003,7 +11492,7 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
             break;
           }
 
-          message.invokeTool = InvokeToolResponse.decode(reader, reader.uint32());
+          message.response = { $case: "invokeTool", invokeTool: InvokeToolResponse.decode(reader, reader.uint32()) };
           continue;
         }
         case 3: {
@@ -11011,7 +11500,10 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
             break;
           }
 
-          message.listModels = ListVSCodeModelsResponse.decode(reader, reader.uint32());
+          message.response = {
+            $case: "listModels",
+            listModels: ListVSCodeModelsResponse.decode(reader, reader.uint32()),
+          };
           continue;
         }
         case 4: {
@@ -11019,7 +11511,7 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
             break;
           }
 
-          message.sendChat = SendVSCodeChatResponse.decode(reader, reader.uint32());
+          message.response = { $case: "sendChat", sendChat: SendVSCodeChatResponse.decode(reader, reader.uint32()) };
           continue;
         }
         case 6: {
@@ -11027,7 +11519,7 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
             break;
           }
 
-          message.error = VSCodeError.decode(reader, reader.uint32());
+          message.response = { $case: "error", error: VSCodeError.decode(reader, reader.uint32()) };
           continue;
         }
         case 7: {
@@ -11035,7 +11527,10 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
             break;
           }
 
-          message.getWorkspace = GetWorkspaceResponse.decode(reader, reader.uint32());
+          message.response = {
+            $case: "getWorkspace",
+            getWorkspace: GetWorkspaceResponse.decode(reader, reader.uint32()),
+          };
           continue;
         }
       }
@@ -11054,26 +11549,24 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
         : isSet(object.request_id)
         ? globalThis.String(object.request_id)
         : "",
-      invokeTool: isSet(object.invokeTool)
-        ? InvokeToolResponse.fromJSON(object.invokeTool)
+      response: isSet(object.invokeTool)
+        ? { $case: "invokeTool", invokeTool: InvokeToolResponse.fromJSON(object.invokeTool) }
         : isSet(object.invoke_tool)
-        ? InvokeToolResponse.fromJSON(object.invoke_tool)
-        : undefined,
-      listModels: isSet(object.listModels)
-        ? ListVSCodeModelsResponse.fromJSON(object.listModels)
+        ? { $case: "invokeTool", invokeTool: InvokeToolResponse.fromJSON(object.invoke_tool) }
+        : isSet(object.listModels)
+        ? { $case: "listModels", listModels: ListVSCodeModelsResponse.fromJSON(object.listModels) }
         : isSet(object.list_models)
-        ? ListVSCodeModelsResponse.fromJSON(object.list_models)
-        : undefined,
-      sendChat: isSet(object.sendChat)
-        ? SendVSCodeChatResponse.fromJSON(object.sendChat)
+        ? { $case: "listModels", listModels: ListVSCodeModelsResponse.fromJSON(object.list_models) }
+        : isSet(object.sendChat)
+        ? { $case: "sendChat", sendChat: SendVSCodeChatResponse.fromJSON(object.sendChat) }
         : isSet(object.send_chat)
-        ? SendVSCodeChatResponse.fromJSON(object.send_chat)
-        : undefined,
-      error: isSet(object.error) ? VSCodeError.fromJSON(object.error) : undefined,
-      getWorkspace: isSet(object.getWorkspace)
-        ? GetWorkspaceResponse.fromJSON(object.getWorkspace)
+        ? { $case: "sendChat", sendChat: SendVSCodeChatResponse.fromJSON(object.send_chat) }
+        : isSet(object.error)
+        ? { $case: "error", error: VSCodeError.fromJSON(object.error) }
+        : isSet(object.getWorkspace)
+        ? { $case: "getWorkspace", getWorkspace: GetWorkspaceResponse.fromJSON(object.getWorkspace) }
         : isSet(object.get_workspace)
-        ? GetWorkspaceResponse.fromJSON(object.get_workspace)
+        ? { $case: "getWorkspace", getWorkspace: GetWorkspaceResponse.fromJSON(object.get_workspace) }
         : undefined,
     };
   },
@@ -11083,20 +11576,16 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
     if (message.requestId !== "") {
       obj.requestId = message.requestId;
     }
-    if (message.invokeTool !== undefined) {
-      obj.invokeTool = InvokeToolResponse.toJSON(message.invokeTool);
-    }
-    if (message.listModels !== undefined) {
-      obj.listModels = ListVSCodeModelsResponse.toJSON(message.listModels);
-    }
-    if (message.sendChat !== undefined) {
-      obj.sendChat = SendVSCodeChatResponse.toJSON(message.sendChat);
-    }
-    if (message.error !== undefined) {
-      obj.error = VSCodeError.toJSON(message.error);
-    }
-    if (message.getWorkspace !== undefined) {
-      obj.getWorkspace = GetWorkspaceResponse.toJSON(message.getWorkspace);
+    if (message.response?.$case === "invokeTool") {
+      obj.invokeTool = InvokeToolResponse.toJSON(message.response.invokeTool);
+    } else if (message.response?.$case === "listModels") {
+      obj.listModels = ListVSCodeModelsResponse.toJSON(message.response.listModels);
+    } else if (message.response?.$case === "sendChat") {
+      obj.sendChat = SendVSCodeChatResponse.toJSON(message.response.sendChat);
+    } else if (message.response?.$case === "error") {
+      obj.error = VSCodeError.toJSON(message.response.error);
+    } else if (message.response?.$case === "getWorkspace") {
+      obj.getWorkspace = GetWorkspaceResponse.toJSON(message.response.getWorkspace);
     }
     return obj;
   },
@@ -11107,21 +11596,50 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
   fromPartial(object: DeepPartial<VSCodeResponse>): VSCodeResponse {
     const message = createBaseVSCodeResponse();
     message.requestId = object.requestId ?? "";
-    message.invokeTool = (object.invokeTool !== undefined && object.invokeTool !== null)
-      ? InvokeToolResponse.fromPartial(object.invokeTool)
-      : undefined;
-    message.listModels = (object.listModels !== undefined && object.listModels !== null)
-      ? ListVSCodeModelsResponse.fromPartial(object.listModels)
-      : undefined;
-    message.sendChat = (object.sendChat !== undefined && object.sendChat !== null)
-      ? SendVSCodeChatResponse.fromPartial(object.sendChat)
-      : undefined;
-    message.error = (object.error !== undefined && object.error !== null)
-      ? VSCodeError.fromPartial(object.error)
-      : undefined;
-    message.getWorkspace = (object.getWorkspace !== undefined && object.getWorkspace !== null)
-      ? GetWorkspaceResponse.fromPartial(object.getWorkspace)
-      : undefined;
+    switch (object.response?.$case) {
+      case "invokeTool": {
+        if (object.response?.invokeTool !== undefined && object.response?.invokeTool !== null) {
+          message.response = {
+            $case: "invokeTool",
+            invokeTool: InvokeToolResponse.fromPartial(object.response.invokeTool),
+          };
+        }
+        break;
+      }
+      case "listModels": {
+        if (object.response?.listModels !== undefined && object.response?.listModels !== null) {
+          message.response = {
+            $case: "listModels",
+            listModels: ListVSCodeModelsResponse.fromPartial(object.response.listModels),
+          };
+        }
+        break;
+      }
+      case "sendChat": {
+        if (object.response?.sendChat !== undefined && object.response?.sendChat !== null) {
+          message.response = {
+            $case: "sendChat",
+            sendChat: SendVSCodeChatResponse.fromPartial(object.response.sendChat),
+          };
+        }
+        break;
+      }
+      case "error": {
+        if (object.response?.error !== undefined && object.response?.error !== null) {
+          message.response = { $case: "error", error: VSCodeError.fromPartial(object.response.error) };
+        }
+        break;
+      }
+      case "getWorkspace": {
+        if (object.response?.getWorkspace !== undefined && object.response?.getWorkspace !== null) {
+          message.response = {
+            $case: "getWorkspace",
+            getWorkspace: GetWorkspaceResponse.fromPartial(object.response.getWorkspace),
+          };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -11928,16 +12446,18 @@ export const SendVSCodeChatResponse: MessageFns<SendVSCodeChatResponse> = {
 };
 
 function createBaseVSCodeChatChunk(): VSCodeChatChunk {
-  return { text: undefined, toolCall: undefined };
+  return { chunk: undefined };
 }
 
 export const VSCodeChatChunk: MessageFns<VSCodeChatChunk> = {
   encode(message: VSCodeChatChunk, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
-    if (message.text !== undefined) {
-      writer.uint32(10).string(message.text);
-    }
-    if (message.toolCall !== undefined) {
-      VSCodeToolCall.encode(message.toolCall, writer.uint32(18).fork()).join();
+    switch (message.chunk?.$case) {
+      case "text":
+        writer.uint32(10).string(message.chunk.text);
+        break;
+      case "toolCall":
+        VSCodeToolCall.encode(message.chunk.toolCall, writer.uint32(18).fork()).join();
+        break;
     }
     return writer;
   },
@@ -11954,7 +12474,7 @@ export const VSCodeChatChunk: MessageFns<VSCodeChatChunk> = {
             break;
           }
 
-          message.text = reader.string();
+          message.chunk = { $case: "text", text: reader.string() };
           continue;
         }
         case 2: {
@@ -11962,7 +12482,7 @@ export const VSCodeChatChunk: MessageFns<VSCodeChatChunk> = {
             break;
           }
 
-          message.toolCall = VSCodeToolCall.decode(reader, reader.uint32());
+          message.chunk = { $case: "toolCall", toolCall: VSCodeToolCall.decode(reader, reader.uint32()) };
           continue;
         }
       }
@@ -11976,22 +12496,22 @@ export const VSCodeChatChunk: MessageFns<VSCodeChatChunk> = {
 
   fromJSON(object: any): VSCodeChatChunk {
     return {
-      text: isSet(object.text) ? globalThis.String(object.text) : undefined,
-      toolCall: isSet(object.toolCall)
-        ? VSCodeToolCall.fromJSON(object.toolCall)
+      chunk: isSet(object.text)
+        ? { $case: "text", text: globalThis.String(object.text) }
+        : isSet(object.toolCall)
+        ? { $case: "toolCall", toolCall: VSCodeToolCall.fromJSON(object.toolCall) }
         : isSet(object.tool_call)
-        ? VSCodeToolCall.fromJSON(object.tool_call)
+        ? { $case: "toolCall", toolCall: VSCodeToolCall.fromJSON(object.tool_call) }
         : undefined,
     };
   },
 
   toJSON(message: VSCodeChatChunk): unknown {
     const obj: any = {};
-    if (message.text !== undefined) {
-      obj.text = message.text;
-    }
-    if (message.toolCall !== undefined) {
-      obj.toolCall = VSCodeToolCall.toJSON(message.toolCall);
+    if (message.chunk?.$case === "text") {
+      obj.text = message.chunk.text;
+    } else if (message.chunk?.$case === "toolCall") {
+      obj.toolCall = VSCodeToolCall.toJSON(message.chunk.toolCall);
     }
     return obj;
   },
@@ -12001,10 +12521,20 @@ export const VSCodeChatChunk: MessageFns<VSCodeChatChunk> = {
   },
   fromPartial(object: DeepPartial<VSCodeChatChunk>): VSCodeChatChunk {
     const message = createBaseVSCodeChatChunk();
-    message.text = object.text ?? undefined;
-    message.toolCall = (object.toolCall !== undefined && object.toolCall !== null)
-      ? VSCodeToolCall.fromPartial(object.toolCall)
-      : undefined;
+    switch (object.chunk?.$case) {
+      case "text": {
+        if (object.chunk?.text !== undefined && object.chunk?.text !== null) {
+          message.chunk = { $case: "text", text: object.chunk.text };
+        }
+        break;
+      }
+      case "toolCall": {
+        if (object.chunk?.toolCall !== undefined && object.chunk?.toolCall !== null) {
+          message.chunk = { $case: "toolCall", toolCall: VSCodeToolCall.fromPartial(object.chunk.toolCall) };
+        }
+        break;
+      }
+    }
     return message;
   },
 };
@@ -12716,6 +13246,24 @@ export const OpenLLMDefinition = {
       responseStream: false,
       options: {},
     },
+    /** Start the embedded web server */
+    startWebServer: {
+      name: "StartWebServer",
+      requestType: StartWebServerRequest,
+      requestStream: false,
+      responseType: StartWebServerResponse,
+      responseStream: false,
+      options: {},
+    },
+    /** Stop the embedded web server */
+    stopWebServer: {
+      name: "StopWebServer",
+      requestType: StopWebServerRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
     /** Register an MCP server */
     registerMcpServer: {
       name: "RegisterMcpServer",
@@ -12847,6 +13395,13 @@ export interface OpenLLMServiceImplementation<CallContextExt = {}> {
     request: HealthCheckRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<HealthCheckResponse>>;
+  /** Start the embedded web server */
+  startWebServer(
+    request: StartWebServerRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<StartWebServerResponse>>;
+  /** Stop the embedded web server */
+  stopWebServer(request: StopWebServerRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
   /** Register an MCP server */
   registerMcpServer(
     request: RegisterMcpServerRequest,
@@ -12962,6 +13517,13 @@ export interface OpenLLMClient<CallOptionsExt = {}> {
     request: DeepPartial<HealthCheckRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<HealthCheckResponse>;
+  /** Start the embedded web server */
+  startWebServer(
+    request: DeepPartial<StartWebServerRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<StartWebServerResponse>;
+  /** Stop the embedded web server */
+  stopWebServer(request: DeepPartial<StopWebServerRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
   /** Register an MCP server */
   registerMcpServer(
     request: DeepPartial<RegisterMcpServerRequest>,
@@ -12980,48 +13542,21 @@ export interface OpenLLMClient<CallOptionsExt = {}> {
 }
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if ((globalThis as any).Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
-  } else {
-    const bin = globalThis.atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; ++i) {
-      arr[i] = bin.charCodeAt(i);
-    }
-    return arr;
-  }
+  return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if ((globalThis as any).Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
-  } else {
-    const bin: string[] = [];
-    arr.forEach((byte) => {
-      bin.push(globalThis.String.fromCharCode(byte));
-    });
-    return globalThis.btoa(bin.join(""));
-  }
+  return globalThis.Buffer.from(arr).toString("base64");
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
-  : T extends globalThis.Array<infer U> ? globalThis.Array<DeepPartial<U>>
+  : T extends Long ? string | number | Long : T extends globalThis.Array<infer U> ? globalThis.Array<DeepPartial<U>>
   : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
-
-function longToNumber(int64: { toString(): string }): number {
-  const num = globalThis.Number(int64.toString());
-  if (num > globalThis.Number.MAX_SAFE_INTEGER) {
-    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
-  }
-  if (num < globalThis.Number.MIN_SAFE_INTEGER) {
-    throw new globalThis.Error("Value is smaller than Number.MIN_SAFE_INTEGER");
-  }
-  return num;
-}
 
 function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;

@@ -17,8 +17,9 @@ import { DaemonClient } from './client';
 
 const logger = getLogger();
 
-// Our vendor ID for filtering out our own models (avoid circular calls)
-const OUR_VENDOR = 'open-llm';
+// Our vendor ID prefix for filtering out our own models (avoid circular calls).
+// All our per-provider vendors start with 'openllm-' (e.g. openllm-openrouter).
+const OUR_VENDOR_PREFIX = 'openllm-';
 
 /**
  * VS Code Backchannel Handler
@@ -34,6 +35,9 @@ export class BackchannelHandler {
     
     // Cache of VS Code LM models
     private modelCache: Map<string, vscode.LanguageModelChat> = new Map();
+
+    /** Callback fired when daemon sends a ModelsChanged notification */
+    onModelsChanged: (() => void) | null = null;
 
     constructor(client: DaemonClient, context: vscode.ExtensionContext) {
         this.client = client;
@@ -182,6 +186,18 @@ export class BackchannelHandler {
             return this.handleGetWorkspace(request.requestId);
         }
         
+        // Handle ModelsChanged push notification from daemon
+        // Proto uses oneof unions: check both camelCase and the $case discriminator
+        const req = request as any;
+        if (req.modelsChanged || req.models_changed || req.request?.$case === 'modelsChanged') {
+            const reason = req.modelsChanged?.reason || req.models_changed?.reason || req.request?.modelsChanged?.reason || 'unknown';
+            logger.info(`[Backchannel] Models changed notification received (reason: ${reason})`);
+            if (this.onModelsChanged) {
+                this.onModelsChanged();
+            }
+            return { requestId: request.requestId };
+        }
+        
         return {
             requestId: request.requestId,
             error: { message: 'Unknown or empty request type', code: 'INVALID_REQUEST' },
@@ -249,7 +265,7 @@ export class BackchannelHandler {
             const models = await vscode.lm.selectChatModels(selector);
             
             // Filter out our own models to avoid circular calls
-            const externalModels = models.filter(m => m.vendor !== OUR_VENDOR);
+            const externalModels = models.filter(m => !m.vendor.startsWith(OUR_VENDOR_PREFIX));
             
             // Cache models for later use
             for (const model of externalModels) {
@@ -290,7 +306,7 @@ export class BackchannelHandler {
             let model = this.modelCache.get(req.modelId);
             if (!model) {
                 const models = await vscode.lm.selectChatModels({});
-                model = models.find(m => m.id === req.modelId && m.vendor !== OUR_VENDOR);
+                model = models.find(m => m.id === req.modelId && !m.vendor.startsWith(OUR_VENDOR_PREFIX));
                 if (model) {
                     this.modelCache.set(model.id, model);
                 }

@@ -2,8 +2,9 @@
  * OpenLLM Daemon Client
  * 
  * The daemon uses Unix Domain Sockets for local IPC:
- * - Socket: $XDG_RUNTIME_DIR/openllm/daemon.sock (or ~/.openllm/daemon.sock)
- * - PID file: $XDG_RUNTIME_DIR/openllm/openllm.pid (or ~/.openllm/openllm.pid)
+ * - Socket: <runtimeDir>/daemon.sock   (Linux: /run/user/<uid>/openllm/)
+ * - PID file: <runtimeDir>/openllm.pid
+ * - Config: <configDir>/config.yaml    (Linux: ~/.config/openllm/)
  * 
  * Architecture:
  * - VS Code → Daemon: gRPC client for chat, sessions, config, etc.

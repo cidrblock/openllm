@@ -48,6 +48,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Start the backchannel for daemon → VS Code callbacks (workspace queries, tool invocation, etc.)
     backchannelHandler = new BackchannelHandler(client, context);
+    
+    // Wire up ModelsChanged notifications: daemon push → LM provider refresh
+    backchannelHandler.onModelsChanged = () => {
+      if (languageModelProvider) {
+        logger.info('[Extension] ModelsChanged notification → refreshing LM provider');
+        languageModelProvider.refreshModels().catch(e => {
+          logger.warn('[Extension] Failed to refresh models after notification:', e);
+        });
+      }
+    };
+    
     backchannelHandler.start().catch(e => {
       logger.warn('[Backchannel] Failed to start:', e);
     });
@@ -159,11 +170,37 @@ function registerCommands(context: vscode.ExtensionContext): void {
     })
   );
 
-  // Open dashboard command - opens web UI in browser
+  // Open dashboard command - starts web server via gRPC, then opens browser
   context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.openDashboard', () => {
-      console.log('[OpenLLM] openDashboard command');
-      vscode.env.openExternal(vscode.Uri.parse(DASHBOARD_URL));
+    vscode.commands.registerCommand('openLLM.openDashboard', async () => {
+      const logger = getLogger();
+      logger.info('[Dashboard] Opening dashboard...');
+      
+      try {
+        const client = getDaemonClient();
+        if (!client.isConnected()) {
+          // Daemon not connected — open URL anyway, user may have started web manually
+          logger.warn('[Dashboard] Daemon not connected, opening URL directly');
+          vscode.env.openExternal(vscode.Uri.parse(DASHBOARD_URL));
+          return;
+        }
+        
+        // Send gRPC request to start the embedded web server
+        const response = await client.startWebServer(8787);
+        const url = response.url || DASHBOARD_URL;
+        
+        if (response.alreadyRunning) {
+          logger.info(`[Dashboard] Web server already running at ${url}`);
+        } else {
+          logger.info(`[Dashboard] Web server started at ${url}`);
+        }
+        
+        vscode.env.openExternal(vscode.Uri.parse(url));
+      } catch (e: any) {
+        logger.error(`[Dashboard] Failed to start web server: ${e.message}`);
+        // Fall back to opening the URL directly
+        vscode.env.openExternal(vscode.Uri.parse(DASHBOARD_URL));
+      }
     })
   );
 

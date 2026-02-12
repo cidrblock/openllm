@@ -6,9 +6,14 @@
   "workspaces": [
     "packages/*"
   ],
+  "type": "module",
   "scripts": {
-    "build": "npm run build --workspaces",
-    "clean": "npm run clean --workspaces",
+    "build": "node build.js",
+    "build:dev": "node build.js --skip-sea --skip-zip --code-install",
+    "build:proto": "node build.js --proto-only",
+    "build:install": "node build.js --code-install",
+    "build:workspaces": "npm run build --workspaces",
+    "clean": "rm -rf dist .build-venv && npm run clean --workspaces",
     "test": "npm run test --workspaces"
   },
   "devDependencies": {

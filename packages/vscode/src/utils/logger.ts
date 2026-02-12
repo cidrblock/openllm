@@ -99,15 +99,6 @@ export function updateLogLevel(): void {
 }
 
 /**
- * Show the output channel
- */
-export function showLog(): void {
-  if (logger) {
-    logger.show();
-  }
-}
-
-/**
  * Dispose the logger
  */
 export function disposeLogger(): void {

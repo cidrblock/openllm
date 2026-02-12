@@ -731,10 +731,12 @@ class ImportSessionRequest(_message.Message):
     def __init__(self, json_content: _Optional[str] = ..., generate_new_id: bool = ...) -> None: ...
 
 class ListModelsRequest(_message.Message):
-    __slots__ = ("provider_filter",)
+    __slots__ = ("provider_filter", "workspace_paths")
     PROVIDER_FILTER_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_PATHS_FIELD_NUMBER: _ClassVar[int]
     provider_filter: str
-    def __init__(self, provider_filter: _Optional[str] = ...) -> None: ...
+    workspace_paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, provider_filter: _Optional[str] = ..., workspace_paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListModelsResponse(_message.Message):
     __slots__ = ("models",)
@@ -771,8 +773,10 @@ class ModelCapabilities(_message.Message):
     def __init__(self, supports_streaming: bool = ..., supports_tools: bool = ..., supports_vision: bool = ..., context_window: _Optional[int] = ...) -> None: ...
 
 class ListProvidersRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("workspace_paths",)
+    WORKSPACE_PATHS_FIELD_NUMBER: _ClassVar[int]
+    workspace_paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, workspace_paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListProvidersResponse(_message.Message):
     __slots__ = ("providers",)
@@ -953,12 +957,16 @@ class SecretInfo(_message.Message):
     def __init__(self, key: _Optional[str] = ..., store: _Optional[_Union[SecretStore, str]] = ..., has_value: bool = ...) -> None: ...
 
 class RegisterRequest(_message.Message):
-    __slots__ = ("client", "is_spawner")
+    __slots__ = ("client", "is_spawner", "workspace_path", "workspace_paths")
     CLIENT_FIELD_NUMBER: _ClassVar[int]
     IS_SPAWNER_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_PATH_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_PATHS_FIELD_NUMBER: _ClassVar[int]
     client: ClientInfo
     is_spawner: bool
-    def __init__(self, client: _Optional[_Union[ClientInfo, _Mapping]] = ..., is_spawner: bool = ...) -> None: ...
+    workspace_path: str
+    workspace_paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, client: _Optional[_Union[ClientInfo, _Mapping]] = ..., is_spawner: bool = ..., workspace_path: _Optional[str] = ..., workspace_paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class RegisterResponse(_message.Message):
     __slots__ = ("client_id", "connected_clients")
@@ -978,6 +986,16 @@ class GetStatusRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
+class GetConnectedWorkspacesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GetConnectedWorkspacesResponse(_message.Message):
+    __slots__ = ("workspaces",)
+    WORKSPACES_FIELD_NUMBER: _ClassVar[int]
+    workspaces: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, workspaces: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class DaemonStatus(_message.Message):
     __slots__ = ("version", "started_at", "connected_clients", "active_sessions", "clients", "registered_mcp_servers")
     VERSION_FIELD_NUMBER: _ClassVar[int]
@@ -995,16 +1013,18 @@ class DaemonStatus(_message.Message):
     def __init__(self, version: _Optional[str] = ..., started_at: _Optional[_Union[Timestamp, _Mapping]] = ..., connected_clients: _Optional[int] = ..., active_sessions: _Optional[int] = ..., clients: _Optional[_Iterable[_Union[ConnectedClient, _Mapping]]] = ..., registered_mcp_servers: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ConnectedClient(_message.Message):
-    __slots__ = ("client_id", "client_type", "connected_at", "is_spawner")
+    __slots__ = ("client_id", "client_type", "connected_at", "is_spawner", "workspace_path")
     CLIENT_ID_FIELD_NUMBER: _ClassVar[int]
     CLIENT_TYPE_FIELD_NUMBER: _ClassVar[int]
     CONNECTED_AT_FIELD_NUMBER: _ClassVar[int]
     IS_SPAWNER_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_PATH_FIELD_NUMBER: _ClassVar[int]
     client_id: str
     client_type: ClientType
     connected_at: Timestamp
     is_spawner: bool
-    def __init__(self, client_id: _Optional[str] = ..., client_type: _Optional[_Union[ClientType, str]] = ..., connected_at: _Optional[_Union[Timestamp, _Mapping]] = ..., is_spawner: bool = ...) -> None: ...
+    workspace_path: str
+    def __init__(self, client_id: _Optional[str] = ..., client_type: _Optional[_Union[ClientType, str]] = ..., connected_at: _Optional[_Union[Timestamp, _Mapping]] = ..., is_spawner: bool = ..., workspace_path: _Optional[str] = ...) -> None: ...
 
 class ShutdownRequest(_message.Message):
     __slots__ = ("force", "grace_period_seconds")
@@ -1025,6 +1045,164 @@ class HealthCheckResponse(_message.Message):
     healthy: bool
     version: str
     def __init__(self, healthy: bool = ..., version: _Optional[str] = ...) -> None: ...
+
+class StartWebServerRequest(_message.Message):
+    __slots__ = ("port",)
+    PORT_FIELD_NUMBER: _ClassVar[int]
+    port: int
+    def __init__(self, port: _Optional[int] = ...) -> None: ...
+
+class StartWebServerResponse(_message.Message):
+    __slots__ = ("started", "already_running", "port", "url")
+    STARTED_FIELD_NUMBER: _ClassVar[int]
+    ALREADY_RUNNING_FIELD_NUMBER: _ClassVar[int]
+    PORT_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    started: bool
+    already_running: bool
+    port: int
+    url: str
+    def __init__(self, started: bool = ..., already_running: bool = ..., port: _Optional[int] = ..., url: _Optional[str] = ...) -> None: ...
+
+class StopWebServerRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class VSCodeRequest(_message.Message):
+    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "get_workspace", "models_changed")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    INVOKE_TOOL_FIELD_NUMBER: _ClassVar[int]
+    LIST_MODELS_FIELD_NUMBER: _ClassVar[int]
+    SEND_CHAT_FIELD_NUMBER: _ClassVar[int]
+    GET_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    MODELS_CHANGED_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    invoke_tool: InvokeToolRequest
+    list_models: ListVSCodeModelsRequest
+    send_chat: SendVSCodeChatRequest
+    get_workspace: GetWorkspaceRequest
+    models_changed: ModelsChangedNotification
+    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolRequest, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsRequest, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatRequest, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceRequest, _Mapping]] = ..., models_changed: _Optional[_Union[ModelsChangedNotification, _Mapping]] = ...) -> None: ...
+
+class ModelsChangedNotification(_message.Message):
+    __slots__ = ("reason",)
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    reason: str
+    def __init__(self, reason: _Optional[str] = ...) -> None: ...
+
+class VSCodeResponse(_message.Message):
+    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "error", "get_workspace")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    INVOKE_TOOL_FIELD_NUMBER: _ClassVar[int]
+    LIST_MODELS_FIELD_NUMBER: _ClassVar[int]
+    SEND_CHAT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    GET_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    invoke_tool: InvokeToolResponse
+    list_models: ListVSCodeModelsResponse
+    send_chat: SendVSCodeChatResponse
+    error: VSCodeError
+    get_workspace: GetWorkspaceResponse
+    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolResponse, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsResponse, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatResponse, _Mapping]] = ..., error: _Optional[_Union[VSCodeError, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceResponse, _Mapping]] = ...) -> None: ...
+
+class GetWorkspaceRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class GetWorkspaceResponse(_message.Message):
+    __slots__ = ("workspace_path", "workspace_folders")
+    WORKSPACE_PATH_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FOLDERS_FIELD_NUMBER: _ClassVar[int]
+    workspace_path: str
+    workspace_folders: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, workspace_path: _Optional[str] = ..., workspace_folders: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class VSCodeError(_message.Message):
+    __slots__ = ("message", "code")
+    MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    CODE_FIELD_NUMBER: _ClassVar[int]
+    message: str
+    code: str
+    def __init__(self, message: _Optional[str] = ..., code: _Optional[str] = ...) -> None: ...
+
+class InvokeToolRequest(_message.Message):
+    __slots__ = ("tool_name", "arguments_json")
+    TOOL_NAME_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    tool_name: str
+    arguments_json: str
+    def __init__(self, tool_name: _Optional[str] = ..., arguments_json: _Optional[str] = ...) -> None: ...
+
+class InvokeToolResponse(_message.Message):
+    __slots__ = ("result_json", "is_error")
+    RESULT_JSON_FIELD_NUMBER: _ClassVar[int]
+    IS_ERROR_FIELD_NUMBER: _ClassVar[int]
+    result_json: str
+    is_error: bool
+    def __init__(self, result_json: _Optional[str] = ..., is_error: bool = ...) -> None: ...
+
+class ListVSCodeModelsRequest(_message.Message):
+    __slots__ = ("family_filter",)
+    FAMILY_FILTER_FIELD_NUMBER: _ClassVar[int]
+    family_filter: str
+    def __init__(self, family_filter: _Optional[str] = ...) -> None: ...
+
+class ListVSCodeModelsResponse(_message.Message):
+    __slots__ = ("models",)
+    MODELS_FIELD_NUMBER: _ClassVar[int]
+    models: _containers.RepeatedCompositeFieldContainer[VSCodeModel]
+    def __init__(self, models: _Optional[_Iterable[_Union[VSCodeModel, _Mapping]]] = ...) -> None: ...
+
+class VSCodeModel(_message.Message):
+    __slots__ = ("id", "name", "vendor", "family", "max_input_tokens")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    VENDOR_FIELD_NUMBER: _ClassVar[int]
+    FAMILY_FIELD_NUMBER: _ClassVar[int]
+    MAX_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    vendor: str
+    family: str
+    max_input_tokens: int
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., vendor: _Optional[str] = ..., family: _Optional[str] = ..., max_input_tokens: _Optional[int] = ...) -> None: ...
+
+class SendVSCodeChatRequest(_message.Message):
+    __slots__ = ("model_id", "messages", "temperature", "max_tokens")
+    MODEL_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
+    TEMPERATURE_FIELD_NUMBER: _ClassVar[int]
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    model_id: str
+    messages: _containers.RepeatedCompositeFieldContainer[Message]
+    temperature: float
+    max_tokens: int
+    def __init__(self, model_id: _Optional[str] = ..., messages: _Optional[_Iterable[_Union[Message, _Mapping]]] = ..., temperature: _Optional[float] = ..., max_tokens: _Optional[int] = ...) -> None: ...
+
+class SendVSCodeChatResponse(_message.Message):
+    __slots__ = ("chunks",)
+    CHUNKS_FIELD_NUMBER: _ClassVar[int]
+    chunks: _containers.RepeatedCompositeFieldContainer[VSCodeChatChunk]
+    def __init__(self, chunks: _Optional[_Iterable[_Union[VSCodeChatChunk, _Mapping]]] = ...) -> None: ...
+
+class VSCodeChatChunk(_message.Message):
+    __slots__ = ("text", "tool_call")
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    TOOL_CALL_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    tool_call: VSCodeToolCall
+    def __init__(self, text: _Optional[str] = ..., tool_call: _Optional[_Union[VSCodeToolCall, _Mapping]] = ...) -> None: ...
+
+class VSCodeToolCall(_message.Message):
+    __slots__ = ("call_id", "name", "arguments_json")
+    CALL_ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    call_id: str
+    name: str
+    arguments_json: str
+    def __init__(self, call_id: _Optional[str] = ..., name: _Optional[str] = ..., arguments_json: _Optional[str] = ...) -> None: ...
 
 class RegisterMcpServerRequest(_message.Message):
     __slots__ = ("server_id", "transport", "capabilities")

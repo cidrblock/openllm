@@ -4,12 +4,15 @@
  * This module provides the gRPC client for communicating with the OpenLLM daemon.
  * The client is generated from proto/openllm/v1/service.proto
  * 
- * The daemon uses Unix Domain Sockets for local IPC:
- * - Socket: $XDG_RUNTIME_DIR/openllm/daemon.sock (or ~/.openllm/daemon.sock)
- * - PID file: ~/.openllm/openllm.pid (always in home dir, matching daemon's transport.ts)
+ * The daemon uses Unix Domain Sockets for local IPC.
+ * Runtime paths (PID file, socket) are computed using the same platform-aware
+ * logic as the daemon (see packages/daemon/src/paths.ts):
+ *   Linux:   $XDG_RUNTIME_DIR/openllm  → /run/user/<uid>/openllm
+ *   macOS:   os.tmpdir()/openllm
+ *   Windows: named pipe
  */
 
-import { createChannel, createClient, Channel, ClientError, Status } from 'nice-grpc';
+import { createChannel, createClient, Channel } from 'nice-grpc';
 import * as proto from '../proto/openllm/v1/service';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
@@ -20,41 +23,44 @@ import { getLogger } from '../utils/logger';
 // Re-export the generated types for convenience
 export * from '../proto/openllm/v1/service';
 
+const APP_NAME = 'openllm';
+
+// ── Platform-aware path helpers (mirrors daemon's paths.ts) ─────────
+
 /**
- * Get the OpenLLM runtime directory (for the socket).
- * Uses XDG_RUNTIME_DIR if available, otherwise /run/user/<uid>/openllm.
- * Must match the daemon's transport.ts getDefaultSocketPath().
+ * Get the platform runtime directory (for ephemeral files: PID, socket, lock).
  */
 function getRuntimeDir(): string {
-    const xdgRuntime = process.env.XDG_RUNTIME_DIR;
-    if (xdgRuntime) {
-        return path.join(xdgRuntime, 'openllm');
+    // 1. Respect XDG_RUNTIME_DIR (standard on Linux)
+    if (process.env.XDG_RUNTIME_DIR) {
+        return path.join(process.env.XDG_RUNTIME_DIR, APP_NAME);
     }
-    // Fallback: match daemon's transport.ts which uses /run/user/<uid>
+
+    // 2. macOS — os.tmpdir() returns DARWIN_USER_TEMP_DIR automatically
+    if (process.platform === 'darwin') {
+        return path.join(os.tmpdir(), APP_NAME);
+    }
+
+    // 3. Linux without XDG_RUNTIME_DIR — try /run/user/<uid>
     if (process.platform !== 'win32') {
         try {
             const uid = os.userInfo().uid;
-            return path.join(`/run/user/${uid}`, 'openllm');
+            return path.join(`/run/user/${uid}`, APP_NAME);
         } catch {
-            // os.userInfo() can fail on some platforms
+            // os.userInfo() can fail in some sandboxes
         }
     }
-    return path.join(os.homedir(), '.openllm');
+
+    // 4. Fallback
+    return path.join('/tmp', APP_NAME);
 }
 
-/**
- * Get the OpenLLM config/state directory (for PID file, config).
- * Always in ~/.openllm/ to match the daemon's transport.ts
- */
-function getStateDir(): string {
-    return path.join(os.homedir(), '.openllm');
-}
-
-// Daemon paths — socket in runtime dir, PID in state dir (matches daemon's transport.ts)
+// Daemon paths — PID + socket in runtime dir (matches daemon's paths.ts)
 const RUNTIME_DIR = getRuntimeDir();
-const STATE_DIR = getStateDir();
-const PID_FILE = path.join(STATE_DIR, 'openllm.pid');
-const SOCKET_FILE = path.join(RUNTIME_DIR, 'daemon.sock');
+const PID_FILE = path.join(RUNTIME_DIR, `${APP_NAME}.pid`);
+const SOCKET_FILE = process.platform === 'win32'
+    ? '\\\\.\\pipe\\openllm-daemon'
+    : path.join(RUNTIME_DIR, 'daemon.sock');
 
 // gRPC address for Unix Domain Socket
 const DEFAULT_DAEMON_ADDRESS = `unix://${SOCKET_FILE}`;
@@ -95,44 +101,6 @@ export function isDaemonRunning(): boolean {
         // process.kill throws if process doesn't exist
         return false;
     }
-}
-
-/**
- * Get the daemon PID if running
- */
-export function getDaemonPid(): number | null {
-    try {
-        if (!fs.existsSync(PID_FILE)) {
-            return null;
-        }
-        
-        const pidStr = fs.readFileSync(PID_FILE, 'utf-8').trim();
-        const pid = parseInt(pidStr, 10);
-        
-        if (isNaN(pid)) {
-            return null;
-        }
-        
-        // Verify process exists
-        process.kill(pid, 0);
-        return pid;
-    } catch (e) {
-        return null;
-    }
-}
-
-/**
- * Get daemon socket path
- */
-export function getSocketPath(): string {
-    return SOCKET_FILE;
-}
-
-/**
- * Get daemon directory
- */
-export function getDaemonDir(): string {
-    return RUNTIME_DIR;
 }
 
 /**
@@ -204,12 +172,9 @@ export class DaemonClient {
         const { spawn } = await import('child_process');
         const logger = getLogger();
         
-        // Ensure both runtime and state directories exist
+        // Ensure runtime directory exists (PID + socket live here)
         if (!fs.existsSync(RUNTIME_DIR)) {
             fs.mkdirSync(RUNTIME_DIR, { recursive: true, mode: 0o700 });
-        }
-        if (!fs.existsSync(STATE_DIR)) {
-            fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
         }
 
         const { cmd, args } = await this.findDaemonCommand();
@@ -281,15 +246,15 @@ export class DaemonClient {
      * 
      * Priority:
      *   1) `openllm` in PATH (global install, npm link, or SEA binary — no node needed)
-     *   2) Bundled daemon JS in extension's bin/ directory (needs node)
-     *   3) Monorepo workspace packages/daemon/dist/index.js (dev, needs node)
+     *   2) Bundled SEA binary in extension's bin/ (self-contained, no node needed)
+     *   3) Bundled JS fallback in extension's bin/ (needs system node)
+     *   4) Monorepo workspace packages/daemon/dist/index.js (dev, needs node)
      */
     private async findDaemonCommand(): Promise<{ cmd: string; args: string[] }> {
         const { execSync } = await import('child_process');
         const logger = getLogger();
         
         // 1) Try to find openllm in PATH (global npm install, npm link, or SEA binary)
-        //    This is the ideal case — no external node dependency needed.
         try {
             const cmd = process.platform === 'win32' ? 'where openllm' : 'which openllm';
             const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
@@ -301,25 +266,36 @@ export class DaemonClient {
             logger.info('[Daemon] openllm not found in PATH');
         }
 
-        // For options 2 & 3 we need a Node.js binary (not the Electron process.execPath)
-        const nodeBin = await this.findNodeBinary();
+        // 2) Bundled SEA binary — self-contained, no node dependency
+        if (extensionPath) {
+            const platform = process.platform === 'win32' ? 'win32' 
+                : process.platform === 'darwin' ? 'darwin' : 'linux';
+            const arch = process.arch; // x64, arm64, etc.
+            const seaBinary = path.join(extensionPath, 'bin', `openllm-daemon-${platform}-${arch}`);
+            if (fs.existsSync(seaBinary)) {
+                logger.info(`[Daemon] Found SEA binary: ${seaBinary}`);
+                return { cmd: seaBinary, args: [] };
+            }
+            logger.info(`[Daemon] No SEA binary at ${seaBinary}`);
+        }
 
-        // 2) Bundled daemon JS in extension (esbuild single-file bundle)
+        // 3) Bundled JS fallback — needs system node
         if (extensionPath) {
             const bundledEntry = path.join(extensionPath, 'bin', 'openllm-daemon.js');
             if (fs.existsSync(bundledEntry)) {
-                logger.info(`[Daemon] Found bundled daemon: ${bundledEntry}`);
+                const nodeBin = await this.findNodeBinary();
+                logger.info(`[Daemon] Found JS fallback: ${bundledEntry} (node: ${nodeBin})`);
                 return { cmd: nodeBin, args: [bundledEntry] };
             }
-            logger.info(`[Daemon] No bundled daemon at ${bundledEntry}`);
         }
 
-        // 3) Monorepo / workspace fallback (development)
+        // 4) Monorepo / workspace fallback (development)
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (workspaceFolders) {
             for (const folder of workspaceFolders) {
                 const candidate = path.join(folder.uri.fsPath, 'packages', 'daemon', 'dist', 'index.js');
                 if (fs.existsSync(candidate)) {
+                    const nodeBin = await this.findNodeBinary();
                     logger.info(`[Daemon] Found daemon in workspace: ${candidate}`);
                     return { cmd: nodeBin, args: [candidate] };
                 }
@@ -447,11 +423,12 @@ export class DaemonClient {
     }
 
     /**
-     * List available models
+     * List available models (workspace-aware)
      */
     async listModels(): Promise<proto.Model[]> {
         const client = this.getClient();
-        const response = await client.listModels({});
+        const folders = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+        const response = await client.listModels({ workspacePaths: folders });
         return response.models;
     }
 
@@ -562,6 +539,23 @@ export class DaemonClient {
     }
 
     /**
+     * Start the embedded web server (dashboard) via gRPC.
+     * Returns the URL to open in the browser.
+     */
+    async startWebServer(port: number = 8787): Promise<proto.StartWebServerResponse> {
+        const client = this.getClient();
+        return client.startWebServer({ port });
+    }
+
+    /**
+     * Stop the embedded web server via gRPC.
+     */
+    async stopWebServer(): Promise<void> {
+        const client = this.getClient();
+        await client.stopWebServer({});
+    }
+
+    /**
      * Register MCP server (VS Code extension registers itself)
      */
     async registerMcpServer(serverId: string, transport: string, capabilities: string[]): Promise<void> {
@@ -588,34 +582,13 @@ export function getDaemonClient(): DaemonClient {
 }
 
 /**
- * Reset the daemon client (for testing)
+ * Reset the daemon client (used internally by shutdownDaemon)
  */
-export function resetDaemonClient(): void {
+function resetDaemonClient(): void {
     if (_instance) {
         _instance.close().catch(() => {});
         _instance = null;
     }
-}
-
-/**
- * Check if gRPC error is a specific status
- */
-export function isGrpcError(error: unknown, status: Status): boolean {
-    return error instanceof ClientError && error.code === status;
-}
-
-/**
- * Check if error is "not found"
- */
-export function isNotFoundError(error: unknown): boolean {
-    return isGrpcError(error, Status.NOT_FOUND);
-}
-
-/**
- * Check if error is "unavailable" (daemon not running)
- */
-export function isUnavailableError(error: unknown): boolean {
-    return isGrpcError(error, Status.UNAVAILABLE);
 }
 
 /**

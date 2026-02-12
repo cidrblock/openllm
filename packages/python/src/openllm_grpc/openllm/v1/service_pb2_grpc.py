@@ -584,6 +584,11 @@ class OpenLLMStub(object):
                 request_serializer=openllm_dot_v1_dot_service__pb2.GetStatusRequest.SerializeToString,
                 response_deserializer=openllm_dot_v1_dot_service__pb2.DaemonStatus.FromString,
                 _registered_method=True)
+        self.GetConnectedWorkspaces = channel.unary_unary(
+                '/openllm.v1.OpenLLM/GetConnectedWorkspaces',
+                request_serializer=openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesRequest.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesResponse.FromString,
+                _registered_method=True)
         self.Shutdown = channel.unary_unary(
                 '/openllm.v1.OpenLLM/Shutdown',
                 request_serializer=openllm_dot_v1_dot_service__pb2.ShutdownRequest.SerializeToString,
@@ -594,6 +599,16 @@ class OpenLLMStub(object):
                 request_serializer=openllm_dot_v1_dot_service__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=openllm_dot_v1_dot_service__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
+        self.StartWebServer = channel.unary_unary(
+                '/openllm.v1.OpenLLM/StartWebServer',
+                request_serializer=openllm_dot_v1_dot_service__pb2.StartWebServerRequest.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.StartWebServerResponse.FromString,
+                _registered_method=True)
+        self.StopWebServer = channel.unary_unary(
+                '/openllm.v1.OpenLLM/StopWebServer',
+                request_serializer=openllm_dot_v1_dot_service__pb2.StopWebServerRequest.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.Empty.FromString,
+                _registered_method=True)
         self.RegisterMcpServer = channel.unary_unary(
                 '/openllm.v1.OpenLLM/RegisterMcpServer',
                 request_serializer=openllm_dot_v1_dot_service__pb2.RegisterMcpServerRequest.SerializeToString,
@@ -603,6 +618,11 @@ class OpenLLMStub(object):
                 '/openllm.v1.OpenLLM/UnregisterMcpServer',
                 request_serializer=openllm_dot_v1_dot_service__pb2.UnregisterMcpServerRequest.SerializeToString,
                 response_deserializer=openllm_dot_v1_dot_service__pb2.Empty.FromString,
+                _registered_method=True)
+        self.VSCodeStream = channel.stream_stream(
+                '/openllm.v1.OpenLLM/VSCodeStream',
+                request_serializer=openllm_dot_v1_dot_service__pb2.VSCodeResponse.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.VSCodeRequest.FromString,
                 _registered_method=True)
 
 
@@ -822,6 +842,13 @@ class OpenLLMServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetConnectedWorkspaces(self, request, context):
+        """Get workspaces from connected VS Code clients (queries via backchannel)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Shutdown(self, request, context):
         """Request daemon shutdown
         """
@@ -836,12 +863,30 @@ class OpenLLMServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StartWebServer(self, request, context):
+        """
+        Web Dashboard (embedded in daemon)
+
+
+        Start the embedded web server
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopWebServer(self, request, context):
+        """Stop the embedded web server
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def RegisterMcpServer(self, request, context):
         """
-        MCP Server Registration (for VS Code extension)
+        MCP Server Registration (for external MCP servers)
 
 
-        Register an MCP server (VS Code extension registers itself)
+        Register an MCP server
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -849,6 +894,21 @@ class OpenLLMServicer(object):
 
     def UnregisterMcpServer(self, request, context):
         """Unregister an MCP server
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def VSCodeStream(self, request_iterator, context):
+        """
+        VS Code Backchannel (Bidirectional Streaming)
+
+        VS Code opens this stream and keeps it alive.
+        The daemon pushes tool/model requests through it.
+        VS Code sends responses back through the same stream.
+
+
+        Bidirectional stream for daemon to call VS Code
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -987,6 +1047,11 @@ def add_OpenLLMServicer_to_server(servicer, server):
                     request_deserializer=openllm_dot_v1_dot_service__pb2.GetStatusRequest.FromString,
                     response_serializer=openllm_dot_v1_dot_service__pb2.DaemonStatus.SerializeToString,
             ),
+            'GetConnectedWorkspaces': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConnectedWorkspaces,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesRequest.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesResponse.SerializeToString,
+            ),
             'Shutdown': grpc.unary_unary_rpc_method_handler(
                     servicer.Shutdown,
                     request_deserializer=openllm_dot_v1_dot_service__pb2.ShutdownRequest.FromString,
@@ -997,6 +1062,16 @@ def add_OpenLLMServicer_to_server(servicer, server):
                     request_deserializer=openllm_dot_v1_dot_service__pb2.HealthCheckRequest.FromString,
                     response_serializer=openllm_dot_v1_dot_service__pb2.HealthCheckResponse.SerializeToString,
             ),
+            'StartWebServer': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartWebServer,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.StartWebServerRequest.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.StartWebServerResponse.SerializeToString,
+            ),
+            'StopWebServer': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopWebServer,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.StopWebServerRequest.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.Empty.SerializeToString,
+            ),
             'RegisterMcpServer': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterMcpServer,
                     request_deserializer=openllm_dot_v1_dot_service__pb2.RegisterMcpServerRequest.FromString,
@@ -1006,6 +1081,11 @@ def add_OpenLLMServicer_to_server(servicer, server):
                     servicer.UnregisterMcpServer,
                     request_deserializer=openllm_dot_v1_dot_service__pb2.UnregisterMcpServerRequest.FromString,
                     response_serializer=openllm_dot_v1_dot_service__pb2.Empty.SerializeToString,
+            ),
+            'VSCodeStream': grpc.stream_stream_rpc_method_handler(
+                    servicer.VSCodeStream,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.VSCodeResponse.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.VSCodeRequest.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1728,6 +1808,33 @@ class OpenLLM(object):
             _registered_method=True)
 
     @staticmethod
+    def GetConnectedWorkspaces(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/openllm.v1.OpenLLM/GetConnectedWorkspaces',
+            openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesRequest.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.GetConnectedWorkspacesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def Shutdown(request,
             target,
             options=(),
@@ -1782,6 +1889,60 @@ class OpenLLM(object):
             _registered_method=True)
 
     @staticmethod
+    def StartWebServer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/openllm.v1.OpenLLM/StartWebServer',
+            openllm_dot_v1_dot_service__pb2.StartWebServerRequest.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.StartWebServerResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StopWebServer(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/openllm.v1.OpenLLM/StopWebServer',
+            openllm_dot_v1_dot_service__pb2.StopWebServerRequest.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
     def RegisterMcpServer(request,
             target,
             options=(),
@@ -1825,6 +1986,33 @@ class OpenLLM(object):
             '/openllm.v1.OpenLLM/UnregisterMcpServer',
             openllm_dot_v1_dot_service__pb2.UnregisterMcpServerRequest.SerializeToString,
             openllm_dot_v1_dot_service__pb2.Empty.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def VSCodeStream(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/openllm.v1.OpenLLM/VSCodeStream',
+            openllm_dot_v1_dot_service__pb2.VSCodeResponse.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.VSCodeRequest.FromString,
             options,
             channel_credentials,
             insecure,
