@@ -105,6 +105,7 @@ export function createWebApp(state: DaemonState): Express {
           configured: p.configured,
           healthy: p.healthy,
           requiresKey: p.requiresKey,
+          defaultBaseUrl: p.defaultBaseUrl,
         })),
       });
     } catch (err: any) {

@@ -797,20 +797,22 @@ class ListProvidersResponse(_message.Message):
     def __init__(self, providers: _Optional[_Iterable[_Union[Provider, _Mapping]]] = ...) -> None: ...
 
 class Provider(_message.Message):
-    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type", "requires_key")
+    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type", "requires_key", "default_base_url")
     ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     CONFIGURED_FIELD_NUMBER: _ClassVar[int]
     HEALTHY_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_TYPE_FIELD_NUMBER: _ClassVar[int]
     REQUIRES_KEY_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_BASE_URL_FIELD_NUMBER: _ClassVar[int]
     id: str
     display_name: str
     configured: bool
     healthy: bool
     provider_type: ProviderType
     requires_key: bool
-    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ..., requires_key: bool = ...) -> None: ...
+    default_base_url: str
+    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ..., requires_key: bool = ..., default_base_url: _Optional[str] = ...) -> None: ...
 
 class GetProviderStatusRequest(_message.Message):
     __slots__ = ("provider_id",)

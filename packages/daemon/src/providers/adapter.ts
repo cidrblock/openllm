@@ -71,6 +71,31 @@ const DEFAULT_ENV_VARS: Record<string, string> = {
 };
 
 /**
+ * Default base URLs per provider.
+ * 
+ * NOTE: multi-llm-ts does not currently expose default base URLs programmatically —
+ * each provider class hardcodes its own default internally. This static map duplicates
+ * those values. A future improvement would be to have multi-llm-ts export a
+ * getDefaultBaseUrl(engine) function so we don't have to maintain a parallel list.
+ */
+const DEFAULT_BASE_URLS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  gemini: 'https://generativelanguage.googleapis.com',
+  mistral: 'https://api.mistral.ai',
+  ollama: 'http://127.0.0.1:11434',
+  openrouter: 'https://openrouter.ai/api/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  xai: 'https://api.x.ai/v1',
+  cerebras: 'https://api.cerebras.ai/v1',
+  lmstudio: 'http://localhost:1234/v1',
+  meta: 'https://api.llama.com/compat/v1/',
+  // azure: no default — must be set by user
+  // mock: no network calls
+};
+
+/**
  * Providers that don't require an API key
  */
 const NO_KEY_PROVIDERS = new Set(['mock', 'ollama', 'lmstudio']);
@@ -94,6 +119,13 @@ export function getProviderDisplayName(providerId: string): string {
  */
 export function getDefaultEnvVar(providerId: string): string | undefined {
   return DEFAULT_ENV_VARS[providerId];
+}
+
+/**
+ * Get the default base URL for a provider (undefined if none / not applicable)
+ */
+export function getDefaultBaseUrl(providerId: string): string | undefined {
+  return DEFAULT_BASE_URLS[providerId];
 }
 
 /**

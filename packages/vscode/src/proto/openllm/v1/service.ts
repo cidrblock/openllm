@@ -919,6 +919,8 @@ export interface Provider {
   providerType: ProviderType;
   /** Whether this provider needs an API key */
   requiresKey: boolean;
+  /** Default API base URL (from multi-llm-ts) */
+  defaultBaseUrl?: string | undefined;
 }
 
 export interface GetProviderStatusRequest {
@@ -8420,7 +8422,15 @@ export const ListProvidersResponse: MessageFns<ListProvidersResponse> = {
 };
 
 function createBaseProvider(): Provider {
-  return { id: "", displayName: "", configured: false, healthy: false, providerType: 0, requiresKey: false };
+  return {
+    id: "",
+    displayName: "",
+    configured: false,
+    healthy: false,
+    providerType: 0,
+    requiresKey: false,
+    defaultBaseUrl: undefined,
+  };
 }
 
 export const Provider: MessageFns<Provider> = {
@@ -8442,6 +8452,9 @@ export const Provider: MessageFns<Provider> = {
     }
     if (message.requiresKey !== false) {
       writer.uint32(48).bool(message.requiresKey);
+    }
+    if (message.defaultBaseUrl !== undefined) {
+      writer.uint32(58).string(message.defaultBaseUrl);
     }
     return writer;
   },
@@ -8501,6 +8514,14 @@ export const Provider: MessageFns<Provider> = {
           message.requiresKey = reader.bool();
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.defaultBaseUrl = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8530,6 +8551,11 @@ export const Provider: MessageFns<Provider> = {
         : isSet(object.requires_key)
         ? globalThis.Boolean(object.requires_key)
         : false,
+      defaultBaseUrl: isSet(object.defaultBaseUrl)
+        ? globalThis.String(object.defaultBaseUrl)
+        : isSet(object.default_base_url)
+        ? globalThis.String(object.default_base_url)
+        : undefined,
     };
   },
 
@@ -8553,6 +8579,9 @@ export const Provider: MessageFns<Provider> = {
     if (message.requiresKey !== false) {
       obj.requiresKey = message.requiresKey;
     }
+    if (message.defaultBaseUrl !== undefined) {
+      obj.defaultBaseUrl = message.defaultBaseUrl;
+    }
     return obj;
   },
 
@@ -8567,6 +8596,7 @@ export const Provider: MessageFns<Provider> = {
     message.healthy = object.healthy ?? false;
     message.providerType = object.providerType ?? 0;
     message.requiresKey = object.requiresKey ?? false;
+    message.defaultBaseUrl = object.defaultBaseUrl ?? undefined;
     return message;
   },
 };

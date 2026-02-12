@@ -116,6 +116,7 @@ export function createOpenLLMService(state: DaemonState) {
             configured: p.configured,
             healthy: p.healthy,
             requires_key: p.requiresKey,
+            default_base_url: p.defaultBaseUrl,
           })),
         });
       }).catch((error) => {

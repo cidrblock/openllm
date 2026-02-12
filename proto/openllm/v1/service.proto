@@ -701,6 +701,7 @@ message Provider {
   bool healthy = 4;                     // Last health check passed
   ProviderType provider_type = 5;
   bool requires_key = 6;               // Whether this provider needs an API key
+  optional string default_base_url = 7; // Default API base URL (from multi-llm-ts)
 }
 
 enum ProviderType {

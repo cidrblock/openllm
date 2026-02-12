@@ -963,6 +963,15 @@
                   </div>
                 </template>
                 
+                <!-- Base URL (shown for providers that have a default) -->
+                <div class="form-group" x-show="provider.defaultBaseUrl" style="margin-bottom: var(--rh-space-md);">
+                  <label>Base URL</label>
+                  <input type="text" 
+                         :placeholder="provider.defaultBaseUrl"
+                         x-model="baseUrls[provider.id]"
+                         style="font-family: 'Red Hat Mono', monospace; font-size: 0.85rem;">
+                </div>
+                
                 <!-- Model Selection Button (always visible for keyless, after config for key-required) -->
                 <div class="form-group" x-show="isProviderConfigured(provider.id) || provider.requiresKey === false">
                   <label>Enabled Models</label>
@@ -1259,6 +1268,7 @@ function dashboard() {
     apiKeys: {},           // { providerId: 'key-value' } - for keychain storage
     envVarNames: {},       // { providerId: 'ENV_VAR_NAME' } - for env var reference
     keySourceSelection: {}, // { providerId: 'keychain' | 'env' } - UI radio selection
+    baseUrls: {},          // { providerId: 'https://...' } - custom base URL overrides
     
     // Config-centric state: providers in config are "configured"
     // Structure: { providerId: { api_key_keychain_name?: string, api_key_env_var_name?: string, enabled_models: string[] } }
@@ -1637,17 +1647,21 @@ function dashboard() {
         // Reset state before loading — prevents stale data leaking across config locations
         this.providerConfig = {};
         this.enabledModelsByProvider = {};
+        this.baseUrls = {};
         
         // Load providers from config - this determines "configured" status
         if (data.config?.providers) {
           this.providerConfig = data.config.providers;
           
-          // Build enabledModelsByProvider from the config
+          // Build enabledModelsByProvider and baseUrls from the config
           for (const [providerId, providerData] of Object.entries(data.config.providers)) {
             if (providerData.enabled_models && providerData.enabled_models.length > 0) {
               this.enabledModelsByProvider[providerId] = new Set(providerData.enabled_models);
             } else {
               this.enabledModelsByProvider[providerId] = new Set();
+            }
+            if (providerData.api_base) {
+              this.baseUrls[providerId] = providerData.api_base;
             }
           }
         }
@@ -1670,6 +1684,11 @@ function dashboard() {
             entry.api_key_keychain_name = providerData.api_key_keychain_name;
           } else if (providerData.api_key_env_var_name) {
             entry.api_key_env_var_name = providerData.api_key_env_var_name;
+          }
+          // Preserve custom base URL if set
+          const baseUrl = this.baseUrls[providerId];
+          if (baseUrl) {
+            entry.api_base = baseUrl;
           }
           providers[providerId] = entry;
         }
@@ -1790,6 +1809,12 @@ function dashboard() {
           configEntry.api_key_env_var_name = envVarName;
         }
 
+        // Include custom base URL if set
+        const baseUrl = this.baseUrls[providerId];
+        if (baseUrl) {
+          configEntry.api_base = baseUrl;
+        }
+
         // Update provider config
         this.providerConfig[providerId] = configEntry;
         this.providerConfig = { ...this.providerConfig };
@@ -1837,6 +1862,7 @@ function dashboard() {
         // Clear UI state
         delete this.keySourceSelection[providerId];
         delete this.envVarNames[providerId];
+        delete this.baseUrls[providerId];
         
         // Save the updated config
         await this.saveConfig();

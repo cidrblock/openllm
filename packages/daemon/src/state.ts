@@ -17,6 +17,7 @@ import {
   getSupportedProviders,
   getProviderDisplayName,
   providerRequiresKey,
+  getDefaultBaseUrl,
   getDefaultEnvVar,
   fetchModels,
   streamChat,
@@ -55,6 +56,7 @@ export interface ProviderInfo {
   configured: boolean;
   healthy: boolean;
   requiresKey: boolean;
+  defaultBaseUrl?: string;
 }
 
 /**
@@ -171,6 +173,7 @@ export class DaemonState {
         configured,
         healthy: true,
         requiresKey: providerRequiresKey(providerId),
+        defaultBaseUrl: getDefaultBaseUrl(providerId),
       });
     }
     
