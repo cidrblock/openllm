@@ -79,18 +79,33 @@ class PerProviderHandler implements vscode.LanguageModelChatProvider {
                     break;
                 }
 
-                if (chunk.text) {
-                    const text = chunk.text.text || '';
-                    progress.report(new vscode.LanguageModelTextPart(text));
-                } else if (chunk.toolCall) {
-                    const tc = chunk.toolCall;
-                    progress.report(new vscode.LanguageModelToolCallPart(
-                        tc.id || `call_${Date.now()}`,
-                        tc.name || '',
-                        JSON.parse(tc.arguments || '{}')
-                    ));
-                } else if (chunk.usage) {
-                    logger.debug(`[LMProvider:${this.providerId}] Usage: ${JSON.stringify(chunk.usage)}`);
+                const c = chunk.chunk;
+                if (!c) continue;
+
+                switch (c.$case) {
+                    case 'text': {
+                        const text = c.text.text || '';
+                        progress.report(new vscode.LanguageModelTextPart(text));
+                        break;
+                    }
+                    case 'toolCall': {
+                        const tc = c.toolCall;
+                        progress.report(new vscode.LanguageModelToolCallPart(
+                            tc.id || `call_${Date.now()}`,
+                            tc.name || '',
+                            JSON.parse(tc.arguments || '{}')
+                        ));
+                        break;
+                    }
+                    case 'usage':
+                        logger.debug(`[LMProvider:${this.providerId}] Usage: ${JSON.stringify(c.usage)}`);
+                        break;
+                    case 'error':
+                        logger.error(`[LMProvider:${this.providerId}] Error chunk: ${c.error.message}`);
+                        throw new Error(c.error.message || 'Chat error');
+                    case 'done':
+                        logger.debug(`[LMProvider:${this.providerId}] Done: ${c.done.finishReason}`);
+                        break;
                 }
             }
         } catch (e) {

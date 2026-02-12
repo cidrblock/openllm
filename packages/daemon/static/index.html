@@ -637,6 +637,8 @@
       padding: 4px 8px;
       border-radius: 3px;
       font-family: 'Red Hat Mono', monospace;
+      overflow-wrap: break-word;
+      word-break: break-all;
     }
 
     /* RHDS Form Elements */
@@ -1191,7 +1193,7 @@
           <div class="rh-tile-content">
             <div class="rh-tile-title">User (Global)</div>
             <div class="rh-tile-desc">Settings apply to all projects</div>
-            <code class="rh-tile-path">~/.openllm/models.json</code>
+            <code class="rh-tile-path" x-text="userConfigPath"></code>
           </div>
         </div>
 
@@ -1221,7 +1223,7 @@
                   <p class="rh-helper-text">No VS Code connected. Enter path manually.</p>
                 </div>
               </template>
-              <code class="rh-tile-path" x-show="workspacePath" x-text="workspacePath + '/.openllm/models.json'"></code>
+              <code class="rh-tile-path" x-show="workspacePath" x-text="workspacePath + '/.config/openllm/config.yaml'"></code>
             </div>
           </div>
         </div>
@@ -1282,6 +1284,7 @@ function dashboard() {
     configLocation: 'user',  // 'user' or 'workspace'
     workspacePath: '',       // Path to workspace when using workspace config
     configPath: '',          // Actual path where config is saved
+    userConfigPath: '',      // User-level config path (fetched from daemon)
     showConfigModal: false,
     connectedWorkspaces: [], // Workspaces from connected VS Code clients
 
@@ -1542,6 +1545,13 @@ function dashboard() {
     },
 
     async init() {
+      // Fetch the platform-correct user config path from the daemon
+      try {
+        const resp = await fetch('/api/config?location=user');
+        const data = await resp.json();
+        this.userConfigPath = data.path || '';
+      } catch { /* will be fetched again in loadConfig */ }
+
       await this.loadConfig();
       await this.checkAllKeyAvailability();
       await this.refresh();
@@ -1643,6 +1653,8 @@ function dashboard() {
 
     async applyConfigLocation() {
       await this.loadConfig();
+      await this.checkAllKeyAvailability();
+      await this.refresh();
       this.showConfigModal = false;
     },
 
