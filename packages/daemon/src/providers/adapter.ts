@@ -378,6 +378,8 @@ export async function* streamChat(
   
   let gotContent = false;
   
+  console.log(`[Adapter] streamChat: engine="${engineInfo.multiLlmName}", model="${engineModelId}", messages=${messages.length}, opts=${JSON.stringify(opts)}`);
+  
   try {
     for await (const chunk of llmEngine.generate(engineModelId, thread, hasOpts ? opts : undefined)) {
       if (chunk.type === 'content') {

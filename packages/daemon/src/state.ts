@@ -378,6 +378,8 @@ export class DaemonState {
     messages: Array<{ role: string; content: string }>,
     requestParams?: ChatParams,
   ): AsyncGenerator<{ type: string; text?: string; finishReason?: string }> {
+    console.log(`[State] Chat request: compositeModelId="${compositeModelId}", messages=${messages.length}`);
+    
     // ── Split composite ID ──
     const slashIdx = compositeModelId.indexOf('/');
     if (slashIdx === -1) {
@@ -388,6 +390,7 @@ export class DaemonState {
     
     const providerId = compositeModelId.substring(0, slashIdx);
     const modelName = compositeModelId.substring(slashIdx + 1);
+    console.log(`[State] Chat: providerId="${providerId}", modelName="${modelName}"`);
     
     // ── Look up virtual provider ──
     const config = this.loadProviderConfig();
@@ -433,6 +436,8 @@ export class DaemonState {
     // Engine model IDs are stored as "engineId/bareModelId" (e.g., "openrouter/anthropic/claude-3-haiku")
     // The engine expects just the bare part: "anthropic/claude-3-haiku"
     const bareModelId = stripEnginePrefix(engineModelId, providerCfg.engine);
+    
+    console.log(`[State] Chat: engine="${providerCfg.engine}", engineModelId="${engineModelId}", bareModelId="${bareModelId}", baseUrl="${providerCfg.base_url || '(none)'}"`);
     
     // ── Call the actual engine ──
     yield* streamChat(

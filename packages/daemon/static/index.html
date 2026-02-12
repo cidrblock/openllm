@@ -729,6 +729,10 @@
                   <!-- Presets -->
                   <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
                     <span style="font-size: 0.8rem; font-weight: 600; color: #6a6e73;">Presets:</span>
+                    <button class="preset-btn" @click="applyPreset(modelName, 'reset')"
+                            :class="{ active: cfg.temperature == null && cfg.top_p == null && cfg.top_k == null && cfg.max_tokens == null && cfg.timeout == null }">
+                      Defaults
+                    </button>
                     <button class="preset-btn" @click="applyPreset(modelName, 'precise')"
                             :class="{ active: cfg.temperature === 0.1 && cfg.top_p === 0.2 }">
                       <span class="preset-icon">&#9678;</span> Precise
@@ -744,10 +748,6 @@
                     <button class="preset-btn" @click="applyPreset(modelName, 'coder')"
                             :class="{ active: cfg.temperature === 0.2 && cfg.max_tokens === 4000 }">
                       <span class="preset-icon">&lt;/&gt;</span> Coder
-                    </button>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'reset')"
-                            style="margin-left: auto; opacity: 0.7;">
-                      &#8634; Reset
                     </button>
                   </div>
 
