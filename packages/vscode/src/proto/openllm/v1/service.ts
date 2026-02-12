@@ -867,6 +867,15 @@ export interface ListModelsResponse {
   models: Model[];
 }
 
+export interface DiscoverModelsRequest {
+  /** Which provider to discover models for */
+  providerId: string;
+}
+
+export interface DiscoverModelsResponse {
+  models: Model[];
+}
+
 export interface Model {
   /** e.g., "openai/gpt-4o" */
   id: string;
@@ -908,6 +917,8 @@ export interface Provider {
   /** Last health check passed */
   healthy: boolean;
   providerType: ProviderType;
+  /** Whether this provider needs an API key */
+  requiresKey: boolean;
 }
 
 export interface GetProviderStatusRequest {
@@ -7890,6 +7901,128 @@ export const ListModelsResponse: MessageFns<ListModelsResponse> = {
   },
 };
 
+function createBaseDiscoverModelsRequest(): DiscoverModelsRequest {
+  return { providerId: "" };
+}
+
+export const DiscoverModelsRequest: MessageFns<DiscoverModelsRequest> = {
+  encode(message: DiscoverModelsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.providerId !== "") {
+      writer.uint32(10).string(message.providerId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiscoverModelsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiscoverModelsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.providerId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiscoverModelsRequest {
+    return {
+      providerId: isSet(object.providerId)
+        ? globalThis.String(object.providerId)
+        : isSet(object.provider_id)
+        ? globalThis.String(object.provider_id)
+        : "",
+    };
+  },
+
+  toJSON(message: DiscoverModelsRequest): unknown {
+    const obj: any = {};
+    if (message.providerId !== "") {
+      obj.providerId = message.providerId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<DiscoverModelsRequest>): DiscoverModelsRequest {
+    return DiscoverModelsRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<DiscoverModelsRequest>): DiscoverModelsRequest {
+    const message = createBaseDiscoverModelsRequest();
+    message.providerId = object.providerId ?? "";
+    return message;
+  },
+};
+
+function createBaseDiscoverModelsResponse(): DiscoverModelsResponse {
+  return { models: [] };
+}
+
+export const DiscoverModelsResponse: MessageFns<DiscoverModelsResponse> = {
+  encode(message: DiscoverModelsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.models) {
+      Model.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): DiscoverModelsResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseDiscoverModelsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.models.push(Model.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): DiscoverModelsResponse {
+    return { models: globalThis.Array.isArray(object?.models) ? object.models.map((e: any) => Model.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: DiscoverModelsResponse): unknown {
+    const obj: any = {};
+    if (message.models?.length) {
+      obj.models = message.models.map((e) => Model.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<DiscoverModelsResponse>): DiscoverModelsResponse {
+    return DiscoverModelsResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<DiscoverModelsResponse>): DiscoverModelsResponse {
+    const message = createBaseDiscoverModelsResponse();
+    message.models = object.models?.map((e) => Model.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseModel(): Model {
   return { id: "", provider: "", name: "", displayName: "", capabilities: undefined, source: 0 };
 }
@@ -8287,7 +8420,7 @@ export const ListProvidersResponse: MessageFns<ListProvidersResponse> = {
 };
 
 function createBaseProvider(): Provider {
-  return { id: "", displayName: "", configured: false, healthy: false, providerType: 0 };
+  return { id: "", displayName: "", configured: false, healthy: false, providerType: 0, requiresKey: false };
 }
 
 export const Provider: MessageFns<Provider> = {
@@ -8306,6 +8439,9 @@ export const Provider: MessageFns<Provider> = {
     }
     if (message.providerType !== 0) {
       writer.uint32(40).int32(message.providerType);
+    }
+    if (message.requiresKey !== false) {
+      writer.uint32(48).bool(message.requiresKey);
     }
     return writer;
   },
@@ -8357,6 +8493,14 @@ export const Provider: MessageFns<Provider> = {
           message.providerType = reader.int32() as any;
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.requiresKey = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8381,6 +8525,11 @@ export const Provider: MessageFns<Provider> = {
         : isSet(object.provider_type)
         ? providerTypeFromJSON(object.provider_type)
         : 0,
+      requiresKey: isSet(object.requiresKey)
+        ? globalThis.Boolean(object.requiresKey)
+        : isSet(object.requires_key)
+        ? globalThis.Boolean(object.requires_key)
+        : false,
     };
   },
 
@@ -8401,6 +8550,9 @@ export const Provider: MessageFns<Provider> = {
     if (message.providerType !== 0) {
       obj.providerType = providerTypeToJSON(message.providerType);
     }
+    if (message.requiresKey !== false) {
+      obj.requiresKey = message.requiresKey;
+    }
     return obj;
   },
 
@@ -8414,6 +8566,7 @@ export const Provider: MessageFns<Provider> = {
     message.configured = object.configured ?? false;
     message.healthy = object.healthy ?? false;
     message.providerType = object.providerType ?? 0;
+    message.requiresKey = object.requiresKey ?? false;
     return message;
   },
 };
@@ -13093,12 +13246,21 @@ export const OpenLLMDefinition = {
       responseStream: false,
       options: {},
     },
-    /** List available models */
+    /** List available models (config-gated: only configured/enabled models) */
     listModels: {
       name: "ListModels",
       requestType: ListModelsRequest,
       requestStream: false,
       responseType: ListModelsResponse,
+      responseStream: false,
+      options: {},
+    },
+    /** Discover all models a provider offers (ignores config, for browsing/selection) */
+    discoverModels: {
+      name: "DiscoverModels",
+      requestType: DiscoverModelsRequest,
+      requestStream: false,
+      responseType: DiscoverModelsResponse,
       responseStream: false,
       options: {},
     },
@@ -13340,11 +13502,16 @@ export interface OpenLLMServiceImplementation<CallContextExt = {}> {
   ): Promise<DeepPartial<ExportSessionResponse>>;
   /** Import a session from JSON */
   importSession(request: ImportSessionRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Session>>;
-  /** List available models */
+  /** List available models (config-gated: only configured/enabled models) */
   listModels(
     request: ListModelsRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ListModelsResponse>>;
+  /** Discover all models a provider offers (ignores config, for browsing/selection) */
+  discoverModels(
+    request: DiscoverModelsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<DiscoverModelsResponse>>;
   /** List configured providers */
   listProviders(
     request: ListProvidersRequest,
@@ -13462,11 +13629,16 @@ export interface OpenLLMClient<CallOptionsExt = {}> {
   ): Promise<ExportSessionResponse>;
   /** Import a session from JSON */
   importSession(request: DeepPartial<ImportSessionRequest>, options?: CallOptions & CallOptionsExt): Promise<Session>;
-  /** List available models */
+  /** List available models (config-gated: only configured/enabled models) */
   listModels(
     request: DeepPartial<ListModelsRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ListModelsResponse>;
+  /** Discover all models a provider offers (ignores config, for browsing/selection) */
+  discoverModels(
+    request: DeepPartial<DiscoverModelsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<DiscoverModelsResponse>;
   /** List configured providers */
   listProviders(
     request: DeepPartial<ListProvidersRequest>,

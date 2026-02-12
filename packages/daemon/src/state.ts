@@ -54,6 +54,7 @@ export interface ProviderInfo {
   displayName: string;
   configured: boolean;
   healthy: boolean;
+  requiresKey: boolean;
 }
 
 /**
@@ -169,6 +170,7 @@ export class DaemonState {
         displayName: getProviderDisplayName(providerId),
         configured,
         healthy: true,
+        requiresKey: providerRequiresKey(providerId),
       });
     }
     
@@ -191,8 +193,8 @@ export class DaemonState {
     for (const providerId of getSupportedProviders()) {
       const providerCfg = config[providerId];
       
-      // Skip unconfigured providers that require keys
-      if (providerRequiresKey(providerId) && !providerCfg) {
+      // Skip unconfigured providers (keyless or not — must be in config)
+      if (!providerCfg) {
         continue;
       }
       
@@ -221,6 +223,29 @@ export class DaemonState {
     }
     
     return allModels;
+  }
+  
+  /**
+   * Discover all models a provider offers, independent of config.
+   * Used for browsing/selection UI — does NOT trigger notifications.
+   * For keyless providers, works without any config entry.
+   * For key-required providers, resolves key from config if available.
+   */
+  async discoverModels(providerId: string): Promise<ModelInfo[]> {
+    const config = this.loadProviderConfig();
+    const providerCfg = config[providerId];
+    const apiKey = await this.resolveApiKey(providerId, providerCfg);
+    
+    if (providerRequiresKey(providerId) && !apiKey) {
+      return []; // Can't discover without a key
+    }
+    
+    try {
+      return await fetchModels(providerId, apiKey || undefined, providerCfg?.api_base);
+    } catch (error) {
+      console.error(`[State] Failed to discover models for ${providerId}:`, error);
+      return [];
+    }
   }
   
   /**

@@ -115,6 +115,7 @@ export function createOpenLLMService(state: DaemonState) {
             display_name: p.displayName,
             configured: p.configured,
             healthy: p.healthy,
+            requires_key: p.requiresKey,
           })),
         });
       }).catch((error) => {
@@ -127,7 +128,7 @@ export function createOpenLLMService(state: DaemonState) {
     },
     
     /**
-     * List models (dynamic from provider APIs, workspace-aware)
+     * List models (dynamic from provider APIs, workspace-aware, config-gated)
      */
     ListModels(
       call: grpc.ServerUnaryCall<any, any>,
@@ -149,6 +150,43 @@ export function createOpenLLMService(state: DaemonState) {
         });
       }).catch((error) => {
         console.error('[gRPC] ListModels error:', error);
+        callback({
+          code: grpc.status.INTERNAL,
+          message: error.message,
+        });
+      });
+    },
+    
+    /**
+     * Discover all models a provider offers (ignores config, for browsing/selection)
+     */
+    DiscoverModels(
+      call: grpc.ServerUnaryCall<any, any>,
+      callback: grpc.sendUnaryData<any>
+    ): void {
+      const providerId = call.request.provider_id || call.request.providerId || '';
+      if (!providerId) {
+        callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: 'provider_id is required',
+        });
+        return;
+      }
+      state.discoverModels(providerId).then((models) => {
+        callback(null, {
+          models: models.map((m) => ({
+            id: m.id,
+            provider: m.provider,
+            display_name: m.displayName,
+            context_window: m.contextWindow,
+            capabilities: {
+              supports_tools: m.capabilities?.supportsTools || false,
+              supports_vision: m.capabilities?.supportsVision || false,
+            },
+          })),
+        });
+      }).catch((error) => {
+        console.error('[gRPC] DiscoverModels error:', error);
         callback({
           code: grpc.status.INTERNAL,
           message: error.message,

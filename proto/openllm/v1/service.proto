@@ -284,8 +284,11 @@ service OpenLLM {
   // Models & Providers
   //
   
-  // List available models
+  // List available models (config-gated: only configured/enabled models)
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  
+  // Discover all models a provider offers (ignores config, for browsing/selection)
+  rpc DiscoverModels(DiscoverModelsRequest) returns (DiscoverModelsResponse);
   
   // List configured providers
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
@@ -653,6 +656,14 @@ message ListModelsResponse {
   repeated Model models = 1;
 }
 
+message DiscoverModelsRequest {
+  string provider_id = 1;             // Which provider to discover models for
+}
+
+message DiscoverModelsResponse {
+  repeated Model models = 1;
+}
+
 message Model {
   string id = 1;                        // e.g., "openai/gpt-4o"
   string provider = 2;                  // e.g., "openai"
@@ -689,6 +700,7 @@ message Provider {
   bool configured = 3;                  // Has API key / is usable
   bool healthy = 4;                     // Last health check passed
   ProviderType provider_type = 5;
+  bool requires_key = 6;               // Whether this provider needs an API key
 }
 
 enum ProviderType {

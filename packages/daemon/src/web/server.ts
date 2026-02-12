@@ -104,6 +104,7 @@ export function createWebApp(state: DaemonState): Express {
           displayName: p.displayName,
           configured: p.configured,
           healthy: p.healthy,
+          requiresKey: p.requiresKey,
         })),
       });
     } catch (err: any) {
@@ -113,11 +114,40 @@ export function createWebApp(state: DaemonState): Express {
   });
   
   /**
+   * GET /api/discover-models/:providerId - Discover all models a provider offers
+   * Ignores config — for browsing/selection UI. Does NOT trigger notifications.
+   */
+  app.get('/api/discover-models/:providerId', async (req, res) => {
+    try {
+      const models = await state.discoverModels(req.params.providerId);
+      res.json({
+        models: models.map((m) => ({
+          id: m.id,
+          provider: m.provider,
+          displayName: m.displayName,
+          contextWindow: m.contextWindow,
+          capabilities: {
+            tools: m.capabilities?.supportsTools || false,
+            vision: m.capabilities?.supportsVision || false,
+            streaming: (m.capabilities as any)?.supportsStreaming || false,
+          },
+        })),
+      });
+    } catch (err: any) {
+      console.error('[Web] /api/discover-models error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
+  /**
    * GET /api/models - List models from configured providers
+   * Optional query: ?workspace=/path/to/workspace (uses workspace config overlay)
    */
   app.get('/api/models', async (req, res) => {
     try {
-      const models = await state.listModels();
+      const workspace = req.query.workspace as string | undefined;
+      const workspacePaths = workspace ? [workspace] : [];
+      const models = await state.listModels(workspacePaths);
       res.json({
         models: models.map((m) => ({
           id: m.id,

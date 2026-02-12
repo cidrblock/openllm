@@ -744,6 +744,18 @@ class ListModelsResponse(_message.Message):
     models: _containers.RepeatedCompositeFieldContainer[Model]
     def __init__(self, models: _Optional[_Iterable[_Union[Model, _Mapping]]] = ...) -> None: ...
 
+class DiscoverModelsRequest(_message.Message):
+    __slots__ = ("provider_id",)
+    PROVIDER_ID_FIELD_NUMBER: _ClassVar[int]
+    provider_id: str
+    def __init__(self, provider_id: _Optional[str] = ...) -> None: ...
+
+class DiscoverModelsResponse(_message.Message):
+    __slots__ = ("models",)
+    MODELS_FIELD_NUMBER: _ClassVar[int]
+    models: _containers.RepeatedCompositeFieldContainer[Model]
+    def __init__(self, models: _Optional[_Iterable[_Union[Model, _Mapping]]] = ...) -> None: ...
+
 class Model(_message.Message):
     __slots__ = ("id", "provider", "name", "display_name", "capabilities", "source")
     ID_FIELD_NUMBER: _ClassVar[int]
@@ -785,18 +797,20 @@ class ListProvidersResponse(_message.Message):
     def __init__(self, providers: _Optional[_Iterable[_Union[Provider, _Mapping]]] = ...) -> None: ...
 
 class Provider(_message.Message):
-    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type")
+    __slots__ = ("id", "display_name", "configured", "healthy", "provider_type", "requires_key")
     ID_FIELD_NUMBER: _ClassVar[int]
     DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
     CONFIGURED_FIELD_NUMBER: _ClassVar[int]
     HEALTHY_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_TYPE_FIELD_NUMBER: _ClassVar[int]
+    REQUIRES_KEY_FIELD_NUMBER: _ClassVar[int]
     id: str
     display_name: str
     configured: bool
     healthy: bool
     provider_type: ProviderType
-    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ...) -> None: ...
+    requires_key: bool
+    def __init__(self, id: _Optional[str] = ..., display_name: _Optional[str] = ..., configured: bool = ..., healthy: bool = ..., provider_type: _Optional[_Union[ProviderType, str]] = ..., requires_key: bool = ...) -> None: ...
 
 class GetProviderStatusRequest(_message.Message):
     __slots__ = ("provider_id",)

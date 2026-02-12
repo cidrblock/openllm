@@ -902,25 +902,27 @@
             <template x-for="provider in sortedProviders" :key="provider.id">
               <div class="provider-card" :class="{ 
                 configured: isProviderConfigured(provider.id),
-                'key-missing': isProviderConfigured(provider.id) && !isKeyAvailable(provider.id)
+                'key-missing': !isKeylessProvider(provider.id) && isProviderConfigured(provider.id) && !isKeyAvailable(provider.id)
               }">
                 <div class="provider-header">
                   <span class="provider-name" x-text="provider.displayName || provider.id"></span>
                   
                   <div class="rh-header-actions">
-                    <!-- Compact Toggle for API Key Source -->
-                    <div class="rh-toggle-group-mini" role="radiogroup" :aria-label="'API Key Source for ' + provider.id">
-                      <button type="button" class="rh-toggle-item" 
-                              :class="{ selected: getKeySource(provider.id) === 'keychain' }"
-                              @click="setKeySource(provider.id, 'keychain')">
-                        Key
-                      </button>
-                      <button type="button" class="rh-toggle-item"
-                              :class="{ selected: getKeySource(provider.id) === 'env' }"
-                              @click="setKeySource(provider.id, 'env')">
-                        Env
-                      </button>
-                    </div>
+                    <!-- Compact Toggle for API Key Source (hidden for keyless providers) -->
+                    <template x-if="provider.requiresKey !== false">
+                      <div class="rh-toggle-group-mini" role="radiogroup" :aria-label="'API Key Source for ' + provider.id">
+                        <button type="button" class="rh-toggle-item" 
+                                :class="{ selected: getKeySource(provider.id) === 'keychain' }"
+                                @click="setKeySource(provider.id, 'keychain')">
+                          Key
+                        </button>
+                        <button type="button" class="rh-toggle-item"
+                                :class="{ selected: getKeySource(provider.id) === 'env' }"
+                                @click="setKeySource(provider.id, 'env')">
+                          Env
+                        </button>
+                      </div>
+                    </template>
                     
                     <span class="status-tag" 
                           :class="getProviderStatusClass(provider.id)"
@@ -928,43 +930,45 @@
                   </div>
                 </div>
                 
-                <!-- Dynamic Input based on source -->
-                <div class="form-row" style="margin-bottom: var(--rh-space-md);">
-                  <!-- Keychain input (password field) -->
-                  <template x-if="getKeySource(provider.id) === 'keychain'">
-                    <div class="form-group" style="flex: 1;">
-                      <label>Key Value</label>
-                      <input type="password" 
-                             :placeholder="isProviderConfigured(provider.id) ? '••••••••••••' : 'Enter API key'"
-                             x-model="apiKeys[provider.id]">
+                <!-- Key-required provider: key input + save/remove -->
+                <template x-if="provider.requiresKey !== false">
+                  <div class="form-row" style="margin-bottom: var(--rh-space-md);">
+                    <!-- Keychain input (password field) -->
+                    <template x-if="getKeySource(provider.id) === 'keychain'">
+                      <div class="form-group" style="flex: 1;">
+                        <label>Key Value</label>
+                        <input type="password" 
+                               :placeholder="isProviderConfigured(provider.id) ? '••••••••••••' : 'Enter API key'"
+                               x-model="apiKeys[provider.id]">
+                      </div>
+                    </template>
+                    
+                    <!-- Env var input (text field with hint) -->
+                    <template x-if="getKeySource(provider.id) === 'env'">
+                      <div class="form-group" style="flex: 1;">
+                        <label>Variable Name</label>
+                        <input type="text" 
+                               :placeholder="getDefaultEnvVarName(provider.id)"
+                               x-model="envVarNames[provider.id]">
+                        <small class="hint" style="color: var(--rh-color-text-secondary); margin-top: 4px; display: block;">
+                          e.g. <code x-text="getDefaultEnvVarName(provider.id)"></code>
+                        </small>
+                      </div>
+                    </template>
+                    
+                    <div style="display: flex; gap: var(--rh-space-sm); align-items: flex-end;">
+                      <button class="btn btn-primary" @click="saveProvider(provider.id)">Save</button>
+                      <button class="btn btn-danger" x-show="isProviderConfigured(provider.id)" @click="deleteProvider(provider.id)">Remove</button>
                     </div>
-                  </template>
-                  
-                  <!-- Env var input (text field with hint) -->
-                  <template x-if="getKeySource(provider.id) === 'env'">
-                    <div class="form-group" style="flex: 1;">
-                      <label>Variable Name</label>
-                      <input type="text" 
-                             :placeholder="getDefaultEnvVarName(provider.id)"
-                             x-model="envVarNames[provider.id]">
-                      <small class="hint" style="color: var(--rh-color-text-secondary); margin-top: 4px; display: block;">
-                        e.g. <code x-text="getDefaultEnvVarName(provider.id)"></code>
-                      </small>
-                    </div>
-                  </template>
-                  
-                  <div style="display: flex; gap: var(--rh-space-sm); align-items: flex-end;">
-                    <button class="btn btn-primary" @click="saveProvider(provider.id)">Save</button>
-                    <button class="btn btn-danger" x-show="isProviderConfigured(provider.id)" @click="deleteProvider(provider.id)">Remove</button>
                   </div>
-                </div>
+                </template>
                 
-                <!-- Model Selection Button -->
-                <div class="form-group" x-show="isProviderConfigured(provider.id)">
+                <!-- Model Selection Button (always visible for keyless, after config for key-required) -->
+                <div class="form-group" x-show="isProviderConfigured(provider.id) || provider.requiresKey === false">
                   <label>Enabled Models</label>
                   <div style="display: flex; align-items: center; gap: var(--rh-space-md);">
                     <button class="btn btn-secondary" @click="openModelSelector(provider.id)"
-                            :disabled="getModelsForProvider(provider.id).length === 0">
+                            :disabled="provider.requiresKey !== false && getModelsForProvider(provider.id).length === 0">
                       Select Models...
                     </button>
                     <span class="enabled-count" x-text="getEnabledModelsCount(provider.id) + ' of ' + getModelsForProvider(provider.id).length + ' models enabled'"></span>
@@ -1279,6 +1283,7 @@ function dashboard() {
     filterTools: false,
     filterVision: false,
     tempSelectedModels: new Set(),  // Temporary selection while modal is open
+    discoveredModels: [],           // Models from discovery endpoint for the modal
     
     // Config persistence
     configLocation: 'user',  // 'user' or 'workspace'
@@ -1288,7 +1293,13 @@ function dashboard() {
     showConfigModal: false,
     connectedWorkspaces: [], // Workspaces from connected VS Code clients
 
-    // A provider is configured if it exists in providerConfig
+    // Check if a provider requires an API key (from backend metadata)
+    isKeylessProvider(providerId) {
+      const provider = this.providers.find(p => p.id === providerId);
+      return provider ? provider.requiresKey === false : false;
+    },
+
+    // A provider is configured if it exists in providerConfig (keyless or not)
     isProviderConfigured(providerId) {
       return this.providerConfig.hasOwnProperty(providerId);
     },
@@ -1345,6 +1356,8 @@ function dashboard() {
       if (!this.isProviderConfigured(providerId)) {
         return 'not-configured';
       }
+      // Keyless providers that are configured don't need a key check
+      if (this.isKeylessProvider(providerId)) return 'configured';
       if (!this.isKeyAvailable(providerId)) {
         return 'key-missing';
       }
@@ -1356,6 +1369,8 @@ function dashboard() {
       if (!this.isProviderConfigured(providerId)) {
         return 'Not configured';
       }
+      // Keyless providers that are configured are always ready
+      if (this.isKeylessProvider(providerId)) return 'Configured';
       if (!this.isKeyAvailable(providerId)) {
         return 'Key missing';
       }
@@ -1364,6 +1379,13 @@ function dashboard() {
 
     // Check key availability for a provider
     async checkKeyAvailability(providerId) {
+      // Keyless providers: available if configured, skip API key check
+      if (this.isKeylessProvider(providerId)) {
+        this.keyAvailability[providerId] = this.isProviderConfigured(providerId);
+        this.keyAvailability = { ...this.keyAvailability };
+        return;
+      }
+
       const config = this.providerConfig[providerId];
       if (!config) {
         this.keyAvailability[providerId] = false;
@@ -1393,20 +1415,20 @@ function dashboard() {
       }
     },
 
-    // Check key availability for all configured providers
+    // Check key availability for all configured providers (and keyless ones)
     async checkAllKeyAvailability() {
-      const promises = Object.keys(this.providerConfig).map(id => this.checkKeyAvailability(id));
+      const providerIds = new Set([
+        ...Object.keys(this.providerConfig),
+        ...this.providers.filter(p => p.requiresKey === false).map(p => p.id),
+      ]);
+      const promises = [...providerIds].map(id => this.checkKeyAvailability(id));
       await Promise.all(promises);
     },
 
     get enabledModels() {
-      const enabled = [];
-      for (const model of this.models) {
-        if (this.isModelEnabled(model.provider, model.id)) {
-          enabled.push(model);
-        }
-      }
-      return enabled;
+      // All models returned by the daemon are already filtered by config
+      // (enabled_models, API key availability, etc.) so they're all valid for chat.
+      return this.models;
     },
 
     getModelsForProvider(providerId) {
@@ -1416,6 +1438,8 @@ function dashboard() {
     // Modal computed properties
     get modelsForModal() {
       if (!this.modelSelectorProviderId) return [];
+      // Use discovered models if available (for unconfigured providers)
+      if (this.discoveredModels.length > 0) return this.discoveredModels;
       return this.getModelsForProvider(this.modelSelectorProviderId);
     },
 
@@ -1462,12 +1486,24 @@ function dashboard() {
     },
 
     // Modal methods
-    openModelSelector(providerId) {
+    async openModelSelector(providerId) {
       this.modelSelectorProviderId = providerId;
       this.modelSelectorProvider = this.providers.find(p => p.id === providerId);
       this.modelSearch = '';
       this.filterTools = false;
       this.filterVision = false;
+      this.discoveredModels = [];
+      
+      // Use discovery endpoint to fetch all available models for browsing
+      // (no config write, no VS Code notification)
+      try {
+        const resp = await fetch(`/api/discover-models/${encodeURIComponent(providerId)}`);
+        const data = await resp.json();
+        this.discoveredModels = data.models || [];
+      } catch (e) {
+        console.error('Failed to discover models:', e);
+      }
+      
       // Copy current selection to temp
       const current = this.enabledModelsByProvider[providerId] || new Set();
       this.tempSelectedModels = new Set(current);
@@ -1479,6 +1515,7 @@ function dashboard() {
       this.modelSelectorProviderId = null;
       this.modelSelectorProvider = null;
       this.tempSelectedModels = new Set();
+      this.discoveredModels = [];
     },
 
     toggleModelInModal(modelId) {
@@ -1506,11 +1543,31 @@ function dashboard() {
     },
 
     async saveModelSelection() {
-      if (this.modelSelectorProviderId) {
-        this.enabledModelsByProvider[this.modelSelectorProviderId] = new Set(this.tempSelectedModels);
+      const providerId = this.modelSelectorProviderId;
+      if (providerId) {
+        const selectedModels = new Set(this.tempSelectedModels);
+        
+        // No models selected — don't save, just close
+        if (selectedModels.size === 0) {
+          // If keyless provider was configured with no models, remove it
+          if (this.isKeylessProvider(providerId) && this.isProviderConfigured(providerId)) {
+            await this.deleteProvider(providerId);
+          }
+          this.closeModelSelector();
+          return;
+        }
+        
+        // For unconfigured keyless providers, add them to config now
+        if (this.isKeylessProvider(providerId) && !this.isProviderConfigured(providerId)) {
+          this.providerConfig[providerId] = { enabled_models: [] };
+          this.providerConfig = { ...this.providerConfig };
+        }
+        
+        this.enabledModelsByProvider[providerId] = selectedModels;
         this.enabledModelsByProvider = { ...this.enabledModelsByProvider };
-        // Persist to config file
+        // Persist to config file (this triggers VS Code notification — correct timing)
         await this.saveConfig();
+        await this.refresh();
       }
       this.closeModelSelector();
     },
@@ -1526,7 +1583,11 @@ function dashboard() {
 
     getEnabledModelsCount(providerId) {
       const set = this.enabledModelsByProvider[providerId];
-      return set ? set.size : 0;
+      // If no explicit selection, all models for this provider are enabled
+      if (!set || set.size === 0) {
+        return this.getModelsForProvider(providerId).length;
+      }
+      return set.size;
     },
 
     toggleModel(providerId, modelId, enabled) {
@@ -1661,10 +1722,14 @@ function dashboard() {
     async refresh() {
       this.loading = true;
       try {
+        const location = this.getConfigLocation();
+        const modelsUrl = location !== 'user'
+          ? `/api/models?workspace=${encodeURIComponent(location)}`
+          : '/api/models';
         const [statusRes, providersRes, modelsRes, secretsRes] = await Promise.all([
           fetch('/api/status'),
           fetch('/api/providers'),
-          fetch('/api/models'),
+          fetch(modelsUrl),
           fetch('/api/secrets'),
         ]);
         

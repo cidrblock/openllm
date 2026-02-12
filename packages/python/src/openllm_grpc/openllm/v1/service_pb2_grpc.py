@@ -519,6 +519,11 @@ class OpenLLMStub(object):
                 request_serializer=openllm_dot_v1_dot_service__pb2.ListModelsRequest.SerializeToString,
                 response_deserializer=openllm_dot_v1_dot_service__pb2.ListModelsResponse.FromString,
                 _registered_method=True)
+        self.DiscoverModels = channel.unary_unary(
+                '/openllm.v1.OpenLLM/DiscoverModels',
+                request_serializer=openllm_dot_v1_dot_service__pb2.DiscoverModelsRequest.SerializeToString,
+                response_deserializer=openllm_dot_v1_dot_service__pb2.DiscoverModelsResponse.FromString,
+                _registered_method=True)
         self.ListProviders = channel.unary_unary(
                 '/openllm.v1.OpenLLM/ListProviders',
                 request_serializer=openllm_dot_v1_dot_service__pb2.ListProvidersRequest.SerializeToString,
@@ -729,7 +734,14 @@ class OpenLLMServicer(object):
         Models & Providers
 
 
-        List available models
+        List available models (config-gated: only configured/enabled models)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DiscoverModels(self, request, context):
+        """Discover all models a provider offers (ignores config, for browsing/selection)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -981,6 +993,11 @@ def add_OpenLLMServicer_to_server(servicer, server):
                     servicer.ListModels,
                     request_deserializer=openllm_dot_v1_dot_service__pb2.ListModelsRequest.FromString,
                     response_serializer=openllm_dot_v1_dot_service__pb2.ListModelsResponse.SerializeToString,
+            ),
+            'DiscoverModels': grpc.unary_unary_rpc_method_handler(
+                    servicer.DiscoverModels,
+                    request_deserializer=openllm_dot_v1_dot_service__pb2.DiscoverModelsRequest.FromString,
+                    response_serializer=openllm_dot_v1_dot_service__pb2.DiscoverModelsResponse.SerializeToString,
             ),
             'ListProviders': grpc.unary_unary_rpc_method_handler(
                     servicer.ListProviders,
@@ -1446,6 +1463,33 @@ class OpenLLM(object):
             '/openllm.v1.OpenLLM/ListModels',
             openllm_dot_v1_dot_service__pb2.ListModelsRequest.SerializeToString,
             openllm_dot_v1_dot_service__pb2.ListModelsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DiscoverModels(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/openllm.v1.OpenLLM/DiscoverModels',
+            openllm_dot_v1_dot_service__pb2.DiscoverModelsRequest.SerializeToString,
+            openllm_dot_v1_dot_service__pb2.DiscoverModelsResponse.FromString,
             options,
             channel_credentials,
             insecure,
