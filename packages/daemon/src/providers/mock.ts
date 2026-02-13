@@ -28,7 +28,6 @@
 export interface MockModelInfo {
   id: string;
   provider: string;
-  displayName: string;
   contextWindow: number;
   capabilities?: {
     supportsTools?: boolean;
@@ -122,6 +121,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Chat chunk type — matches the ChatChunk union from adapter.ts.
+ */
+export type MockChatChunk =
+  | { type: 'text'; text: string }
+  | { type: 'done'; finishReason: string };
+
+/**
  * Stream a mock chat response.
  * 
  * This is the mock equivalent of the real `streamChat` in adapter.ts.
@@ -129,7 +135,7 @@ function sleep(ms: number): Promise<void> {
 export async function* mockStreamChat(
   modelId: string,
   messages: Array<{ role: string; content: string }>,
-): AsyncGenerator<{ type: 'text' | 'done'; text?: string; finishReason?: string }> {
+): AsyncGenerator<MockChatChunk> {
   const mode = parseMockMode(modelId);
   
   console.log(`[mock] Mode: ${mode.type}, model: ${modelId}`);
@@ -189,37 +195,32 @@ export async function* mockStreamChat(
 export function getMockModels(): MockModelInfo[] {
   return [
     {
-      id: 'mock/echo',
+      id: 'echo',
       provider: 'mock',
-      displayName: 'Echo (echoes user message)',
       contextWindow: 128000,
       capabilities: { supportsTools: true, supportsVision: true },
     },
     {
-      id: 'mock/fixed',
+      id: 'fixed',
       provider: 'mock',
-      displayName: 'Fixed Response',
       contextWindow: 128000,
       capabilities: { supportsTools: true, supportsVision: true },
     },
     {
-      id: 'mock/error',
+      id: 'error',
       provider: 'mock',
-      displayName: 'Error (simulates failure)',
       contextWindow: 128000,
       capabilities: { supportsTools: true, supportsVision: true },
     },
     {
-      id: 'mock/empty',
+      id: 'empty',
       provider: 'mock',
-      displayName: 'Empty Response',
       contextWindow: 128000,
       capabilities: { supportsTools: true, supportsVision: true },
     },
     {
-      id: 'mock/slow',
+      id: 'slow',
       provider: 'mock',
-      displayName: 'Slow Echo (200ms per chunk)',
       contextWindow: 128000,
       capabilities: { supportsTools: true, supportsVision: true },
     },

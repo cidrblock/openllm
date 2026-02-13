@@ -463,7 +463,7 @@
             <template x-for="[provId, provCfg] in Object.entries(providerConfig)" :key="provId">
               <div class="provider-card" :class="{ configured: getProviderStatus(provId) === 'configured', unhealthy: getProviderStatus(provId) === 'key-missing' }">
                 <div class="provider-header">
-                  <span class="provider-name" x-text="provCfg.display_name || provId"></span>
+                  <span class="provider-name" x-text="provId"></span>
                   <div style="display: flex; gap: 8px; align-items: center;">
                     <span class="engine-badge" x-text="provCfg.engine"></span>
                     <span class="status-tag" :class="getProviderStatus(provId)" x-text="getProviderStatusText(provId)"></span>
@@ -590,9 +590,9 @@
           <div>
             <p style="color: #6a6e73; margin: 0 0 16px;">Choose an engine (API implementation) for your new provider instance.</p>
             <div class="engine-grid">
-              <template x-for="engine in engines" :key="engine.id">
+              <template x-for="engine in [...engines].sort((a, b) => a.id.localeCompare(b.id))" :key="engine.id">
                 <div class="engine-tile" :class="{ selected: wizardEngine === engine.id }" @click="wizardEngine = engine.id">
-                  <div class="tile-name" x-text="engine.displayName"></div>
+                  <div class="tile-name" x-text="engine.id"></div>
                   <div class="tile-hint" x-text="engine.requiresKey ? 'API key required' : 'No key needed'"></div>
                 </div>
               </template>
@@ -609,10 +609,6 @@
                      pattern="[a-z0-9][a-z0-9._-]*" style="font-family: 'Red Hat Mono', monospace;"
                      :disabled="wizardEditMode" :style="wizardEditMode ? 'background: #f0f0f0;' : ''">
               <small x-show="!wizardEditMode" style="color: #6a6e73; display: block; margin-top: 4px;">Lowercase, alphanumeric, dots, hyphens, underscores. No spaces or slashes.</small>
-            </div>
-            <div class="form-group">
-              <label>Display Name (optional)</label>
-              <input type="text" x-model="wizardDisplayName" :placeholder="getEngineDisplayName(wizardEngine)">
             </div>
             <div class="form-group">
               <label>Base URL</label>
@@ -665,7 +661,7 @@
                     <div class="dual-list-panel-header" x-text="'Available (' + filteredAvailableModels.length + ')'"></div>
                     <template x-for="m in filteredAvailableModels" :key="m.id">
                       <div class="model-item" :class="{ selected: wizardLeftSelected.has(m.id) }" @click="toggleLeftSelect(m.id)">
-                        <div class="model-name" x-text="m.displayName || m.id"></div>
+                        <div class="model-name" x-text="m.id"></div>
                         <div style="display: flex; gap: 2px;">
                           <span x-show="m.capabilities?.tools" class="cap-tag tools">T</span>
                           <span x-show="m.capabilities?.vision" class="cap-tag vision">V</span>
@@ -867,7 +863,8 @@
   <!-- Edit Provider and Model Selector modals removed — "Edit" button reuses the wizard at step 2 -->
 
   <!-- ═══════════ CONFIG LOCATION MODAL ═══════════ -->
-  <div class="modal-backdrop" x-show="showConfigModal" x-cloak @click.self="showConfigModal = false">
+  <div class="modal-backdrop" x-show="showConfigModal" x-cloak @click.self="showConfigModal = false"
+       style="z-index: 1100;">
     <div class="rh-modal" @click.stop>
       <div class="rh-modal-header">
         <h3>Save config to</h3>
@@ -944,7 +941,7 @@ function dashboard() {
     wizardStep: 1,
     wizardEngine: '',
     wizardName: '',
-    wizardDisplayName: '',
+    
     wizardBaseUrl: '',
     wizardKeySource: 'keychain',
     wizardApiKey: '',
@@ -1034,7 +1031,7 @@ function dashboard() {
     },
     
     // ── Engine helpers ──
-    getEngineDisplayName(engineId) { return this.engines.find(e => e.id === engineId)?.displayName || engineId; },
+    getEngineDisplayName(engineId) { return engineId; },
     getEngineDefaultUrl(engineId) { return this.engines.find(e => e.id === engineId)?.defaultBaseUrl || ''; },
     getEngineDefaultEnvVar(engineId) { return this.engines.find(e => e.id === engineId)?.defaultEnvVar || `${(engineId || '').toUpperCase()}_API_KEY`; },
     engineRequiresKey(engineId) { const e = this.engines.find(e => e.id === engineId); return e ? e.requiresKey : true; },
@@ -1066,6 +1063,7 @@ function dashboard() {
     
     // ── Add Provider Wizard ──
     openWizard() {
+      this.showConfigModal = false; // Close config modal if open
       this.wizardOpen = true;
       this.wizardStep = 1;
       this.wizardEditMode = false;
@@ -1073,7 +1071,6 @@ function dashboard() {
       this.wizardFromModelsTab = false;
       this.wizardEngine = '';
       this.wizardName = '';
-      this.wizardDisplayName = '';
       this.wizardBaseUrl = '';
       this.wizardKeySource = 'keychain';
       this.wizardApiKey = '';
@@ -1089,6 +1086,7 @@ function dashboard() {
     },
     
     async openEditWizard(provId) {
+      this.showConfigModal = false; // Close config modal if open
       const cfg = this.providerConfig[provId] || {};
       this.wizardOpen = true;
       this.wizardStep = 2;  // Skip engine selection — go straight to provider config
@@ -1097,7 +1095,6 @@ function dashboard() {
       this.wizardFromModelsTab = false;
       this.wizardEngine = cfg.engine || provId;
       this.wizardName = provId;
-      this.wizardDisplayName = cfg.display_name || '';
       this.wizardBaseUrl = cfg.base_url || '';
       this.wizardKeySource = cfg.api_key_env_var_name ? 'env' : 'keychain';
       this.wizardApiKey = '';  // Don't pre-fill key for security
@@ -1134,7 +1131,7 @@ function dashboard() {
     async wizardNext() {
       if (this.wizardStep === 1) {
         if (!this.wizardEngine) return;
-        // Auto-fill name from engine if empty
+        // Auto-fill name and display name from engine if empty
         if (!this.wizardName) this.wizardName = this.wizardEngine;
         // If name already exists, suggest a suffix
         if (this.providerConfig[this.wizardName]) {
@@ -1175,8 +1172,7 @@ function dashboard() {
         engine: this.wizardEngine,
         models: { ...this.wizardEnabledModels },
       };
-      if (this.wizardDisplayName) provCfg.display_name = this.wizardDisplayName;
-      else delete provCfg.display_name;
+      delete provCfg.display_name;
       if (this.wizardBaseUrl) provCfg.base_url = this.wizardBaseUrl;
       else delete provCfg.base_url;
       
@@ -1227,7 +1223,7 @@ function dashboard() {
           // Allow adding again (variants)
         }
         const search = this.wizardModelSearch.toLowerCase();
-        if (search && !(m.displayName || m.id).toLowerCase().includes(search) && !m.id.toLowerCase().includes(search)) {
+        if (search && !m.id.toLowerCase().includes(search)) {
           return false;
         }
         return true;

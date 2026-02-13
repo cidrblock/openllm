@@ -127,13 +127,12 @@ program
     const { getEngines } = await import('./providers/adapter.js');
     const engines = getEngines().map((e) => ({
       id: e.id,
-      displayName: e.displayName,
     }));
     if (options.json) {
       console.log(JSON.stringify(engines));
     } else {
       for (const e of engines) {
-        console.log(`${e.id}\t${e.displayName}`);
+        console.log(e.id);
       }
     }
   });
@@ -146,7 +145,6 @@ program
     const { getEngines } = await import('./providers/adapter.js');
     const engines = getEngines().map((e) => ({
       id: e.id,
-      displayName: e.displayName,
       requiresKey: e.requiresKey,
       defaultBaseUrl: e.defaultBaseUrl,
     }));
@@ -154,7 +152,7 @@ program
       console.log(JSON.stringify(engines));
     } else {
       for (const e of engines) {
-        console.log(`${e.id}\t${e.displayName}\t${e.requiresKey ? 'key-required' : 'keyless'}\t${e.defaultBaseUrl || '-'}`);
+        console.log(`${e.id}\t${e.requiresKey ? 'key-required' : 'keyless'}\t${e.defaultBaseUrl || '-'}`);
       }
     }
   });

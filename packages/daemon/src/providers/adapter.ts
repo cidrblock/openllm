@@ -1,182 +1,274 @@
 /**
- * Provider adapter - wraps multi-llm-ts engines for OpenLLM
- * 
- * The "actual" layer: engines are fixed API implementations from multi-llm-ts.
+ * Provider adapter - wraps Vercel AI SDK providers for OpenLLM
+ *
+ * The "actual" layer: engines are fixed API implementations from the Vercel AI SDK.
  * Virtual providers (user-defined instances) live in config/state -- not here.
- * 
- * This module consolidates all engine metadata into a single EngineInfo[] source
- * of truth, and provides fetchModels() + streamChat() that operate on engine IDs.
+ *
+ * This module uses a data-driven provider registry: adding a new engine is as
+ * simple as adding an entry to the ENGINES record. Each entry carries metadata
+ * AND the factory function, so no switch statements are needed at runtime.
+ *
+ * Tool support uses Vercel AI SDK's native tool() objects and streamText() with
+ * the built-in step loop (stopWhen). No wrapper classes required.
  */
 
-import {
-  igniteEngine,
-  loadModels,
-  Message,
-} from 'multi-llm-ts';
+import { streamText, jsonSchema } from 'ai';
+import type { LanguageModel, ToolSet } from 'ai';
+
+import { createOpenAI } from '@ai-sdk/openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createMistral } from '@ai-sdk/mistral';
+import { createXai } from '@ai-sdk/xai';
+import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createGroq } from '@ai-sdk/groq';
+import { createCohere } from '@ai-sdk/cohere';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createFireworks } from '@ai-sdk/fireworks';
+import { createTogetherAI } from '@ai-sdk/togetherai';
+import { createPerplexity } from '@ai-sdk/perplexity';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+
 import { mockStreamChat, getMockModels } from './mock.js';
+
+// ── Provider config type for factory functions ─────────────────────────
+
+interface ProviderFactoryConfig {
+  apiKey?: string;
+  baseURL?: string;
+}
 
 // ── Engine metadata (actual layer) ─────────────────────────────────────
 
 /**
- * Engine = actual API implementation from multi-llm-ts.
+ * Engine = actual API implementation backed by a Vercel AI SDK provider.
  * Fixed set, not user-configurable. This is the "actual" layer.
+ *
+ * Adding a new engine requires only a new entry here -- no other code changes.
  */
 export interface EngineInfo {
   /** Engine type identifier (e.g., "openrouter", "openai") */
   id: string;
-  /** multi-llm-ts engine name (may differ from id, e.g., gemini → "google") */
-  multiLlmName: string;
-  /** Human-readable display name (e.g., "OpenRouter") */
-  displayName: string;
   /** Whether this engine requires an API key */
   requiresKey: boolean;
-  /** Default base URL (from multi-llm-ts defaults; undefined if user must set) */
+  /** Default base URL (undefined if user must set) */
   defaultBaseUrl?: string;
   /** Default environment variable for API key */
   defaultEnvVar?: string;
+  /** Whether this engine supports tool calling */
+  supportsTools: boolean;
+  /** Factory: creates a Vercel AI SDK provider and returns a language model */
+  createModel: (modelId: string, config: ProviderFactoryConfig) => LanguageModel;
 }
 
-/**
- * Predefined template for the "Add Provider" wizard.
- * Essentially the engine info + a suggested instance name.
- */
-export interface ProviderTemplate {
-  engine: string;
-  suggestedName: string;
-  displayName: string;
-  defaultBaseUrl?: string;
-  requiresKey: boolean;
+// ── Helper factories ───────────────────────────────────────────────────
+
+/** Create model via a dedicated @ai-sdk/* provider package */
+function dedicatedProvider(
+  factory: (config: any) => any,
+  config: ProviderFactoryConfig,
+  modelId: string,
+): LanguageModel {
+  const provider = factory({
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+  });
+  return provider(modelId);
 }
 
+/** Create model via @ai-sdk/openai-compatible */
+function openaiCompatibleProvider(
+  name: string,
+  defaultBaseURL: string,
+  config: ProviderFactoryConfig,
+  modelId: string,
+): LanguageModel {
+  const provider = createOpenAICompatible({
+    name,
+    baseURL: config.baseURL || defaultBaseURL,
+    ...(config.apiKey ? { apiKey: config.apiKey } : {}),
+  });
+  return provider.chatModel(modelId);
+}
+
+// ── Engine registry ────────────────────────────────────────────────────
+
 /**
- * Single source of truth for all engine metadata.
- * Replaces PROVIDER_ENGINE_MAP, PROVIDER_DISPLAY_NAMES, DEFAULT_ENV_VARS,
- * NO_KEY_PROVIDERS, and DEFAULT_BASE_URLS.
- * 
- * NOTE: default base URLs are duplicated from multi-llm-ts internals.
- * multi-llm-ts does not currently expose them programmatically.
+ * Data-driven provider registry.
+ * Each entry carries metadata AND the factory function.
+ * Adding a new engine = adding a new entry. No switch/if-else anywhere.
  */
-const ENGINES: EngineInfo[] = [
-  {
+const ENGINES: Record<string, EngineInfo> = {
+  // ── Mock (testing) ──────────────────────────────────────────────────
+  mock: {
     id: 'mock',
-    multiLlmName: 'mock',
-    displayName: 'Mock (Testing)',
     requiresKey: false,
+    supportsTools: false,
+    createModel: () => { throw new Error('Mock engine uses mockStreamChat, not createModel'); },
   },
-  {
+
+  // ── Dedicated provider packages ─────────────────────────────────────
+  openai: {
     id: 'openai',
-    multiLlmName: 'openai',
-    displayName: 'OpenAI',
     requiresKey: true,
     defaultBaseUrl: 'https://api.openai.com/v1',
     defaultEnvVar: 'OPENAI_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createOpenAI, config, modelId),
   },
-  {
+  anthropic: {
     id: 'anthropic',
-    multiLlmName: 'anthropic',
-    displayName: 'Anthropic',
     requiresKey: true,
     defaultBaseUrl: 'https://api.anthropic.com',
     defaultEnvVar: 'ANTHROPIC_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createAnthropic, config, modelId),
   },
-  {
+  gemini: {
     id: 'gemini',
-    multiLlmName: 'google',
-    displayName: 'Google Gemini',
     requiresKey: true,
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
     defaultEnvVar: 'GOOGLE_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createGoogleGenerativeAI, config, modelId),
   },
-  {
+  mistral: {
     id: 'mistral',
-    multiLlmName: 'mistralai',
-    displayName: 'Mistral',
     requiresKey: true,
     defaultBaseUrl: 'https://api.mistral.ai',
     defaultEnvVar: 'MISTRAL_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createMistral, config, modelId),
   },
-  {
-    id: 'ollama',
-    multiLlmName: 'ollama',
-    displayName: 'Ollama',
-    requiresKey: false,
-    defaultBaseUrl: 'http://127.0.0.1:11434',
-  },
-  {
-    id: 'azure',
-    multiLlmName: 'azure',
-    displayName: 'Azure OpenAI',
-    requiresKey: true,
-    // No default base URL — user must set
-    defaultEnvVar: 'AZURE_OPENAI_API_KEY',
-  },
-  {
-    id: 'openrouter',
-    multiLlmName: 'openrouter',
-    displayName: 'OpenRouter',
-    requiresKey: true,
-    defaultBaseUrl: 'https://openrouter.ai/api/v1',
-    defaultEnvVar: 'OPENROUTER_API_KEY',
-  },
-  {
-    id: 'deepseek',
-    multiLlmName: 'deepseek',
-    displayName: 'DeepSeek',
-    requiresKey: true,
-    defaultBaseUrl: 'https://api.deepseek.com/v1',
-    defaultEnvVar: 'DEEPSEEK_API_KEY',
-  },
-  {
-    id: 'groq',
-    multiLlmName: 'groq',
-    displayName: 'Groq',
-    requiresKey: true,
-    defaultBaseUrl: 'https://api.groq.com/openai/v1',
-    defaultEnvVar: 'GROQ_API_KEY',
-  },
-  {
+  xai: {
     id: 'xai',
-    multiLlmName: 'xai',
-    displayName: 'xAI (Grok)',
     requiresKey: true,
     defaultBaseUrl: 'https://api.x.ai/v1',
     defaultEnvVar: 'XAI_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createXai, config, modelId),
   },
-  {
+  deepseek: {
+    id: 'deepseek',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    defaultEnvVar: 'DEEPSEEK_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createDeepSeek, config, modelId),
+  },
+  groq: {
+    id: 'groq',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.groq.com/openai/v1',
+    defaultEnvVar: 'GROQ_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createGroq, config, modelId),
+  },
+  cohere: {
+    id: 'cohere',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.cohere.com',
+    defaultEnvVar: 'COHERE_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createCohere, config, modelId),
+  },
+  bedrock: {
+    id: 'bedrock',
+    requiresKey: false, // Uses AWS credentials
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createAmazonBedrock, config, modelId),
+  },
+  fireworks: {
+    id: 'fireworks',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.fireworks.ai/inference/v1',
+    defaultEnvVar: 'FIREWORKS_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createFireworks, config, modelId),
+  },
+  togetherai: {
+    id: 'togetherai',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.together.xyz/v1',
+    defaultEnvVar: 'TOGETHER_AI_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) => dedicatedProvider(createTogetherAI, config, modelId),
+  },
+  perplexity: {
+    id: 'perplexity',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.perplexity.ai',
+    defaultEnvVar: 'PERPLEXITY_API_KEY',
+    supportsTools: false,
+    createModel: (modelId, config) => dedicatedProvider(createPerplexity, config, modelId),
+  },
+
+  // ── Azure (uses OpenAI SDK with compatibility mode) ─────────────────
+  azure: {
+    id: 'azure',
+    requiresKey: true,
+    defaultEnvVar: 'AZURE_OPENAI_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('azure-openai', config.baseURL || '', config, modelId),
+  },
+
+  // ── OpenAI-compatible engines ───────────────────────────────────────
+  openrouter: {
+    id: 'openrouter',
+    requiresKey: true,
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    defaultEnvVar: 'OPENROUTER_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('openrouter', 'https://openrouter.ai/api/v1', config, modelId),
+  },
+  ollama: {
+    id: 'ollama',
+    requiresKey: false,
+    defaultBaseUrl: 'http://127.0.0.1:11434/v1',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('ollama', 'http://127.0.0.1:11434/v1', config, modelId),
+  },
+  lmstudio: {
+    id: 'lmstudio',
+    requiresKey: false,
+    defaultBaseUrl: 'http://localhost:1234/v1',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('lmstudio', 'http://localhost:1234/v1', config, modelId),
+  },
+  cerebras: {
     id: 'cerebras',
-    multiLlmName: 'cerebras',
-    displayName: 'Cerebras',
     requiresKey: true,
     defaultBaseUrl: 'https://api.cerebras.ai/v1',
     defaultEnvVar: 'CEREBRAS_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('cerebras', 'https://api.cerebras.ai/v1', config, modelId),
   },
-  {
-    id: 'lmstudio',
-    multiLlmName: 'lmstudio',
-    displayName: 'LM Studio',
-    requiresKey: false,
-    defaultBaseUrl: 'http://localhost:1234/v1',
-  },
-  {
+  meta: {
     id: 'meta',
-    multiLlmName: 'meta',
-    displayName: 'Meta (Llama)',
     requiresKey: true,
     defaultBaseUrl: 'https://api.llama.com/compat/v1/',
     defaultEnvVar: 'META_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('meta', 'https://api.llama.com/compat/v1/', config, modelId),
   },
-];
+};
 
 /** Index for O(1) lookup by engine ID */
 const ENGINE_MAP = new Map<string, EngineInfo>(
-  ENGINES.map(e => [e.id, e]),
+  Object.values(ENGINES).map(e => [e.id, e]),
 );
 
 // ── Engine accessors ───────────────────────────────────────────────────
 
 /** Get all available engines (the fixed set of API implementations). */
 export function getEngines(): EngineInfo[] {
-  return ENGINES;
+  return Object.values(ENGINES);
 }
 
 /** Get a single engine by ID, or undefined if not found. */
@@ -186,52 +278,28 @@ export function getEngine(engineId: string): EngineInfo | undefined {
 
 /** Get predefined templates for the "Add Provider" wizard. */
 export function getProviderTemplates(): ProviderTemplate[] {
-  return ENGINES.map(e => ({
+  return Object.values(ENGINES).map(e => ({
     engine: e.id,
     suggestedName: e.id,
-    displayName: e.displayName,
     defaultBaseUrl: e.defaultBaseUrl,
     requiresKey: e.requiresKey,
   }));
 }
 
-// ── Backward-compatible accessors (used by code not yet migrated) ──────
-
-/** @deprecated Use getEngines() instead */
-export function getSupportedProviders(): string[] {
-  return ENGINES.map(e => e.id);
-}
-
-/** @deprecated Use getEngine(id)?.displayName instead */
-export function getProviderDisplayName(providerId: string): string {
-  return ENGINE_MAP.get(providerId)?.displayName || providerId;
-}
-
-/** @deprecated Use getEngine(id)?.defaultEnvVar instead */
-export function getDefaultEnvVar(providerId: string): string | undefined {
-  return ENGINE_MAP.get(providerId)?.defaultEnvVar;
-}
-
-/** @deprecated Use getEngine(id)?.defaultBaseUrl instead */
-export function getDefaultBaseUrl(providerId: string): string | undefined {
-  return ENGINE_MAP.get(providerId)?.defaultBaseUrl;
-}
-
-/** @deprecated Use getEngine(id)?.requiresKey === false instead */
-export function providerRequiresKey(providerId: string): boolean {
-  const engine = ENGINE_MAP.get(providerId);
-  return engine ? engine.requiresKey : true;
-}
-
-/** @deprecated Use getEngine(id)?.multiLlmName instead */
-export function getEngineName(providerId: string): string | undefined {
-  return ENGINE_MAP.get(providerId)?.multiLlmName;
+/**
+ * Predefined template for the "Add Provider" wizard.
+ */
+export interface ProviderTemplate {
+  engine: string;
+  suggestedName: string;
+  defaultBaseUrl?: string;
+  requiresKey: boolean;
 }
 
 // ── Chat parameters ────────────────────────────────────────────────────
 
 /**
- * Per-model chat parameters that can be passed through to multi-llm-ts.
+ * Per-model chat parameters that can be passed through to the AI SDK.
  * Used for the 3-tier merge: Request > Config > Engine Default.
  */
 export interface ChatParams {
@@ -242,20 +310,63 @@ export interface ChatParams {
   timeout?: number;
 }
 
+// ── Tool definitions (passed from proto/config to AI SDK tools) ────────
+
+/**
+ * Tool definition as provided by callers (proto Tool or config).
+ * Converted to Vercel AI SDK tool() objects.
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: string;  // JSON schema string
+}
+
+/**
+ * Callback provided by the caller to execute a tool.
+ * The adapter delegates tool execution to this callback;
+ * Vercel AI SDK handles the orchestration loop.
+ */
+export type ToolExecutor = (
+  toolName: string,
+  args: Record<string, any>,
+) => Promise<any>;
+
+/**
+ * Callback for tool execution validation (approval tiers).
+ * Called BEFORE each tool execution.
+ * Return 'allow' to proceed, 'deny' to skip this tool, 'abort' to stop the loop.
+ */
+export type ToolValidationCallback = (
+  toolName: string,
+  args: any,
+) => Promise<'allow' | 'deny' | 'abort'>;
+
+// ── Chat chunk types (yielded by streamChat) ────────────────────────────
+
+/**
+ * Chunk types yielded by streamChat.
+ * - text: content from the LLM
+ * - tool: tool execution state change
+ * - done: stream finished
+ */
+export type ChatChunk =
+  | { type: 'text'; text: string }
+  | { type: 'tool'; name: string; state: string; status?: string; call?: { params: any; result: any }; done: boolean }
+  | { type: 'error'; error: string }
+  | { type: 'done'; finishReason: string };
+
 // ── Discovery model info (from engine API) ─────────────────────────────
 
 /**
  * Model info returned from engine discovery (fetchModels).
  * This is the "actual" model — the raw data from the engine API.
- * Distinguished from the runtime ModelInfo in state.ts which is "virtual".
  */
 export interface DiscoveredModel {
-  /** Engine-prefixed model ID: e.g., "openrouter/anthropic/claude-opus-4.6" */
+  /** Model ID: e.g., "anthropic/claude-opus-4.6" */
   id: string;
   /** Engine ID that discovered this model */
   engine: string;
-  /** Human-readable name */
-  displayName: string;
   /** Context window size (0 if unknown) */
   contextWindow: number;
   /** Model capabilities */
@@ -268,9 +379,12 @@ export interface DiscoveredModel {
 // ── Fetch models (actual layer) ────────────────────────────────────────
 
 /**
- * Fetch available models from an engine.
+ * Fetch available models from an engine via its API.
  * Returns engine-prefixed model IDs (e.g., "openrouter/anthropic/claude-opus-4.6").
  * This operates on the "actual" layer — no virtual provider awareness.
+ *
+ * The Vercel AI SDK does not provide a loadModels() function, so we call
+ * each provider's models API directly via fetch.
  */
 export async function fetchModels(
   engineId: string,
@@ -282,125 +396,362 @@ export async function fetchModels(
     return getMockModels().map(m => ({
       id: m.id,
       engine: 'mock',
-      displayName: m.displayName,
       contextWindow: m.contextWindow || 0,
       capabilities: m.capabilities,
     }));
   }
-  
+
   const engine = ENGINE_MAP.get(engineId);
-  if (!engine) {
-    return [];
-  }
-  
-  const config: Record<string, any> = {};
-  if (apiKey) config.apiKey = apiKey;
-  if (baseUrl) config.baseURL = baseUrl;
-  
+  if (!engine) return [];
+
   try {
-    const modelsList = await loadModels(engine.multiLlmName, config);
-    
-    if (!modelsList || !modelsList.chat) {
-      return [];
-    }
-    
-    return modelsList.chat.map((m) => ({
-      id: `${engineId}/${m.id}`,
-      engine: engineId,
-      displayName: m.name || m.id,
-      contextWindow: 0,
-      capabilities: {
-        supportsTools: m.capabilities?.tools === true,
-        supportsVision: m.capabilities?.vision === true,
-      },
-    }));
+    return await fetchModelsFromApi(engineId, engine, apiKey, baseUrl);
   } catch (error: any) {
     console.error(`[Adapter] Failed to fetch models for engine ${engineId}:`, error.message || error);
     return [];
   }
 }
 
+/**
+ * Fetch models from the provider's API endpoint.
+ * Most OpenAI-compatible providers support GET /v1/models.
+ * Provider-specific APIs are handled per-engine.
+ */
+async function fetchModelsFromApi(
+  engineId: string,
+  engine: EngineInfo,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<DiscoveredModel[]> {
+  const effectiveBaseUrl = baseUrl || engine.defaultBaseUrl;
+
+  // Anthropic uses a different API format
+  if (engineId === 'anthropic') {
+    return fetchAnthropicModels(engineId, apiKey, effectiveBaseUrl);
+  }
+
+  // Google Gemini uses a different API format
+  if (engineId === 'gemini') {
+    return fetchGeminiModels(engineId, apiKey, effectiveBaseUrl);
+  }
+
+  // AWS Bedrock - skip for now (requires AWS SDK auth)
+  if (engineId === 'bedrock') {
+    return [];
+  }
+
+  // OpenAI-compatible: GET /models (or /v1/models)
+  if (!effectiveBaseUrl) return [];
+
+  const modelsUrl = effectiveBaseUrl.endsWith('/v1')
+    ? `${effectiveBaseUrl}/models`
+    : effectiveBaseUrl.endsWith('/')
+      ? `${effectiveBaseUrl}models`
+      : `${effectiveBaseUrl}/models`;
+
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+  };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const resp = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(15000) });
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => 'unknown')}`);
+  }
+
+  const data = await resp.json() as any;
+  const models = data.data || data.models || [];
+
+  return models.map((m: any) => ({
+    id: m.id || m.name,
+    engine: engineId,
+    contextWindow: m.context_length || m.context_window || 0,
+    capabilities: {
+      supportsTools: engine.supportsTools,
+      supportsVision: false,
+    },
+  }));
+}
+
+/** Fetch models from Anthropic's /v1/models API */
+async function fetchAnthropicModels(
+  engineId: string,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<DiscoveredModel[]> {
+  const url = `${baseUrl || 'https://api.anthropic.com'}/v1/models`;
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    'anthropic-version': '2023-06-01',
+  };
+  if (apiKey) {
+    headers['x-api-key'] = apiKey;
+  }
+
+  const resp = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  if (!resp.ok) {
+    throw new Error(`Anthropic HTTP ${resp.status}`);
+  }
+
+  const data = await resp.json() as any;
+  const models = data.data || [];
+
+  return models.map((m: any) => ({
+    id: m.id,
+    engine: engineId,
+    contextWindow: m.max_tokens || 0,
+    capabilities: {
+      supportsTools: true,
+      supportsVision: true,
+    },
+  }));
+}
+
+/** Fetch models from Google's Gemini API */
+async function fetchGeminiModels(
+  engineId: string,
+  apiKey?: string,
+  baseUrl?: string,
+): Promise<DiscoveredModel[]> {
+  const base = baseUrl || 'https://generativelanguage.googleapis.com';
+  const url = `${base}/v1beta/models${apiKey ? `?key=${apiKey}` : ''}`;
+
+  const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  if (!resp.ok) {
+    throw new Error(`Gemini HTTP ${resp.status}`);
+  }
+
+  const data = await resp.json() as any;
+  const models = data.models || [];
+
+  return models
+    .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+    .map((m: any) => ({
+      id: m.name?.replace('models/', '') || m.name,
+      engine: engineId,
+      contextWindow: m.inputTokenLimit || 0,
+      capabilities: {
+        supportsTools: true,
+        supportsVision: true,
+      },
+    }));
+}
+
 // ── Stream chat (actual layer) ─────────────────────────────────────────
 
 /**
- * Stream a chat response from an engine.
+ * Stream a chat response from an engine using the Vercel AI SDK.
  * Operates on the "actual" layer — takes engine ID and engine model ID directly.
  * The caller (state.ts) is responsible for virtual → actual resolution.
- * 
+ *
+ * When tools are provided, creates Vercel AI SDK tool() objects and uses
+ * streamText's built-in step loop (stopWhen) for automatic tool execution.
+ *
  * @param engineId - Engine type (e.g., "openrouter")
- * @param engineModelId - Actual model ID the engine expects (e.g., "anthropic/claude-opus-4.6")
- * @param messages - Chat messages
+ * @param engineModelId - Actual model ID the engine expects
+ * @param messages - Chat messages (role + content)
  * @param apiKey - API key (optional for keyless engines)
  * @param baseUrl - Custom base URL (optional)
- * @param params - Chat parameters (temperature, top_p, etc.) — wired to multi-llm-ts opts
+ * @param params - Chat parameters (temperature, top_p, etc.)
+ * @param tools - Tool definitions to register (empty = no tools)
+ * @param toolExecutor - Callback to execute tool calls (required if tools provided)
+ * @param toolValidator - Optional callback for approval tiers
  */
 export async function* streamChat(
   engineId: string,
   engineModelId: string,
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
   apiKey?: string,
   baseUrl?: string,
   params?: ChatParams,
-): AsyncGenerator<{ type: 'text' | 'done'; text?: string; finishReason?: string }> {
+  tools?: ToolDefinition[],
+  toolExecutor?: ToolExecutor,
+  toolValidator?: ToolValidationCallback,
+): AsyncGenerator<ChatChunk> {
   // Mock engine — no network, no key, deterministic
   if (engineId === 'mock') {
     yield* mockStreamChat(engineModelId, messages);
     return;
   }
-  
+
   const engineInfo = ENGINE_MAP.get(engineId);
   if (!engineInfo) {
+    console.error(`[Adapter] Unknown engine: ${engineId}`);
+    yield { type: 'error', error: `Unknown engine: ${engineId}` };
     yield { type: 'done', finishReason: 'error' };
     return;
   }
-  
-  const config: Record<string, any> = {};
-  if (apiKey) config.apiKey = apiKey;
-  if (baseUrl) config.baseURL = baseUrl;
-  
-  const llmEngine = igniteEngine(engineInfo.multiLlmName, config);
-  
-  // Convert messages to multi-llm-ts format
-  const thread = messages.map((m) => new Message(
-    m.role as 'system' | 'user' | 'assistant',
-    m.content,
-  ));
-  
-  // Build multi-llm-ts completion options from params
-  const opts: Record<string, any> = {};
-  if (params?.temperature != null) opts.temperature = params.temperature;
-  if (params?.top_p != null) opts.top_p = params.top_p;
-  if (params?.top_k != null) opts.top_k = params.top_k;
-  if (params?.maxTokens != null) opts.maxTokens = params.maxTokens;
-  if (params?.timeout != null) opts.timeout = params.timeout;
-  
-  const hasOpts = Object.keys(opts).length > 0;
-  
-  let gotContent = false;
-  
-  console.log(`[Adapter] streamChat: engine="${engineInfo.multiLlmName}", model="${engineModelId}", messages=${messages.length}, opts=${JSON.stringify(opts)}`);
-  
+
+  console.log(`[Adapter] streamChat: engine="${engineId}", model="${engineModelId}", messages=${messages.length}, tools=${tools?.length || 0}`);
+
   try {
-    for await (const chunk of llmEngine.generate(engineModelId, thread, hasOpts ? opts : undefined)) {
-      if (chunk.type === 'content') {
-        if (chunk.text) {
-          yield { type: 'text', text: chunk.text };
-          gotContent = true;
+    // Create the Vercel AI SDK model instance
+    const model = engineInfo.createModel(engineModelId, {
+      apiKey,
+      baseURL: baseUrl,
+    });
+
+    // Convert messages to Vercel AI SDK format
+    const aiMessages = convertMessages(messages);
+
+    // Convert ToolDefinition[] to Vercel AI SDK tool() objects
+    const hasTools = tools && tools.length > 0 && toolExecutor;
+    let aiTools: ToolSet | undefined;
+
+    if (hasTools) {
+      const toolRecord: Record<string, any> = {};
+      for (const t of tools) {
+        let schema: any;
+        try {
+          schema = JSON.parse(t.inputSchema);
+        } catch {
+          schema = { type: 'object', properties: {} };
         }
-        if (chunk.done) {
-          yield { type: 'done', finishReason: 'stop' };
-          return;
+        // Ensure schema always has type: "object" — Anthropic requires it
+        if (!schema.type) {
+          schema.type = 'object';
         }
+        if (!schema.properties) {
+          schema.properties = {};
+        }
+
+        // Construct tool object directly (bypasses tool() generic inference issues with jsonSchema)
+        toolRecord[t.name] = {
+          description: t.description,
+          parameters: jsonSchema<any>(schema),
+          execute: async (args: any) => {
+            // Validation callback (approval tiers)
+            if (toolValidator) {
+              const decision = await toolValidator(t.name, args);
+              if (decision === 'deny') return { error: 'Tool execution denied by policy' };
+              if (decision === 'abort') throw new Error('Tool execution aborted by policy');
+            }
+            return toolExecutor!(t.name, args);
+          },
+        };
       }
-      // Skip tool/usage/stream chunks for now
+      aiTools = toolRecord;
     }
-    
-    // If we exited the loop without a done chunk
+
+    // Build streamText options
+    const streamOptions: any = {
+      model,
+      messages: aiMessages,
+      ...(aiTools ? { tools: aiTools, maxSteps: 10 } : {}),
+      ...(params?.temperature != null ? { temperature: params.temperature } : {}),
+      ...(params?.maxTokens != null ? { maxTokens: params.maxTokens } : {}),
+      ...(params?.top_p != null ? { topP: params.top_p } : {}),
+      ...(params?.top_k != null ? { topK: params.top_k } : {}),
+    };
+
+    const result = streamText(streamOptions);
+
+    // Iterate over the full stream and yield our ChatChunk format
+    let gotContent = false;
+    for await (const part of result.fullStream) {
+      switch (part.type) {
+        case 'text-delta':
+          if (part.text) {
+            yield { type: 'text', text: part.text };
+            gotContent = true;
+          }
+          break;
+
+        case 'tool-call':
+          yield {
+            type: 'tool',
+            name: part.toolName,
+            state: 'running',
+            call: { params: part.input, result: undefined },
+            done: false,
+          };
+          break;
+
+        case 'tool-result':
+          yield {
+            type: 'tool',
+            name: part.toolName,
+            state: 'completed',
+            call: { params: part.input, result: part.output },
+            done: true,
+          };
+          break;
+
+        case 'error':
+          console.error(`[Adapter] Stream error for ${engineId}/${engineModelId}:`, part.error);
+          const errMsg = part.error instanceof Error ? part.error.message
+            : typeof part.error === 'string' ? part.error
+            : JSON.stringify(part.error);
+          yield { type: 'error', error: errMsg };
+          break;
+
+        case 'finish':
+          yield { type: 'done', finishReason: part.finishReason || 'stop' };
+          return;
+      }
+    }
+
+    // If we got content but no explicit finish event, emit done
     if (gotContent) {
       yield { type: 'done', finishReason: 'stop' };
     }
   } catch (error: any) {
-    console.error(`[Adapter] Chat error for ${engineId}/${engineModelId}:`, error.message || error);
+    const errorMessage = error.message || String(error);
+    console.error(`[Adapter] Chat error for ${engineId}/${engineModelId}:`, errorMessage);
+    yield { type: 'error', error: `${engineId}/${engineModelId}: ${errorMessage}` };
     yield { type: 'done', finishReason: 'error' };
   }
+}
+
+// ── Message conversion ─────────────────────────────────────────────────
+
+/**
+ * Convert our internal message format to Vercel AI SDK ModelMessage format.
+ */
+function convertMessages(
+  messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
+): any[] {
+  return messages.map(m => {
+    switch (m.role) {
+      case 'system':
+        return { role: 'system' as const, content: m.content };
+
+      case 'user':
+        return { role: 'user' as const, content: m.content };
+
+      case 'assistant':
+        // Assistant messages may have tool calls
+        if (m.tool_calls && m.tool_calls.length > 0) {
+          const parts: any[] = [];
+          if (m.content) {
+            parts.push({ type: 'text', text: m.content });
+          }
+          for (const tc of m.tool_calls) {
+            parts.push({
+              type: 'tool-call',
+              toolCallId: tc.id,
+              toolName: tc.name,
+              args: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments,
+            });
+          }
+          return { role: 'assistant' as const, content: parts };
+        }
+        return { role: 'assistant' as const, content: m.content };
+
+      case 'tool':
+        return {
+          role: 'tool' as const,
+          content: [{
+            type: 'tool-result',
+            toolCallId: m.tool_call_id || '',
+            result: m.content,
+          }],
+        };
+
+      default:
+        return { role: 'user' as const, content: m.content };
+    }
+  });
 }

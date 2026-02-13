@@ -25,7 +25,11 @@ import {
   streamChat,
   type EngineInfo,
   type ChatParams,
+  type ChatChunk,
   type DiscoveredModel,
+  type ToolDefinition,
+  type ToolExecutor,
+  type ToolValidationCallback,
 } from './providers/adapter.js';
 
 // ── Client types ───────────────────────────────────────────────────────
@@ -65,8 +69,6 @@ export interface ProviderInfo {
   id: string;
   /** Actual engine type (e.g., "openrouter") */
   engine: string;
-  /** Human-readable label (from config.display_name or engine default) */
-  displayName: string;
   /** Whether this provider has been configured with required credentials */
   configured: boolean;
   /** Whether the provider is reachable (from health checks) */
@@ -96,8 +98,6 @@ export interface ModelInfo {
   provider: string;
   /** Actual engine type (convenience, from provider) */
   engine: string;
-  /** Human-readable display name */
-  displayName: string;
   /** Context window size */
   contextWindow: number;
   /** Model capabilities */
@@ -124,6 +124,20 @@ export interface VSCodeConnection {
     reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   }>;
+}
+
+// ── Chat tool options ──────────────────────────────────────────────────
+
+/**
+ * Chat options controlling tool behavior.
+ */
+export interface ChatToolOptions {
+  /** "auto" (default) | "passthrough" | "none" */
+  toolMode?: string;
+  /** Client-provided tool definitions (overrides registry when present) */
+  tools?: ToolDefinition[];
+  /** Max tool execution rounds (0 = unlimited, default 10) */
+  maxToolIterations?: number;
 }
 
 // ── Central daemon state ───────────────────────────────────────────────
@@ -245,7 +259,6 @@ export class DaemonState {
       providers.push({
         id: providerId,
         engine: providerCfg.engine,
-        displayName: providerCfg.display_name || engineInfo.displayName,
         configured,
         healthy: this.providerHealth.get(providerId) ?? true,
         requiresKey: engineInfo.requiresKey,
@@ -326,7 +339,6 @@ export class DaemonState {
           engineModelId,
           provider: providerId,
           engine: providerCfg.engine,
-          displayName: modelName,
           contextWindow: discovered?.contextWindow || 0,
           capabilities: discovered?.capabilities,
           params: Object.keys(modelCfg).length > 0 ? modelCfg : undefined,
@@ -369,21 +381,41 @@ export class DaemonState {
    * 
    * Applies system prompt and merges params (request > config > engine default).
    * 
+   * Tool modes:
+   * - "auto" (default): Tools are passed to Vercel AI SDK as tool() objects;
+   *   streamText() handles the orchestration loop (maxSteps). execute() calls
+   *   are delegated to the ToolExecutor (e.g., VS Code backchannel).
+   * - "passthrough": Tools are sent to the LLM but tool_call chunks are
+   *   streamed back to the caller without execution. The caller owns the loop.
+   * - "none": No tools sent to the LLM.
+   * 
    * @param compositeModelId - "{provider-id}/{model-name}"
    * @param messages - Chat messages
    * @param requestParams - Per-request parameter overrides (from caller)
+   * @param toolOptions - Tool mode, definitions, and limits
    */
   async* chat(
     compositeModelId: string,
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
     requestParams?: ChatParams,
-  ): AsyncGenerator<{ type: string; text?: string; finishReason?: string }> {
-    console.log(`[State] Chat request: compositeModelId="${compositeModelId}", messages=${messages.length}`);
+    toolOptions?: ChatToolOptions,
+  ): AsyncGenerator<ChatChunk> {
+    const toolMode = toolOptions?.toolMode || 'auto';
+    console.log(`[State] Chat request: compositeModelId="${compositeModelId}", messages=${messages.length}, toolMode="${toolMode}", tools=${toolOptions?.tools?.length || 0}`);
+    
+    // ── Validate passthrough mode ──
+    if (toolMode === 'passthrough' && (!toolOptions?.tools || toolOptions.tools.length === 0)) {
+      console.error(`[State] passthrough mode requires client-provided tools`);
+      yield { type: 'error', error: 'passthrough mode requires client-provided tools' };
+      yield { type: 'done', finishReason: 'error' };
+      return;
+    }
     
     // ── Split composite ID ──
     const slashIdx = compositeModelId.indexOf('/');
     if (slashIdx === -1) {
       console.error(`[State] Invalid composite model ID (no slash): ${compositeModelId}`);
+      yield { type: 'error', error: `Invalid model ID (expected provider/model): ${compositeModelId}` };
       yield { type: 'done', finishReason: 'error' };
       return;
     }
@@ -397,6 +429,7 @@ export class DaemonState {
     const providerCfg = config[providerId];
     if (!providerCfg) {
       console.error(`[State] Provider not found: ${providerId}`);
+      yield { type: 'error', error: `Provider not found: "${providerId}". Check your configuration.` };
       yield { type: 'done', finishReason: 'error' };
       return;
     }
@@ -404,6 +437,7 @@ export class DaemonState {
     const engineInfo = getEngine(providerCfg.engine);
     if (!engineInfo) {
       console.error(`[State] Unknown engine "${providerCfg.engine}" for provider "${providerId}"`);
+      yield { type: 'error', error: `Unknown engine "${providerCfg.engine}" for provider "${providerId}"` };
       yield { type: 'done', finishReason: 'error' };
       return;
     }
@@ -412,6 +446,7 @@ export class DaemonState {
     const apiKey = await this.resolveApiKey(providerId, providerCfg);
     if (engineInfo.requiresKey && !apiKey) {
       console.error(`[State] No API key for provider ${providerId}`);
+      yield { type: 'error', error: `No API key configured for provider "${providerId}". Add one via the Web UI or config file.` };
       yield { type: 'done', finishReason: 'error' };
       return;
     }
@@ -432,21 +467,61 @@ export class DaemonState {
     // ── Merge params (3-tier: request > config > engine default) ──
     const mergedParams = mergeParams(modelCfg, requestParams);
     
-    // ── Strip engine prefix from model ID for the actual API call ──
-    // Engine model IDs are stored as "engineId/bareModelId" (e.g., "openrouter/anthropic/claude-3-haiku")
-    // The engine expects just the bare part: "anthropic/claude-3-haiku"
-    const bareModelId = stripEnginePrefix(engineModelId, providerCfg.engine);
+    console.log(`[State] Chat: engine="${providerCfg.engine}", engineModelId="${engineModelId}", toolMode="${toolMode}", baseUrl="${providerCfg.base_url || '(none)'}"`);
     
-    console.log(`[State] Chat: engine="${providerCfg.engine}", engineModelId="${engineModelId}", bareModelId="${bareModelId}", baseUrl="${providerCfg.base_url || '(none)'}"`);
+    // ── Resolve tools based on mode ──
+    let tools: ToolDefinition[] | undefined;
+    let toolExecutor: ToolExecutor | undefined;
+    
+    if (toolMode === 'none') {
+      // No tools — clean completion
+      tools = undefined;
+      toolExecutor = undefined;
+    } else if (toolMode === 'passthrough') {
+      // Passthrough: send tools to LLM but don't execute.
+      // We pass tools but no executor — adapter will use engine directly
+      // and raw tool_call chunks will come through without execution.
+      // For now passthrough is handled as no-tool (Vercel AI SDK's streamText
+      // always executes tools when provided — no "send but don't execute" mode).
+      // TODO: Implement passthrough properly when needed for external agents.
+      // External agents can use the gRPC/REST API with tool_mode=passthrough.
+      tools = undefined;
+      toolExecutor = undefined;
+      console.warn(`[State] passthrough mode: tools will be sent to LLM but not executed (delegated to caller)`);
+    } else {
+      // Auto mode: use client tools if provided, otherwise future registry
+      if (toolOptions?.tools && toolOptions.tools.length > 0) {
+        tools = toolOptions.tools;
+        
+        // Tool executor: delegate to VS Code backchannel for now (Phase 1)
+        // Phase 2 will use the ToolRouter for registry-based routing
+        toolExecutor = async (toolName: string, args: Record<string, any>) => {
+          console.log(`[State] Tool execution: ${toolName}`, JSON.stringify(args).substring(0, 200));
+          try {
+            const result = await this.invokeVSCodeTool(toolName, args);
+            if (result.isError) {
+              console.error(`[State] Tool error: ${toolName}:`, result.resultJson);
+              return { error: result.resultJson };
+            }
+            return JSON.parse(result.resultJson);
+          } catch (error: any) {
+            console.error(`[State] Tool execution failed: ${toolName}:`, error.message);
+            return { error: error.message };
+          }
+        };
+      }
+    }
     
     // ── Call the actual engine ──
     yield* streamChat(
       providerCfg.engine,
-      bareModelId,
+      engineModelId,
       processedMessages,
       apiKey || undefined,
       providerCfg.base_url,
       mergedParams,
+      tools,
+      toolExecutor,
     );
   }
   
@@ -827,17 +902,4 @@ function mergeParams(
   if (requestParams?.timeout != null) { merged.timeout = requestParams.timeout; hasAny = true; }
   
   return hasAny ? merged : undefined;
-}
-
-/**
- * Strip the engine prefix from an engine model ID.
- * Engine model IDs are stored as "engineId/bareModelId" (e.g., "openrouter/anthropic/claude-3-haiku").
- * The multi-llm-ts engine expects just the bare part: "anthropic/claude-3-haiku".
- */
-function stripEnginePrefix(engineModelId: string, engineId: string): string {
-  const prefix = `${engineId}/`;
-  if (engineModelId.startsWith(prefix)) {
-    return engineModelId.substring(prefix.length);
-  }
-  return engineModelId;
 }

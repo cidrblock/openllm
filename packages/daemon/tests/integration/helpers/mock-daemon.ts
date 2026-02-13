@@ -176,8 +176,8 @@ export async function createMockDaemon(chatOptions?: MockChatOptions): Promise<M
     ListProviders(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
       callback(null, {
         providers: [
-          { id: 'openai', display_name: 'OpenAI', configured: true, healthy: true },
-          { id: 'anthropic', display_name: 'Anthropic', configured: false, healthy: true },
+          { id: 'openai', configured: true, healthy: true },
+          { id: 'anthropic', configured: false, healthy: true },
         ],
       });
     },
@@ -188,8 +188,8 @@ export async function createMockDaemon(chatOptions?: MockChatOptions): Promise<M
     ListModels(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>) {
       callback(null, {
         models: [
-          { id: 'openai/gpt-4o', provider: 'openai', display_name: 'GPT-4o' },
-          { id: 'openai/gpt-4o-mini', provider: 'openai', display_name: 'GPT-4o Mini' },
+          { id: 'openai/gpt-4o', provider: 'openai' },
+          { id: 'openai/gpt-4o-mini', provider: 'openai' },
         ],
       });
     },

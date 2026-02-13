@@ -102,7 +102,6 @@ export function createWebApp(state: DaemonState): Express {
         providers: providers.map((p) => ({
           id: p.id,
           engine: p.engine,
-          displayName: p.displayName,
           configured: p.configured,
           healthy: p.healthy,
           requiresKey: p.requiresKey,
@@ -118,12 +117,11 @@ export function createWebApp(state: DaemonState): Express {
   
   /**
    * GET /api/engines - List available engine types (for Add Provider wizard)
-   * Returns the fixed set of API implementations from multi-llm-ts.
+   * Returns the fixed set of API implementations from the Vercel AI SDK.
    */
   app.get('/api/engines', (req, res) => {
     const engines = getEngines().map(e => ({
       id: e.id,
-      displayName: e.displayName,
       requiresKey: e.requiresKey,
       defaultBaseUrl: e.defaultBaseUrl,
       defaultEnvVar: e.defaultEnvVar,
@@ -165,7 +163,6 @@ export function createWebApp(state: DaemonState): Express {
         models: models.map((m) => ({
           id: m.id,
           engine: m.engine,
-          displayName: m.displayName,
           contextWindow: m.contextWindow,
           capabilities: {
             tools: m.capabilities?.supportsTools || false,
@@ -195,7 +192,6 @@ export function createWebApp(state: DaemonState): Express {
           engineModelId: m.engineModelId,
           provider: m.provider,
           engine: m.engine,
-          displayName: m.displayName,
           contextWindow: m.contextWindow,
           capabilities: {
             tools: m.capabilities?.supportsTools || false,
@@ -437,7 +433,7 @@ export function createWebApp(state: DaemonState): Express {
    * Calls state.chat() directly — no gRPC in the loop.
    */
   app.post('/api/chat', (req, res) => {
-    const { model, messages, temperature, top_p, top_k, max_tokens, timeout: reqTimeout } = req.body;
+    const { model, messages, temperature, top_p, top_k, max_tokens, timeout: reqTimeout, tools, tool_mode } = req.body;
     
     if (!model || !messages) {
       res.status(400).json({ error: 'model and messages required' });
@@ -470,6 +466,8 @@ export function createWebApp(state: DaemonState): Express {
     const chatMessages = messages.map((m: any) => ({
       role: m.role || 'user',
       content: m.content || '',
+      tool_call_id: m.tool_call_id || undefined,
+      tool_calls: m.tool_calls || undefined,
     }));
     
     // Build request params (per-request overrides)
@@ -481,7 +479,19 @@ export function createWebApp(state: DaemonState): Express {
     if (reqTimeout != null) requestParams.timeout = reqTimeout;
     const hasParams = Object.keys(requestParams).length > 0;
     
-    console.log('[Web] Starting Chat stream:', model, `messages: ${chatMessages.length}`);
+    // Build tool options
+    const toolDefs = Array.isArray(tools) ? tools.map((t: any) => ({
+      name: t.name || '',
+      description: t.description || '',
+      inputSchema: typeof t.input_schema === 'string' ? t.input_schema : JSON.stringify(t.input_schema || {}),
+    })).filter((t: any) => t.name) : undefined;
+    
+    const toolOptions = (toolDefs && toolDefs.length > 0) || tool_mode ? {
+      toolMode: tool_mode || 'auto',
+      tools: toolDefs && toolDefs.length > 0 ? toolDefs : undefined,
+    } : undefined;
+    
+    console.log('[Web] Starting Chat stream:', model, `messages: ${chatMessages.length}`, `tools: ${toolDefs?.length || 0}`, `toolMode: ${tool_mode || 'auto'}`);
     
     // Detect actual client disconnect (connection close, not request body consumed)
     // IMPORTANT: use res.on('close') — NOT req.on('close') which fires
@@ -496,11 +506,20 @@ export function createWebApp(state: DaemonState): Express {
     // Stream directly from DaemonState — no gRPC involved
     (async () => {
       try {
-        for await (const chunk of state.chat(model, chatMessages, hasParams ? requestParams : undefined)) {
+        for await (const chunk of state.chat(model, chatMessages, hasParams ? requestParams : undefined, toolOptions)) {
           if (ended) break;
           
           if (chunk.type === 'text' && chunk.text) {
             safeWrite(`data: ${JSON.stringify({ type: 'text', content: chunk.text })}\n\n`);
+          } else if (chunk.type === 'tool') {
+            // Tool execution progress/result
+            const toolData: any = { type: 'tool', name: chunk.name, state: chunk.state, done: chunk.done };
+            if (chunk.call) {
+              toolData.call = { params: chunk.call.params, result: chunk.call.result };
+            }
+            safeWrite(`data: ${JSON.stringify(toolData)}\n\n`);
+          } else if (chunk.type === 'error') {
+            safeWrite(`data: ${JSON.stringify({ type: 'error', error: chunk.error })}\n\n`);
           } else if (chunk.type === 'done') {
             safeWrite(`data: ${JSON.stringify({ type: 'done', finish_reason: chunk.finishReason || 'stop' })}\n\n`);
           }
@@ -521,7 +540,7 @@ export function createWebApp(state: DaemonState): Express {
   app.post('/api/provider/:id/configure', async (req, res) => {
     try {
       const providerId = req.params.id;
-      const { engine, displayName, apiKey, envVarName, baseUrl, target, workspacePath } = req.body;
+      const { engine, apiKey, envVarName, baseUrl, target, workspacePath } = req.body;
       
       const config: ConfigFile = (target === 'workspace' && workspacePath
         ? loadWorkspaceConfig(workspacePath)
@@ -530,9 +549,9 @@ export function createWebApp(state: DaemonState): Express {
       if (!config.providers) config.providers = {};
       
       // Initialize or update provider config
-      const existing = config.providers[providerId] || {} as any;
+      const existing: any = config.providers[providerId] || {};
       if (engine) existing.engine = engine;
-      if (displayName) existing.display_name = displayName;
+      delete existing.display_name; // clean up legacy field
       config.providers[providerId] = existing;
       
       if (apiKey) {

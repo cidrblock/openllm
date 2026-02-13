@@ -591,7 +591,11 @@ export interface ChatRequest {
   /** e.g., "openai/gpt-4o" or "openllm/copilot-gpt-4o" */
   model: string;
   messages: Message[];
-  options: ChatOptions | undefined;
+  options:
+    | ChatOptions
+    | undefined;
+  /** Client-provided tool definitions (overrides registry) */
+  tools: Tool[];
 }
 
 export interface SessionChatRequest {
@@ -615,12 +619,16 @@ export interface ChatOptions {
   maxToolIterations: number;
   /** Only use these tools (empty = all) */
   toolFilter: string[];
-  /** Top-k sampling (NEW) */
+  /** Top-k sampling */
   topK?:
     | number
     | undefined;
-  /** Request timeout in ms (NEW) */
-  timeout?: number | undefined;
+  /** Request timeout in ms */
+  timeout?:
+    | number
+    | undefined;
+  /** "auto" (default) | "passthrough" | "none" */
+  toolMode?: string | undefined;
 }
 
 export interface ChatChunk {
@@ -895,20 +903,18 @@ export interface Model {
   provider: string;
   /** Virtual model name (unique within provider) */
   name: string;
-  /** Human-readable display name */
-  displayName: string;
   capabilities:
     | ModelCapabilities
     | undefined;
   /** Direct HTTP or via vscode.lm */
   source: ModelSource;
-  /** Actual engine type (NEW) */
+  /** Actual engine type */
   engine: string;
-  /** Per-model config params (NEW) */
+  /** Per-model config params */
   params?:
     | ModelParams
     | undefined;
-  /** Actual engine model ID sent to API (NEW) */
+  /** Actual engine model ID sent to API */
   engineModelId: string;
 }
 
@@ -951,7 +957,6 @@ export interface ListProvidersResponse {
 export interface Provider {
   /** Virtual provider name = unique ID */
   id: string;
-  displayName: string;
   /** Has API key / is usable */
   configured: boolean;
   /** Last health check passed */
@@ -963,9 +968,9 @@ export interface Provider {
   defaultBaseUrl?:
     | string
     | undefined;
-  /** Actual engine type (NEW) */
+  /** Actual engine type */
   engine: string;
-  /** Configured base URL override (NEW) */
+  /** Configured base URL override */
   baseUrl?: string | undefined;
 }
 
@@ -992,8 +997,6 @@ export interface ListEnginesResponse {
 export interface Engine {
   /** Engine type identifier (e.g., "openrouter") */
   id: string;
-  /** Human-readable name (e.g., "OpenRouter") */
-  displayName: string;
   /** Whether this engine needs an API key */
   requiresKey: boolean;
   /** Default API base URL */
@@ -4139,7 +4142,7 @@ export const PromptMessage: MessageFns<PromptMessage> = {
 };
 
 function createBaseChatRequest(): ChatRequest {
-  return { model: "", messages: [], options: undefined };
+  return { model: "", messages: [], options: undefined, tools: [] };
 }
 
 export const ChatRequest: MessageFns<ChatRequest> = {
@@ -4152,6 +4155,9 @@ export const ChatRequest: MessageFns<ChatRequest> = {
     }
     if (message.options !== undefined) {
       ChatOptions.encode(message.options, writer.uint32(26).fork()).join();
+    }
+    for (const v of message.tools) {
+      Tool.encode(v!, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -4187,6 +4193,14 @@ export const ChatRequest: MessageFns<ChatRequest> = {
           message.options = ChatOptions.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.tools.push(Tool.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4201,6 +4215,7 @@ export const ChatRequest: MessageFns<ChatRequest> = {
       model: isSet(object.model) ? globalThis.String(object.model) : "",
       messages: globalThis.Array.isArray(object?.messages) ? object.messages.map((e: any) => Message.fromJSON(e)) : [],
       options: isSet(object.options) ? ChatOptions.fromJSON(object.options) : undefined,
+      tools: globalThis.Array.isArray(object?.tools) ? object.tools.map((e: any) => Tool.fromJSON(e)) : [],
     };
   },
 
@@ -4215,6 +4230,9 @@ export const ChatRequest: MessageFns<ChatRequest> = {
     if (message.options !== undefined) {
       obj.options = ChatOptions.toJSON(message.options);
     }
+    if (message.tools?.length) {
+      obj.tools = message.tools.map((e) => Tool.toJSON(e));
+    }
     return obj;
   },
 
@@ -4228,6 +4246,7 @@ export const ChatRequest: MessageFns<ChatRequest> = {
     message.options = (object.options !== undefined && object.options !== null)
       ? ChatOptions.fromPartial(object.options)
       : undefined;
+    message.tools = object.tools?.map((e) => Tool.fromPartial(e)) || [];
     return message;
   },
 };
@@ -4343,6 +4362,7 @@ function createBaseChatOptions(): ChatOptions {
     toolFilter: [],
     topK: undefined,
     timeout: undefined,
+    toolMode: undefined,
   };
 }
 
@@ -4374,6 +4394,9 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     }
     if (message.timeout !== undefined) {
       writer.uint32(72).int32(message.timeout);
+    }
+    if (message.toolMode !== undefined) {
+      writer.uint32(82).string(message.toolMode);
     }
     return writer;
   },
@@ -4457,6 +4480,14 @@ export const ChatOptions: MessageFns<ChatOptions> = {
           message.timeout = reader.int32();
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.toolMode = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -4501,6 +4532,11 @@ export const ChatOptions: MessageFns<ChatOptions> = {
         ? globalThis.Number(object.top_k)
         : undefined,
       timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
+      toolMode: isSet(object.toolMode)
+        ? globalThis.String(object.toolMode)
+        : isSet(object.tool_mode)
+        ? globalThis.String(object.tool_mode)
+        : undefined,
     };
   },
 
@@ -4533,6 +4569,9 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     if (message.timeout !== undefined) {
       obj.timeout = Math.round(message.timeout);
     }
+    if (message.toolMode !== undefined) {
+      obj.toolMode = message.toolMode;
+    }
     return obj;
   },
 
@@ -4550,6 +4589,7 @@ export const ChatOptions: MessageFns<ChatOptions> = {
     message.toolFilter = object.toolFilter?.map((e) => e) || [];
     message.topK = object.topK ?? undefined;
     message.timeout = object.timeout ?? undefined;
+    message.toolMode = object.toolMode ?? undefined;
     return message;
   },
 };
@@ -8177,7 +8217,6 @@ function createBaseModel(): Model {
     id: "",
     provider: "",
     name: "",
-    displayName: "",
     capabilities: undefined,
     source: 0,
     engine: "",
@@ -8197,23 +8236,20 @@ export const Model: MessageFns<Model> = {
     if (message.name !== "") {
       writer.uint32(26).string(message.name);
     }
-    if (message.displayName !== "") {
-      writer.uint32(34).string(message.displayName);
-    }
     if (message.capabilities !== undefined) {
-      ModelCapabilities.encode(message.capabilities, writer.uint32(42).fork()).join();
+      ModelCapabilities.encode(message.capabilities, writer.uint32(34).fork()).join();
     }
     if (message.source !== 0) {
-      writer.uint32(48).int32(message.source);
+      writer.uint32(40).int32(message.source);
     }
     if (message.engine !== "") {
-      writer.uint32(66).string(message.engine);
+      writer.uint32(50).string(message.engine);
     }
     if (message.params !== undefined) {
-      ModelParams.encode(message.params, writer.uint32(74).fork()).join();
+      ModelParams.encode(message.params, writer.uint32(58).fork()).join();
     }
     if (message.engineModelId !== "") {
-      writer.uint32(82).string(message.engineModelId);
+      writer.uint32(66).string(message.engineModelId);
     }
     return writer;
   },
@@ -8254,43 +8290,35 @@ export const Model: MessageFns<Model> = {
             break;
           }
 
-          message.displayName = reader.string();
-          continue;
-        }
-        case 5: {
-          if (tag !== 42) {
-            break;
-          }
-
           message.capabilities = ModelCapabilities.decode(reader, reader.uint32());
           continue;
         }
-        case 6: {
-          if (tag !== 48) {
+        case 5: {
+          if (tag !== 40) {
             break;
           }
 
           message.source = reader.int32() as any;
           continue;
         }
-        case 8: {
-          if (tag !== 66) {
+        case 6: {
+          if (tag !== 50) {
             break;
           }
 
           message.engine = reader.string();
           continue;
         }
-        case 9: {
-          if (tag !== 74) {
+        case 7: {
+          if (tag !== 58) {
             break;
           }
 
           message.params = ModelParams.decode(reader, reader.uint32());
           continue;
         }
-        case 10: {
-          if (tag !== 82) {
+        case 8: {
+          if (tag !== 66) {
             break;
           }
 
@@ -8311,11 +8339,6 @@ export const Model: MessageFns<Model> = {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
       provider: isSet(object.provider) ? globalThis.String(object.provider) : "",
       name: isSet(object.name) ? globalThis.String(object.name) : "",
-      displayName: isSet(object.displayName)
-        ? globalThis.String(object.displayName)
-        : isSet(object.display_name)
-        ? globalThis.String(object.display_name)
-        : "",
       capabilities: isSet(object.capabilities) ? ModelCapabilities.fromJSON(object.capabilities) : undefined,
       source: isSet(object.source) ? modelSourceFromJSON(object.source) : 0,
       engine: isSet(object.engine) ? globalThis.String(object.engine) : "",
@@ -8338,9 +8361,6 @@ export const Model: MessageFns<Model> = {
     }
     if (message.name !== "") {
       obj.name = message.name;
-    }
-    if (message.displayName !== "") {
-      obj.displayName = message.displayName;
     }
     if (message.capabilities !== undefined) {
       obj.capabilities = ModelCapabilities.toJSON(message.capabilities);
@@ -8368,7 +8388,6 @@ export const Model: MessageFns<Model> = {
     message.id = object.id ?? "";
     message.provider = object.provider ?? "";
     message.name = object.name ?? "";
-    message.displayName = object.displayName ?? "";
     message.capabilities = (object.capabilities !== undefined && object.capabilities !== null)
       ? ModelCapabilities.fromPartial(object.capabilities)
       : undefined;
@@ -8819,7 +8838,6 @@ export const ListProvidersResponse: MessageFns<ListProvidersResponse> = {
 function createBaseProvider(): Provider {
   return {
     id: "",
-    displayName: "",
     configured: false,
     healthy: false,
     providerType: 0,
@@ -8835,29 +8853,26 @@ export const Provider: MessageFns<Provider> = {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
-    if (message.displayName !== "") {
-      writer.uint32(18).string(message.displayName);
-    }
     if (message.configured !== false) {
-      writer.uint32(24).bool(message.configured);
+      writer.uint32(16).bool(message.configured);
     }
     if (message.healthy !== false) {
-      writer.uint32(32).bool(message.healthy);
+      writer.uint32(24).bool(message.healthy);
     }
     if (message.providerType !== 0) {
-      writer.uint32(40).int32(message.providerType);
+      writer.uint32(32).int32(message.providerType);
     }
     if (message.requiresKey !== false) {
-      writer.uint32(48).bool(message.requiresKey);
+      writer.uint32(40).bool(message.requiresKey);
     }
     if (message.defaultBaseUrl !== undefined) {
-      writer.uint32(58).string(message.defaultBaseUrl);
+      writer.uint32(50).string(message.defaultBaseUrl);
     }
     if (message.engine !== "") {
-      writer.uint32(66).string(message.engine);
+      writer.uint32(58).string(message.engine);
     }
     if (message.baseUrl !== undefined) {
-      writer.uint32(74).string(message.baseUrl);
+      writer.uint32(66).string(message.baseUrl);
     }
     return writer;
   },
@@ -8878,11 +8893,11 @@ export const Provider: MessageFns<Provider> = {
           continue;
         }
         case 2: {
-          if (tag !== 18) {
+          if (tag !== 16) {
             break;
           }
 
-          message.displayName = reader.string();
+          message.configured = reader.bool();
           continue;
         }
         case 3: {
@@ -8890,7 +8905,7 @@ export const Provider: MessageFns<Provider> = {
             break;
           }
 
-          message.configured = reader.bool();
+          message.healthy = reader.bool();
           continue;
         }
         case 4: {
@@ -8898,7 +8913,7 @@ export const Provider: MessageFns<Provider> = {
             break;
           }
 
-          message.healthy = reader.bool();
+          message.providerType = reader.int32() as any;
           continue;
         }
         case 5: {
@@ -8906,15 +8921,15 @@ export const Provider: MessageFns<Provider> = {
             break;
           }
 
-          message.providerType = reader.int32() as any;
+          message.requiresKey = reader.bool();
           continue;
         }
         case 6: {
-          if (tag !== 48) {
+          if (tag !== 50) {
             break;
           }
 
-          message.requiresKey = reader.bool();
+          message.defaultBaseUrl = reader.string();
           continue;
         }
         case 7: {
@@ -8922,19 +8937,11 @@ export const Provider: MessageFns<Provider> = {
             break;
           }
 
-          message.defaultBaseUrl = reader.string();
+          message.engine = reader.string();
           continue;
         }
         case 8: {
           if (tag !== 66) {
-            break;
-          }
-
-          message.engine = reader.string();
-          continue;
-        }
-        case 9: {
-          if (tag !== 74) {
             break;
           }
 
@@ -8953,11 +8960,6 @@ export const Provider: MessageFns<Provider> = {
   fromJSON(object: any): Provider {
     return {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
-      displayName: isSet(object.displayName)
-        ? globalThis.String(object.displayName)
-        : isSet(object.display_name)
-        ? globalThis.String(object.display_name)
-        : "",
       configured: isSet(object.configured) ? globalThis.Boolean(object.configured) : false,
       healthy: isSet(object.healthy) ? globalThis.Boolean(object.healthy) : false,
       providerType: isSet(object.providerType)
@@ -8989,9 +8991,6 @@ export const Provider: MessageFns<Provider> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
-    if (message.displayName !== "") {
-      obj.displayName = message.displayName;
-    }
     if (message.configured !== false) {
       obj.configured = message.configured;
     }
@@ -9022,7 +9021,6 @@ export const Provider: MessageFns<Provider> = {
   fromPartial(object: DeepPartial<Provider>): Provider {
     const message = createBaseProvider();
     message.id = object.id ?? "";
-    message.displayName = object.displayName ?? "";
     message.configured = object.configured ?? false;
     message.healthy = object.healthy ?? false;
     message.providerType = object.providerType ?? 0;
@@ -9336,7 +9334,7 @@ export const ListEnginesResponse: MessageFns<ListEnginesResponse> = {
 };
 
 function createBaseEngine(): Engine {
-  return { id: "", displayName: "", requiresKey: false, defaultBaseUrl: undefined, defaultEnvVar: undefined };
+  return { id: "", requiresKey: false, defaultBaseUrl: undefined, defaultEnvVar: undefined };
 }
 
 export const Engine: MessageFns<Engine> = {
@@ -9344,17 +9342,14 @@ export const Engine: MessageFns<Engine> = {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
-    if (message.displayName !== "") {
-      writer.uint32(18).string(message.displayName);
-    }
     if (message.requiresKey !== false) {
-      writer.uint32(24).bool(message.requiresKey);
+      writer.uint32(16).bool(message.requiresKey);
     }
     if (message.defaultBaseUrl !== undefined) {
-      writer.uint32(34).string(message.defaultBaseUrl);
+      writer.uint32(26).string(message.defaultBaseUrl);
     }
     if (message.defaultEnvVar !== undefined) {
-      writer.uint32(42).string(message.defaultEnvVar);
+      writer.uint32(34).string(message.defaultEnvVar);
     }
     return writer;
   },
@@ -9375,31 +9370,23 @@ export const Engine: MessageFns<Engine> = {
           continue;
         }
         case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.displayName = reader.string();
-          continue;
-        }
-        case 3: {
-          if (tag !== 24) {
+          if (tag !== 16) {
             break;
           }
 
           message.requiresKey = reader.bool();
           continue;
         }
-        case 4: {
-          if (tag !== 34) {
+        case 3: {
+          if (tag !== 26) {
             break;
           }
 
           message.defaultBaseUrl = reader.string();
           continue;
         }
-        case 5: {
-          if (tag !== 42) {
+        case 4: {
+          if (tag !== 34) {
             break;
           }
 
@@ -9418,11 +9405,6 @@ export const Engine: MessageFns<Engine> = {
   fromJSON(object: any): Engine {
     return {
       id: isSet(object.id) ? globalThis.String(object.id) : "",
-      displayName: isSet(object.displayName)
-        ? globalThis.String(object.displayName)
-        : isSet(object.display_name)
-        ? globalThis.String(object.display_name)
-        : "",
       requiresKey: isSet(object.requiresKey)
         ? globalThis.Boolean(object.requiresKey)
         : isSet(object.requires_key)
@@ -9446,9 +9428,6 @@ export const Engine: MessageFns<Engine> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
-    if (message.displayName !== "") {
-      obj.displayName = message.displayName;
-    }
     if (message.requiresKey !== false) {
       obj.requiresKey = message.requiresKey;
     }
@@ -9467,7 +9446,6 @@ export const Engine: MessageFns<Engine> = {
   fromPartial(object: DeepPartial<Engine>): Engine {
     const message = createBaseEngine();
     message.id = object.id ?? "";
-    message.displayName = object.displayName ?? "";
     message.requiresKey = object.requiresKey ?? false;
     message.defaultBaseUrl = object.defaultBaseUrl ?? undefined;
     message.defaultEnvVar = object.defaultEnvVar ?? undefined;

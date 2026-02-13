@@ -112,7 +112,6 @@ describe('loadConfigFromPath (new schema)', () => {
       providers: {
         'work-openrouter': {
           engine: 'openrouter',
-          display_name: 'Work OpenRouter',
           api_key_keychain_name: 'OPENROUTER_WORK_KEY',
           models: {
             'openrouter/anthropic/claude-haiku-3.5': {},
@@ -132,7 +131,6 @@ describe('loadConfigFromPath (new schema)', () => {
     const prov = config!.providers!['work-openrouter'];
     expect(prov).toBeDefined();
     expect(prov.engine).toBe('openrouter');
-    expect(prov.display_name).toBe('Work OpenRouter');
     expect(prov.models).toBeDefined();
     expect(Object.keys(prov.models!)).toHaveLength(2);
     expect(prov.models!['claude-precise'].model_id).toBe('openrouter/anthropic/claude-opus-4.6');

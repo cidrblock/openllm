@@ -283,10 +283,7 @@ describe('Web API - Unary Endpoints (direct DaemonState)', () => {
     expect(statusCode).toBe(200);
     expect(body.providers).toHaveLength(2);
     expect(body.providers[0].id).toBe('openai');
-    expect(body.providers[0].displayName).toBe('OpenAI');
     expect(body.providers[0].configured).toBe(true);
-    // Should NOT have snake_case fields
-    expect(body.providers[0].display_name).toBeUndefined();
   });
   
   it('should list models from DaemonState (wrapped, camelCase)', async () => {
@@ -294,10 +291,7 @@ describe('Web API - Unary Endpoints (direct DaemonState)', () => {
     expect(statusCode).toBe(200);
     expect(body.models).toHaveLength(1);
     expect(body.models[0].id).toBe('openai/gpt-4o');
-    expect(body.models[0].displayName).toBe('GPT-4o');
     expect(body.models[0].capabilities).toBeDefined();
-    // Should NOT have snake_case fields
-    expect(body.models[0].display_name).toBeUndefined();
   });
   
   it('should list workspaces from DaemonState (wrapped)', async () => {

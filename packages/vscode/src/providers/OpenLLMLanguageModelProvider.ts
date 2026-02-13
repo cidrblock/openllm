@@ -17,9 +17,16 @@ const VENDOR_ID = 'openllm';
 function formatDetail(model: proto.Model): string {
     const parts: string[] = [];
     
-    // Engine name
-    const engine = model.engine || model.provider || '';
-    if (engine) parts.push(engine);
+    // Provider name (virtual provider ID, e.g., "anthropic-test") with engine in parens
+    const provider = model.provider || '';
+    const engine = model.engine || '';
+    if (provider && engine && provider !== engine) {
+        parts.push(`${provider} (${engine})`);
+    } else if (provider) {
+        parts.push(provider);
+    } else if (engine) {
+        parts.push(engine);
+    }
     
     // Non-default params
     const params = model.params;
@@ -36,7 +43,8 @@ function formatDetail(model: proto.Model): string {
     }
     
     if (parts.length === 0) return 'default';
-    if (parts.length === 1 && parts[0] === engine) return `${engine} · default`;
+    const label = provider || engine;
+    if (parts.length === 1 && (parts[0] === provider || parts[0] === engine || parts[0].startsWith(provider))) return `${parts[0]} · default`;
     return parts.join(' · ');
 }
 
@@ -81,14 +89,16 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
         logger.info(`[LMProvider] provideLanguageModelChatInformation called (${this.models.length} models)`);
         const result = this.models.map(model => {
             const compositeId = model.id || `${model.provider}/${model.name}`;
-            const virtualName = model.name || model.displayName || compositeId;
+            // compositeId is already "{provider}/{bare-model}" (e.g., "anthropic-test/claude-opus-4-6")
+            // Use it directly as the display name
+            const provider = model.provider || '';
             const contextWindow = model.capabilities?.contextWindow || 128000;
 
             const info = {
-                id: compositeId,                              // Routing key: "work-openrouter/claude-opus-precise"
-                name: virtualName,                            // Display: "claude-opus-precise"
-                family: model.provider || 'openllm',          // Grouping: "work-openrouter"
-                detail: formatDetail(model),                  // "OpenRouter · temp=0.2, top_p=0.5"
+                id: compositeId,                              // Routing key: "anthropic-test/claude-opus-4-6"
+                name: compositeId,                            // Display: "anthropic-test/claude-opus-4-6"
+                family: provider || 'openllm',                // Grouping (not prominent in picker)
+                detail: formatDetail(model),                  // "anthropic-test (anthropic) · default"
                 tooltip: formatTooltip(model),                // Full details on hover
                 version: '1.0.0',
                 maxInputTokens: contextWindow,
@@ -117,13 +127,38 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
 
         const protoMessages = convertMessages(messages);
 
+        // Convert VS Code tool definitions to proto Tool format
+        const protoTools: proto.DeepPartial<proto.Tool>[] = [];
+        if (options.tools && options.tools.length > 0) {
+            for (const tool of options.tools) {
+                protoTools.push({
+                    name: tool.name,
+                    description: tool.description || '',
+                    inputSchema: JSON.stringify(tool.inputSchema || {}),
+                });
+            }
+            logger.debug(`[LMProvider] Forwarding ${protoTools.length} tools to daemon`);
+        }
+
+        // Determine tool mode:
+        // - When VS Code provides tools, use 'auto' (daemon owns the loop via Vercel AI SDK)
+        // - If toolMode is explicitly set in options, map it; otherwise infer from tools presence
+        let toolMode = protoTools.length > 0 ? 'auto' : 'none';
+        if (options.toolMode !== undefined) {
+            // VS Code LanguageModelChatToolMode enum: Required=1
+            // Map any non-undefined toolMode to 'auto' since VS Code only sends tools it wants used
+            toolMode = 'auto';
+        }
+
         const request: proto.DeepPartial<proto.ChatRequest> = {
             model: compositeId,
             messages: protoMessages,
             options: {
                 temperature: options.modelOptions?.temperature as number | undefined,
                 maxTokens: options.modelOptions?.maxTokens as number | undefined,
-            }
+                toolMode: toolMode,
+            },
+            tools: protoTools.length > 0 ? protoTools : [],
         };
 
         const stream = this.client.chat(request);
@@ -146,7 +181,9 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
                         break;
                     }
                     case 'toolCall': {
+                        // Tool call from the LLM (passthrough mode or before execution)
                         const tc = c.toolCall;
+                        logger.debug(`[LMProvider] Tool call: ${tc.name} (id: ${tc.id})`);
                         progress.report(new vscode.LanguageModelToolCallPart(
                             tc.id || `call_${Date.now()}`,
                             tc.name || '',
@@ -154,12 +191,27 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
                         ));
                         break;
                     }
+                    case 'toolResult': {
+                        // Tool result from daemon execution (auto mode)
+                        const tr = c.toolResult;
+                        logger.debug(`[LMProvider] Tool result: ${tr.name} (callId: ${tr.toolCallId}, error: ${tr.isError})`);
+                        // VS Code expects LanguageModelToolResultPart for tool results
+                        progress.report(new vscode.LanguageModelToolResultPart(
+                            tr.toolCallId || '',
+                            [new vscode.LanguageModelTextPart(tr.content || '')]
+                        ));
+                        break;
+                    }
                     case 'usage':
                         logger.debug(`[LMProvider] Usage: ${JSON.stringify(c.usage)}`);
                         break;
-                    case 'error':
-                        logger.error(`[LMProvider] Error chunk: ${c.error.message}`);
-                        throw new Error(c.error.message || 'Chat error');
+                    case 'error': {
+                        const errMsg = c.error.message || 'Unknown error';
+                        logger.error(`[LMProvider] Error chunk: ${errMsg}`);
+                        // Surface the error as visible text in the chat response
+                        progress.report(new vscode.LanguageModelTextPart(`\n\n**Error:** ${errMsg}\n`));
+                        break;
+                    }
                     case 'done':
                         logger.debug(`[LMProvider] Done: ${c.done.finishReason}`);
                         break;
@@ -271,7 +323,12 @@ export class OpenLLMLanguageModelProvider {
 }
 
 /**
- * Convert VS Code messages to proto format
+ * Convert VS Code messages to proto format.
+ * 
+ * Handles:
+ * - Text parts → concatenated into content string
+ * - ToolCallPart → tool_calls array on assistant messages
+ * - ToolResultPart → role=ROLE_TOOL with tool_call_id and result content
  */
 function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessage[]): proto.Message[] {
     return messages.map(m => {
@@ -285,17 +342,37 @@ function convertMessages(messages: readonly vscode.LanguageModelChatRequestMessa
         }
 
         let textContent = '';
+        const toolCalls: proto.DeepPartial<proto.ToolCall>[] = [];
+        let toolCallId = '';
+
         for (const part of m.content) {
             if (part instanceof vscode.LanguageModelTextPart) {
                 textContent += part.value;
+            } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                // Assistant message with tool calls
+                toolCalls.push({
+                    id: part.callId || '',
+                    name: part.name || '',
+                    arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input || {}),
+                });
+            } else if (part instanceof vscode.LanguageModelToolResultPart) {
+                // Tool result message
+                role = proto.Role.ROLE_TOOL;
+                toolCallId = part.callId || '';
+                // Extract text content from the result parts
+                for (const resultPart of part.content) {
+                    if (resultPart instanceof vscode.LanguageModelTextPart) {
+                        textContent += resultPart.value;
+                    }
+                }
             }
         }
 
         return {
             role,
             content: textContent,
-            toolCalls: [],
-            toolCallId: '',
+            toolCalls: toolCalls as proto.ToolCall[],
+            toolCallId,
             name: m.name || '',
         };
     });

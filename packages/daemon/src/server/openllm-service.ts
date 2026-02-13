@@ -3,8 +3,8 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { DaemonState, ClientType } from '../state.js';
-import { getEngines, getEngine } from '../providers/adapter.js';
+import { DaemonState, ClientType, type ChatToolOptions } from '../state.js';
+import { getEngines, getEngine, type ToolDefinition } from '../providers/adapter.js';
 import {
   startEmbeddedWebServer,
   stopEmbeddedWebServer,
@@ -113,7 +113,6 @@ export function createOpenLLMService(state: DaemonState) {
           providers: providers.map((p) => ({
             id: p.id,
             engine: p.engine,
-            display_name: p.displayName,
             configured: p.configured,
             healthy: p.healthy,
             requires_key: p.requiresKey,
@@ -146,7 +145,6 @@ export function createOpenLLMService(state: DaemonState) {
             engine_model_id: m.engineModelId,
             provider: m.provider,
             engine: m.engine,
-            display_name: m.displayName,
             context_window: m.contextWindow,
             capabilities: {
               supports_tools: m.capabilities?.supportsTools || false,
@@ -194,7 +192,6 @@ export function createOpenLLMService(state: DaemonState) {
           models: models.map((m) => ({
             id: m.id,
             engine: m.engine,
-            display_name: m.displayName,
             context_window: m.contextWindow,
             capabilities: {
               supports_tools: m.capabilities?.supportsTools || false,
@@ -222,6 +219,9 @@ export function createOpenLLMService(state: DaemonState) {
       const messages = (request.messages || []).map((m: any) => ({
         role: toRole(m.role),
         content: m.content || '',
+        // Preserve tool-related fields for conversation history
+        tool_call_id: m.tool_call_id || m.toolCallId || undefined,
+        tool_calls: m.tool_calls || m.toolCalls || undefined,
       }));
       
       if (!model) {
@@ -240,12 +240,63 @@ export function createOpenLLMService(state: DaemonState) {
       if (opts.timeout != null) requestParams.timeout = opts.timeout;
       const hasParams = Object.keys(requestParams).length > 0;
       
+      // ── Extract tools from proto request ──
+      const protoTools: any[] = request.tools || [];
+      const tools: ToolDefinition[] = protoTools.map((t: any) => ({
+        name: t.name || '',
+        description: t.description || '',
+        inputSchema: t.input_schema || t.inputSchema || '{}',
+      })).filter((t: ToolDefinition) => t.name); // Filter out empty-name tools
+      
+      // ── Extract tool mode from options ──
+      const toolMode = opts.tool_mode || opts.toolMode || 'auto';
+      const maxToolIterations = opts.max_tool_iterations || opts.maxToolIterations || 10;
+      
+      const toolOptions: ChatToolOptions = {
+        toolMode,
+        tools: tools.length > 0 ? tools : undefined,
+        maxToolIterations,
+      };
+      
       // Stream the response
       (async () => {
         try {
-          for await (const chunk of state.chat(model, messages, hasParams ? requestParams : undefined)) {
+          for await (const chunk of state.chat(model, messages, hasParams ? requestParams : undefined, toolOptions)) {
             if (chunk.type === 'text' && chunk.text) {
               call.write({ text: { text: chunk.text } });
+            } else if (chunk.type === 'tool') {
+              // Tool chunk from Vercel AI SDK streamText
+              // Shape: { type: 'tool', name, state, status?, call?, done }
+              // state: 'running' | 'completed'
+              // call: { params, result } — params always present, result when done=true
+              if (chunk.call && chunk.done) {
+                // Tool execution completed — emit both tool_call and tool_result
+                call.write({
+                  tool_call: {
+                    id: `${chunk.name}-${Date.now()}`,
+                    name: chunk.name || '',
+                    arguments_json: chunk.call.params ? JSON.stringify(chunk.call.params) : '{}',
+                  },
+                });
+                call.write({
+                  tool_result: {
+                    tool_call_id: `${chunk.name}-${Date.now()}`,
+                    result_json: typeof chunk.call.result === 'string' ? chunk.call.result : JSON.stringify(chunk.call.result || {}),
+                    is_error: false,
+                  },
+                });
+              } else if (!chunk.done) {
+                // Tool in progress — emit a tool_call with what we know
+                call.write({
+                  tool_call: {
+                    id: `${chunk.name}-${Date.now()}`,
+                    name: chunk.name || '',
+                    arguments_json: chunk.call?.params ? JSON.stringify(chunk.call.params) : '{}',
+                  },
+                });
+              }
+            } else if (chunk.type === 'error') {
+              call.write({ error: { code: 'INTERNAL', message: chunk.error } });
             } else if (chunk.type === 'done') {
               call.write({ done: { finish_reason: chunk.finishReason || 'stop' } });
             }
@@ -498,7 +549,6 @@ export function createOpenLLMService(state: DaemonState) {
       callback(null, {
         engines: engines.map(e => ({
           id: e.id,
-          display_name: e.displayName,
           requires_key: e.requiresKey,
           default_base_url: e.defaultBaseUrl,
           default_env_var: e.defaultEnvVar,

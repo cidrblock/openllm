@@ -74,8 +74,6 @@ export interface ModelConfig {
 export interface ProviderConfig {
   /** Actual engine type: "openrouter", "openai", "anthropic", etc. */
   engine: string;
-  /** Optional human-readable label (defaults to engine display name) */
-  display_name?: string;
   /** Keychain key name for API key */
   api_key_keychain_name?: string;
   /** Environment variable name for API key */

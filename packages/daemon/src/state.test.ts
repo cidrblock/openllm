@@ -330,7 +330,6 @@ describe('DaemonState.listProviders', () => {
       providers: {
         'work-openrouter': {
           engine: 'openrouter',
-          display_name: 'Work OpenRouter',
           api_key_keychain_name: 'WOR_KEY',
           base_url: 'https://custom.openrouter.ai',
           models: { 'model-a': {} },
@@ -347,7 +346,6 @@ describe('DaemonState.listProviders', () => {
     expect(providers).toHaveLength(1);
     expect(providers[0].id).toBe('work-openrouter');
     expect(providers[0].engine).toBe('openrouter');
-    expect(providers[0].displayName).toBe('Work OpenRouter');
     expect(providers[0].configured).toBe(true);
     expect(providers[0].requiresKey).toBe(true);
     expect(providers[0].baseUrl).toBe('https://custom.openrouter.ai');

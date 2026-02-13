@@ -64,7 +64,6 @@ class Model:
     id: str
     provider: str
     name: str
-    display_name: str
     supports_streaming: bool
     supports_tools: bool
 
@@ -429,7 +428,6 @@ class OpenLLMClient:
                 id=m.id,
                 provider=m.provider,
                 name=m.name,
-                display_name=m.display_name,
                 supports_streaming=m.capabilities.supports_streaming,
                 supports_tools=m.capabilities.supports_tools,
             )
