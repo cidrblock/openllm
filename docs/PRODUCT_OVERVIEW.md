@@ -25,27 +25,36 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 
 ---
 
-## Supported Providers
+## Supported Engines
 
-| Provider | Tool Calling | Vision | Streaming | Notes |
-|----------|--------------|--------|-----------|-------|
-| OpenAI | ✓ | ✓ | ✓ | GPT-4o, GPT-4 Turbo |
-| Anthropic | ✓ | ✓ | ✓ | Claude 3.5, Claude 3 |
-| Google Gemini | ✓ | ✓ | ✓ | Gemini Pro, Flash |
-| Mistral | ✓ | ✗ | ✓ | Mistral Large, Medium |
-| Azure OpenAI | ✓ | ✓ | ✓ | Corporate/on-prem |
-| OpenRouter | ✓ | ✓ | ✓ | 100+ model aggregator |
-| Ollama | ✗ | ✗ | ✓ | Local models |
-| DeepSeek | ✓ | ✗ | ✓ | DeepSeek Coder |
-| Groq | ✓ | ✗ | ✓ | Fast inference |
-| Together | ✓ | ✗ | ✓ | Open models |
-| Cohere | ✓ | ✗ | ✓ | Command models |
-| xAI (Grok) | ✓ | ✗ | ✓ | Grok models |
-| Fireworks | ✓ | ✗ | ✓ | Optimized inference |
+19 engines via the [Vercel AI SDK](https://sdk.vercel.ai/) with dynamically loaded `@ai-sdk/*` packages.
+
+| Engine | ID | Tool Calling | SDK Package |
+|--------|----|-------------|-------------|
+| OpenAI | `openai` | Yes | `@ai-sdk/openai` |
+| Anthropic | `anthropic` | Yes | `@ai-sdk/anthropic` |
+| Google Gemini | `gemini` | Yes | `@ai-sdk/google` |
+| Mistral | `mistral` | Yes | `@ai-sdk/mistral` |
+| xAI (Grok) | `xai` | Yes | `@ai-sdk/xai` |
+| DeepSeek | `deepseek` | Yes | `@ai-sdk/deepseek` |
+| Groq | `groq` | Yes | `@ai-sdk/groq` |
+| Cohere | `cohere` | Yes | `@ai-sdk/cohere` |
+| Amazon Bedrock | `bedrock` | Yes | `@ai-sdk/amazon-bedrock` |
+| Fireworks | `fireworks` | Yes | `@ai-sdk/fireworks` |
+| Together AI | `togetherai` | Yes | `@ai-sdk/togetherai` |
+| Perplexity | `perplexity` | No | `@ai-sdk/perplexity` |
+| Azure OpenAI | `azure` | Yes | `@ai-sdk/openai-compatible` |
+| OpenRouter | `openrouter` | Yes | `@ai-sdk/openai-compatible` |
+| Ollama | `ollama` | Yes | `@ai-sdk/openai-compatible` |
+| LM Studio | `lmstudio` | Yes | `@ai-sdk/openai-compatible` |
+| Cerebras | `cerebras` | Yes | `@ai-sdk/openai-compatible` |
+| Meta (Llama) | `meta` | Yes | `@ai-sdk/openai-compatible` |
+| Mock | `mock` | No | *(built-in)* |
 
 **Notes:** 
 - Ollama supports any model that can run locally (Llama, Mistral, Qwen, DeepSeek, etc.)
 - Models are discovered dynamically from provider APIs when possible
+- All streaming; provider packages loaded on demand
 
 ---
 
@@ -56,8 +65,10 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 │                    Consumer Applications                         │
 │                                                                  │
 │   VS Code Extension     Python Scripts      Web Dashboard        │
-│   (gRPC client)         (gRPC client)       (HTTP → gRPC)        │
+│   (gRPC client)         (gRPC client)       (HTTP → DaemonState) │
 │         │                      │                   │             │
+│   Custom Apps                                                    │
+│   (@openllm/core)                                                │
 └─────────┼──────────────────────┼───────────────────┼─────────────┘
           │                      │                   │
           └──────────────────────┼───────────────────┘
@@ -66,28 +77,37 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 ┌─────────────────────────────────────────────────────────────────┐
 │                     openllm daemon (TypeScript)                  │
 │                                                                  │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌────────────────┐  │
-│   │  gRPC Server    │  │  Web Server     │  │  Session Mgmt  │  │
-│   │  (@grpc/grpc-js)│  │  (Express)       │  │                │  │
-│   └────────┬────────┘  └────────┬────────┘  └────────────────┘  │
-│            │                    │                                │
-│   ┌────────▼────────┐  ┌────────▼────────┐  ┌────────────────┐  │
-│   │  LLM Providers  │  │  Unified Config │  │  Secret Store  │  │
-│   │  (multi-llm-ts) │  │  Resolver       │  │  (keychain)    │  │
-│   └─────────────────┘  └─────────────────┘  └────────────────┘  │
+│   ┌─ @openllm/core ────────────────────────────────────────┐    │
+│   │  CoreState       Engines (Vercel AI SDK)   Config (YAML) │    │
+│   │  SecretStore     Streaming chat + tools    Discovery     │    │
+│   └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
+│   ┌─ daemon layer ──────────────────────────────────────────┐    │
+│   │  DaemonState     gRPC Server       Web UI (Express)      │    │
+│   │  CLI             VS Code backchannel  Keychain (keytar)  │    │
+│   └──────────────────────────────────────────────────────────┘    │
+│                                                                  │
 └────────────────────────────────┬────────────────────────────────┘
                                  │ HTTP
                                  ▼
                     ┌─────────────────────────┐
-                    │    LLM Provider APIs    │
-                    │  OpenAI, Anthropic...   │
+                    │    LLM Provider APIs     │
+                    │  OpenAI, Anthropic,      │
+                    │  Gemini, Ollama...       │
                     └─────────────────────────┘
 ```
+
+### Two Packages, One Source Tree
+
+| Package | Contents | Audience |
+|---------|----------|----------|
+| **@openllm/core** | LLM engine abstraction, streaming chat, config, secret store interface | Agent devs, web devs, custom apps |
+| **@openllm/daemon** | gRPC, web UI, CLI, VS Code backchannel, SEA binary (bundles core) | End users |
 
 ### Why TypeScript Daemon?
 
 1. **Single source of truth** - Configuration and secrets managed centrally
-2. **Session continuity** - Start a chat in VS Code, continue from CLI
+2. **Reusable core** - Library usable without the daemon for agent/web development
 3. **Performance** - Async streaming with minimal overhead
 4. **Simplicity** - Clients are thin gRPC wrappers, not embedded native code
 
@@ -183,7 +203,7 @@ providers:
 | 2 | Local Model Support | ✅ Complete | Ollama provider with auto-discovery |
 | 3 | Simplified Integration | ✅ Complete | Standard VS Code LM API |
 | 4 | Provider Switching | ✅ Complete | Enable/disable via web dashboard |
-| 5 | Session Continuity | ✅ Complete | Sessions persist across clients |
+| 5 | Session Continuity | Deferred | Stub RPCs exist; full implementation in a future release |
 
 ---
 
@@ -221,23 +241,7 @@ providers:
 
 ## Session Continuity
 
-A key feature is session continuity across tools:
-
-```bash
-# List sessions from any client
-$ openllm session list
-ID        MODEL           TOPIC                    MESSAGES  SOURCE   AGE
-abc123    openai/gpt-4o   Debugging auth module    15        vscode   5m ago
-def456    anthropic/...   Code review              8         cli      2h ago
-
-# Continue in CLI
-$ openllm session attach abc123
-
-# Export for teammate
-$ openllm session export abc123 > debugging-session.json
-```
-
-Sessions are JSON files - searchable, diffable, version-controllable.
+Session continuity is **deferred** to a future release. Stub RPCs exist in the gRPC proto but return `UNIMPLEMENTED`. The vision is to enable starting a chat in VS Code and continuing from CLI or another tool, with JSON-based session persistence.
 
 ---
 

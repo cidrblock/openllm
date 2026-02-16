@@ -1,6 +1,11 @@
 # OpenLLM TypeScript Migration Plan
 
-**Status:** Phases 1-4 Complete  
+> **Historical document.** This plan described the Rust-to-TypeScript migration, which is complete.
+> The codebase has since moved from `multi-llm-ts` to the Vercel AI SDK (`@ai-sdk/*`)
+> and been reorganized into a core/daemon split. See [ARCHITECTURE.md](ARCHITECTURE.md) for
+> the current design.
+
+**Status:** Complete (historical)  
 **Date:** February 2026  
 **Objective:** Rewrite the Rust daemon core in TypeScript while preserving all functionality
 

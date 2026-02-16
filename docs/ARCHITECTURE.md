@@ -2,10 +2,11 @@
 
 ## Overview
 
-OpenLLM is a unified AI daemon written in TypeScript/Node.js that provides:
-- A gRPC API for chat, sessions, and configuration
-- A web dashboard for provider/model management
-- A VS Code extension that registers models with VS Code's Language Model API
+OpenLLM is a unified AI daemon and library written in TypeScript/Node.js that provides:
+- A **reusable core library** (`@openllm/core`) for LLM engine abstraction, streaming chat, and config
+- A **gRPC API** for chat and configuration
+- A **web dashboard** for provider/model management
+- A **VS Code extension** that registers models with VS Code's Language Model API
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -24,35 +25,59 @@ OpenLLM is a unified AI daemon written in TypeScript/Node.js that provides:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                     openllm daemon (TypeScript)                          │
 │                                                                          │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  gRPC Server (@grpc/grpc-js + proto-loader)                        │  │
-│  │  └── OpenLLM Service: chat, sessions, models, secrets             │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
+│  ┌─ @openllm/core ──────────────────────────────────────────────────┐   │
+│  │  CoreState          Engines (Vercel AI SDK)    Config (YAML)      │   │
+│  │  SecretStore i/f    Streaming chat + tools     Model discovery    │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │  DaemonState    │  │  Providers      │  │  Session Manager          │  │
-│  │  (Central Hub)  │  │  (multi-llm-ts) │  │  (Deferred / Stub)       │  │
-│  └────────┬────────┘  └────────┬────────┘  └─────────────────────────┘  │
-│           │                    │                                         │
-│  ┌────────▼────────┐  ┌────────▼────────┐  ┌─────────────────────────┐  │
-│  │  keytar + env   │  │  Config Loader   │  │  VS Code Backchannel    │  │
-│  │  (Secrets)      │  │  (YAML)         │  │  (workspace paths)      │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────────┘  │
+│  ┌─ daemon layer ────────────────────────────────────────────────────┐   │
+│  │  DaemonState        gRPC Server               VS Code Backchannel │   │
+│  │  CLI (Commander)    Web Dashboard (Express)    KeychainSecretStore │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │  Web Dashboard (Express) - Embedded, direct DaemonState access     │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                                                          │
-└────────────────────────────────────────────┬────────────────────────────┘
-                                             │
-         ┌───────────────────────────────────┼───────────────────┐
-         │                                   │                   │
-         ▼                                   ▼                   ▼
+└──────────────────────────────────────────┬──────────────────────────────┘
+                                           │
+         ┌─────────────────────────────────┼───────────────────┐
+         │                                 │                   │
+         ▼                                 ▼                   ▼
 ┌─────────────────┐              ┌─────────────────┐    ┌───────────────┐
-│   LLM APIs      │              │  keytar         │    │  Config Files│
-│   (HTTP)        │              │  (keychain)     │    │  (YAML)      │
+│   LLM APIs      │              │  keytar         │    │  Config Files │
+│   (HTTP)        │              │  (keychain)     │    │  (YAML)       │
 └─────────────────┘              └─────────────────┘    └───────────────┘
 ```
+
+## Core/Full Package Split
+
+The source tree is organized into two layers:
+
+### @openllm/core (`src/core/`)
+
+Reusable library with zero transport dependencies. Can be used standalone by agent developers, web developers, or any Node.js application.
+
+| File | Purpose |
+|------|---------|
+| `core/state.ts` | `CoreState` class — provider resolution, model listing, chat |
+| `core/engines.ts` | Engine registry with Vercel AI SDK providers (dynamically loaded) |
+| `core/config.ts` | YAML config loader/saver, merge logic |
+| `core/secrets.ts` | `SecretStore` interface + `MemorySecretStore` |
+| `core/paths.ts` | Platform-aware path utilities |
+| `core/mock.ts` | Mock engine for testing |
+| `core/index.ts` | Public API surface |
+
+### @openllm/daemon (`src/daemon/`)
+
+Full application layer. Extends core with transport, UI, and CLI.
+
+| File | Purpose |
+|------|---------|
+| `daemon/state.ts` | `DaemonState extends CoreState` — client registry, VS Code backchannel |
+| `daemon/daemon.ts` | Process lifecycle, gRPC server startup, signal handling |
+| `daemon/transport.ts` | Unix socket and PID file management |
+| `daemon/index.ts` | CLI entry point (Commander) |
+| `daemon/server/openllm-service.ts` | gRPC service handlers |
+| `daemon/web/server.ts` | Express web server + REST API |
+| `daemon/web/grpc-web-control.ts` | gRPC client for web server control |
+| `daemon/secrets/keychain.ts` | `KeychainSecretStore` (keytar native addon) |
 
 ## Components
 
@@ -76,8 +101,8 @@ The web dashboard runs inside the daemon process via Express:
 
 - **Port**: `localhost:8787` (configurable)
 - **Static assets**: Served from `packages/daemon/static/`
-- **API routes**: `/api/*` → Direct calls to `DaemonState` (no gRPC in the loop)
-- **Chat SSE**: `POST /api/chat` → Streaming responses via Server-Sent Events
+- **API routes**: `/api/*` -> Direct calls to `DaemonState` (no gRPC in the loop)
+- **Chat SSE**: `POST /api/chat` -> Streaming responses via Server-Sent Events
 
 The web server is started either:
 1. In-process when `openllm web` runs and no daemon is running
@@ -98,37 +123,44 @@ The extension acts as a **thin gRPC client** to the daemon:
 - `daemon/backchannel.ts` - Bidirectional stream handler
 - `providers/OpenLLMLanguageModelProvider.ts` - VS Code LM API integration
 
-## Provider Architecture
+## Engine Architecture
 
-All LLM providers are implemented via the `multi-llm-ts` library with a unified adapter:
+All LLM providers are implemented via the [Vercel AI SDK](https://sdk.vercel.ai/) with a data-driven engine registry in `core/engines.ts`.
+
+### Engine registry
+
+Each engine entry carries metadata AND its factory function. Adding a new engine is a single registry entry — no switch statements anywhere.
 
 ```typescript
-// Provider adapter maps OpenLLM provider IDs to multi-llm-ts engine names
-const PROVIDER_ENGINE_MAP: Record<string, string> = {
-  mock: 'mock',
-  openai: 'openai',
-  anthropic: 'anthropic',
-  gemini: 'google',
-  mistral: 'mistralai',
-  ollama: 'ollama',
-  azure: 'azure',
-  openrouter: 'openrouter',
-  deepseek: 'deepseek',
-  groq: 'groq',
-  xai: 'xai',
-  cerebras: 'cerebras',
-  lmstudio: 'lmstudio',
-  meta: 'meta',
+// core/engines.ts — simplified
+const ENGINES: Record<string, EngineInfo> = {
+  openai: {
+    id: 'openai',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    defaultEnvVar: 'OPENAI_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      dedicatedProvider('@ai-sdk/openai', 'createOpenAI', config, modelId),
+  },
+  // ... 17 more engines
 };
-
-// fetchModels() uses loadModels(engineName, config)
-// streamChat() uses igniteEngine(engineName, config).generate(modelId, thread)
 ```
 
-**Supported providers:**
-- OpenAI, Anthropic, Google Gemini, Mistral, Ollama
-- Azure OpenAI, OpenRouter, DeepSeek, Groq
-- xAI (Grok), Cerebras, LM Studio, Meta (Llama)
+### Dynamic provider loading
+
+AI SDK provider packages (`@ai-sdk/openai`, `@ai-sdk/anthropic`, etc.) are loaded via dynamic `import()` at runtime — only when that engine is actually used. This means:
+
+- **For the core library**: consumers install only the providers they need
+- **For the daemon**: all providers are bundled into the SEA binary
+
+If a provider package is missing, the error message tells you exactly what to install.
+
+### Engine categories
+
+- **Dedicated providers**: Each has its own `@ai-sdk/*` package (OpenAI, Anthropic, Gemini, Mistral, xAI, DeepSeek, Groq, Cohere, Bedrock, Fireworks, Together AI, Perplexity)
+- **OpenAI-compatible**: Use `@ai-sdk/openai-compatible` (Azure, OpenRouter, Ollama, LM Studio, Cerebras, Meta)
+- **Mock**: Built-in, no external package needed
 
 ## Secret Management
 
@@ -158,26 +190,27 @@ interface SecretStore {
 }
 ```
 
-`DaemonState` uses `KeychainSecretStore` (keytar-backed) by default. If keytar is unavailable, keychain storage is disabled and only env vars work.
+`CoreState` accepts any `SecretStore` via constructor injection. `DaemonState` uses `KeychainSecretStore` (keytar-backed) by default. Tests and library consumers can use `MemorySecretStore`.
 
 ## Configuration
 
 ### Config Files
 
 - **User level**: `~/.openllm/config.yaml`
-- **Workspace level**: `<workspace>/.openllm/config.yaml`
+- **Workspace level**: `<workspace>/.config/openllm/config.yaml`
+
+### Config Format
 
 ```yaml
 providers:
-  openai:
-    api_key_keychain_name: "OPENAI_API_KEY"  # OR api_key_env_var_name
-    enabled_models:
-      - gpt-4o
-      - gpt-4o-mini
-  anthropic:
-    api_key_env_var_name: "ANTHROPIC_API_KEY"
-    enabled_models:
-      - claude-3-5-sonnet-20241022
+  my-openai:              # Virtual provider name (user-defined)
+    engine: openai        # Actual engine type
+    api_key_keychain_name: "OPENAI_API_KEY"
+    models:               # Map of virtual model name -> config
+      gpt-4o: {}          # Enabled with defaults
+      gpt-4o-mini:
+        temperature: 0.3
+        max_tokens: 4096
 ```
 
 ### Config Loader
@@ -185,8 +218,9 @@ providers:
 User and workspace configs are merged (workspace overrides user):
 
 ```typescript
+// core/config.ts
 // loadConfig(), loadWorkspaceConfig(), mergeConfigs()
-// Provider config: api_key_keychain_name | api_key_env_var_name, api_base, enabled_models
+// Provider config: engine, api_key_keychain_name | api_key_env_var_name, base_url, models
 ```
 
 ## gRPC Protocol
@@ -225,12 +259,12 @@ Defined in `proto/openllm/v1/service.proto`. The daemon loads protos dynamically
 
 The `VSCodeStream` RPC enables bidirectional communication:
 
-**Daemon → VS Code requests:**
+**Daemon -> VS Code requests:**
 - `GetWorkspace` - Get connected workspace paths
 - `InvokeTool` - Invoke VS Code tools (future)
 - `ListModels` - List VS Code LM models (future)
 
-**VS Code → Daemon responses:**
+**VS Code -> Daemon responses:**
 - Workspace folder paths
 - Tool results
 - Error responses
@@ -246,13 +280,13 @@ Session management is **deferred**. Stub RPCs exist in the proto and service han
 ```
 1. Client sends ChatRequest via gRPC (or POST /api/chat for web)
    ↓
-2. DaemonState.chat() parses provider/model from model ID
+2. DaemonState.chat() → CoreState.chat() resolves provider/model from composite ID
    ↓
-3. DaemonState.resolveApiKey() gets API key (keytar or env var based on config)
+3. CoreState.resolveApiKey() gets API key (keychain or env var based on config)
    ↓
-4. Provider adapter streamChat() uses multi-llm-ts to call LLM API
+4. engines.ts streamChat() dynamically loads the AI SDK provider and calls streamText()
    ↓
-5. Response chunks streamed back to client
+5. Response chunks streamed back to client as ChatChunk objects
 ```
 
 ### Model Discovery Flow
@@ -260,14 +294,14 @@ Session management is **deferred**. Stub RPCs exist in the proto and service han
 ```
 1. Client calls ListModels (gRPC or GET /api/models)
    ↓
-2. DaemonState.listModels() iterates providers
+2. CoreState.listModels() iterates configured providers
    ↓
 3. For each configured provider:
    - Load API key from config (keychain name or env var name)
    - Resolve key value via secretStore or process.env
-   - Call fetchModels(providerId, apiKey) → multi-llm-ts loadModels()
+   - Call fetchModels(engineId, apiKey) → provider API
    ↓
-4. Aggregate and return all models
+4. Aggregate and return all models as ModelInfo[]
 ```
 
 ### Web Dashboard Flow
@@ -296,7 +330,7 @@ Session management is **deferred**. Stub RPCs exist in the proto and service han
 | Socket (Windows) | `\\.\pipe\openllm-daemon` | gRPC named pipe |
 | PID file | `~/.openllm/openllm.pid` | Daemon process ID |
 | User Config | `~/.openllm/config.yaml` | User-level provider config |
-| Workspace Config | `<ws>/.openllm/config.yaml` | Workspace-level config |
+| Workspace Config | `<ws>/.config/openllm/config.yaml` | Workspace-level config |
 | Logs | Stdout/stderr | Daemon logs |
 
 ## Security

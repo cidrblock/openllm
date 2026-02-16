@@ -15,9 +15,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
-import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../config/loader.js';
+import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../../core/config.js';
 import type { DaemonState } from '../state.js';
-import { getEngines, getEngine, getProviderTemplates } from '../providers/adapter.js';
+import { getEngines, getEngine, getProviderTemplates } from '../../core/engines.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +34,7 @@ function resolveStaticPath(): string {
     process.env.OPENLLM_STATIC_DIR,
     path.resolve(__dirname, '../static'),
     path.resolve(__dirname, 'static'),
-    path.resolve(__dirname, '../../static'),
+    path.resolve(__dirname, '../../../static'),
   ].filter(Boolean) as string[];
   
   for (const dir of candidates) {
@@ -466,6 +466,7 @@ export function createWebApp(state: DaemonState): Express {
     const chatMessages = messages.map((m: any) => ({
       role: m.role || 'user',
       content: m.content || '',
+      name: m.name || undefined,
       tool_call_id: m.tool_call_id || undefined,
       tool_calls: m.tool_calls || undefined,
     }));

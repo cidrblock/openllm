@@ -28,7 +28,7 @@ function resolveProtoDir(): string {
     process.env.OPENLLM_PROTO_DIR,
     path.resolve(__dirname, '../proto'),
     path.resolve(__dirname, 'proto'),
-    path.resolve(__dirname, '../../../../proto'),
+    path.resolve(__dirname, '../../../../../proto'),
   ].filter(Boolean) as string[];
   
   for (const dir of candidates) {

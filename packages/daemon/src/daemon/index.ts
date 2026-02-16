@@ -13,6 +13,7 @@ import { Command } from 'commander';
 import { startDaemon, stopDaemon, getDaemonStatus } from './daemon.js';
 import { isDaemonRunningSync, getDefaultSocketPath } from './transport.js';
 import { startEmbeddedWebServer, stopEmbeddedWebServer } from './web/server.js';
+import { getEngines } from '../core/engines.js';
 
 const VERSION = '0.1.0';
 
@@ -124,7 +125,6 @@ program
   .description('List supported providers/engines (for build tooling)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
-    const { getEngines } = await import('./providers/adapter.js');
     const engines = getEngines().map((e) => ({
       id: e.id,
     }));
@@ -142,7 +142,6 @@ program
   .description('List available engines (API implementations)')
   .option('--json', 'Output as JSON')
   .action(async (options) => {
-    const { getEngines } = await import('./providers/adapter.js');
     const engines = getEngines().map((e) => ({
       id: e.id,
       requiresKey: e.requiresKey,

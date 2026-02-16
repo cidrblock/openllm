@@ -24,6 +24,8 @@ import { DaemonState } from './state.js';
 import { createOpenLLMService } from './server/openllm-service.js';
 import { stopEmbeddedWebServer } from './web/server.js';
 
+export type { DaemonState };
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -37,7 +39,7 @@ function resolveProtoPath(): { protoFile: string; includeDir: string } {
   const candidates = [
     process.env.OPENLLM_PROTO_DIR,
     path.resolve(__dirname, 'proto'),
-    path.resolve(__dirname, '../../../proto'),
+    path.resolve(__dirname, '../../../../proto'),
   ].filter(Boolean) as string[];
   
   for (const dir of candidates) {

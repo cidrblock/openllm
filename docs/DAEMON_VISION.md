@@ -1,18 +1,26 @@
 # OpenLLM Daemon Vision
 
-**Status:** Partially Implemented  
+**Status:** Historical (original design document)  
 **Author:** OpenLLM Team  
 **Date:** February 2026
 
 ---
 
-> **Note:** This is the original design document. For current architecture, see `ARCHITECTURE.md`.
-> 
+> **Historical document.** This is the original design document. For current architecture,
+> see [ARCHITECTURE.md](ARCHITECTURE.md).
+>
+> **Post-vision changes:**
+> - Providers now use the [Vercel AI SDK](https://sdk.vercel.ai/) (`@ai-sdk/*`), not `multi-llm-ts`
+> - Source reorganized into `src/core/` (reusable library) and `src/daemon/` (full application)
+> - `CoreState` (transport-agnostic) and `DaemonState extends CoreState`
+> - `@openllm/core` published as a standalone library for agent/web developers
+> - Dynamic provider loading — AI SDK packages loaded on demand
+>
 > **Implemented:**
 > - TypeScript daemon (migrated from Rust) with gRPC on Unix socket
 > - Web dashboard with RHDS styling (embedded in daemon via Express)
 > - VS Code extension (gRPC client + Language Model API registration)
-> - Provider support via multi-llm-ts (15+ providers)
+> - 19 LLM engines via Vercel AI SDK
 > - Mock provider for testing (echo, fixed, error, empty, slow modes)
 > - Keychain secret storage (via keytar)
 > - YAML configuration (user/workspace levels)

@@ -12,16 +12,33 @@
 ```
 openllm/
 ├── packages/
-│   ├── daemon/              # TypeScript daemon
-│   │   ├── src/             # Source code
+│   ├── daemon/              # TypeScript daemon + core library
+│   │   ├── src/
+│   │   │   ├── core/        # @openllm/core (reusable library)
+│   │   │   │   ├── index.ts # Public API
+│   │   │   │   ├── state.ts # CoreState
+│   │   │   │   ├── engines.ts # Engine registry (Vercel AI SDK)
+│   │   │   │   ├── config.ts  # YAML config
+│   │   │   │   ├── secrets.ts # SecretStore + MemorySecretStore
+│   │   │   │   ├── paths.ts   # Platform paths
+│   │   │   │   └── mock.ts    # Mock engine
+│   │   │   └── daemon/      # Daemon-specific code
+│   │   │       ├── index.ts # CLI entry point
+│   │   │       ├── state.ts # DaemonState extends CoreState
+│   │   │       ├── daemon.ts
+│   │   │       ├── transport.ts
+│   │   │       ├── server/  # gRPC service handlers
+│   │   │       ├── web/     # Express web server
+│   │   │       └── secrets/ # KeychainSecretStore
 │   │   ├── static/          # Web dashboard HTML
 │   │   ├── tests/           # Integration tests
-│   │   └── vitest.config.ts
+│   │   └── build.js         # SEA + core package builder
 │   ├── python/              # Python gRPC client
-│   └── vscode/              # VS Code extension
+│   ├── vscode/              # VS Code extension
+│   └── proto-ts/            # Generated TS proto stubs
 ├── proto/                   # gRPC service definition
-├── tests/                   # Test docs
-└── docs/
+├── docs/
+└── build.js                 # Monorepo build orchestrator
 ```
 
 ## Building
@@ -30,31 +47,50 @@ openllm/
 cd packages/daemon
 npm install
 npm run build   # TypeScript compilation
-npm test        # vitest (53 tests)
+npm test        # vitest
 ```
 
 ## Running
 
 ```bash
-node dist/index.js daemon         # Start daemon
-node dist/index.js web            # Start web dashboard
-node dist/index.js status         # Check status
-node dist/index.js stop           # Stop daemon
+# Development (via tsx, no compile step)
+npm run daemon        # Start daemon (foreground)
+npm run web           # Start web dashboard
+npm run status        # Check status
+
+# Production (compiled)
+node dist/daemon/index.js daemon
+node dist/daemon/index.js web
+node dist/daemon/index.js status
+node dist/daemon/index.js stop
 ```
+
+## Full Build (SEA + VSIX)
+
+```bash
+# From repo root
+node build.js                  # Full build: proto + SEA + VSIX + zip
+node build.js --skip-proto     # Skip proto generation
+node build.js --code-install   # Build + install VSIX into VS Code
+```
+
+Requires `NODE_SEA_BASE` env var pointing to a Node.js binary with the SEA fuse if your system node doesn't have it.
 
 ## Development Workflow
 
 ### 1. Making Daemon Changes
 
-Edit `src/`, rebuild, restart:
+Edit `src/core/` or `src/daemon/`, then:
 
 ```bash
 cd packages/daemon
+npm run daemon    # tsx watches and runs directly, no build needed
+```
+
+For compiled output:
+```bash
 npm run build
-# Kill any running daemon
-pkill -f "node dist/index.js daemon"
-# Restart
-node dist/index.js daemon
+node dist/daemon/index.js daemon
 ```
 
 ### 2. Making Proto Changes
@@ -62,9 +98,7 @@ node dist/index.js daemon
 1. Edit `proto/openllm/v1/service.proto`
 2. Regenerate TypeScript stubs for VS Code:
    ```bash
-   cd proto
-   ./generate.sh
-   # Or manually with protoc (see proto/README.md)
+   node build.js --proto-only
    ```
 3. The daemon uses `@grpc/proto-loader` for dynamic loading and does not need stub regeneration
 
@@ -72,56 +106,70 @@ node dist/index.js daemon
 
 1. Open `packages/vscode` in VS Code
 2. Press **F5** to launch Extension Development Host
-3. Check Output panel → "Open LLM Provider" for logs
+3. Check Output panel -> "Open LLM Provider" for logs
 
 ### 4. Web Dashboard
 
 1. Edit `packages/daemon/static/index.html`
 2. Restart the web server to see changes
-3. Start daemon + web: `node dist/index.js web` (or start daemon first, then web)
+3. Start daemon + web: `npm run web` (or start daemon first, then web)
 
-## Adding a New Provider
+## Adding a New Engine
 
-Edit `packages/daemon/src/providers/adapter.ts`:
+Edit `packages/daemon/src/core/engines.ts`:
 
-- Add to **PROVIDER_ENGINE_MAP** – maps OpenLLM provider ID to multi-llm-ts engine name
-- Add to **PROVIDER_DISPLAY_NAMES** – human-readable name
-- Add to **NO_KEY_PROVIDERS** (as a `Set`) if the provider does not require an API key
-- Add to **DEFAULT_ENV_VARS** – default environment variable name for the API key
+1. Add a new entry to the `ENGINES` record with metadata and a `createModel` factory
+2. That's it — no other code changes needed
 
-Example:
+Example for a dedicated `@ai-sdk/*` provider:
 
 ```typescript
-const PROVIDER_ENGINE_MAP: Record<string, string> = {
-  // ... existing
-  newprovider: 'newprovider',
-};
+const ENGINES: Record<string, EngineInfo> = {
+  // ... existing engines
 
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  // ... existing
-  newprovider: 'New Provider',
-};
-
-const NO_KEY_PROVIDERS = new Set(['mock', 'ollama', 'lmstudio']);  // add if no key needed
-
-const DEFAULT_ENV_VARS: Record<string, string> = {
-  // ... existing
-  newprovider: 'NEWPROVIDER_API_KEY',
+  newengine: {
+    id: 'newengine',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.newengine.com/v1',
+    defaultEnvVar: 'NEWENGINE_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      dedicatedProvider('@ai-sdk/newengine', 'createNewEngine', config, modelId),
+  },
 };
 ```
 
+For an OpenAI-compatible provider (no dedicated SDK package):
+
+```typescript
+  newcompat: {
+    id: 'newcompat',
+    requiresKey: true,
+    defaultBaseUrl: 'https://api.newcompat.com/v1',
+    defaultEnvVar: 'NEWCOMPAT_API_KEY',
+    supportsTools: true,
+    createModel: (modelId, config) =>
+      openaiCompatibleProvider('newcompat', 'https://api.newcompat.com/v1', config, modelId),
+  },
+```
+
+The engine will automatically appear in:
+- `listEngines()` / `list-engines` CLI command
+- The web dashboard's "Add Provider" wizard
+- `getProviderTemplates()` for UI consumption
+
 ## Adding a New gRPC RPC
 
-1. **Define in proto** – Edit `proto/openllm/v1/service.proto`:
+1. **Define in proto** - Edit `proto/openllm/v1/service.proto`:
    ```protobuf
    rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);
    message NewMethodRequest { string field = 1; }
    message NewMethodResponse { string result = 1; }
    ```
 
-2. **Regenerate stubs** – Run `proto/generate.sh` (or equivalent) for the VS Code extension
+2. **Regenerate stubs** - Run `node build.js --proto-only` for the VS Code extension
 
-3. **Implement handler** – Edit `packages/daemon/src/server/openllm-service.ts`:
+3. **Implement handler** - Edit `packages/daemon/src/daemon/server/openllm-service.ts`:
    ```typescript
    NewMethod(
      call: grpc.ServerUnaryCall<any, any>,
@@ -134,9 +182,9 @@ const DEFAULT_ENV_VARS: Record<string, string> = {
 
 ## Testing
 
-- **Unit tests** – vitest, co-located with source (`src/**/*.test.ts`)
-- **Integration tests** – `tests/integration/*.test.ts`
-- **Mock provider** – Use `mock/echo`, `mock/fixed`, `mock/error` for testing without network or API keys
+- **Unit tests** - vitest, co-located with source (`src/core/*.test.ts`, `src/*.test.ts`)
+- **Integration tests** - `tests/integration/*.test.ts`
+- **Mock engine** - Use `mock/echo`, `mock/fixed`, `mock/error` for testing without network or API keys
 
 ```bash
 cd packages/daemon
@@ -147,9 +195,9 @@ npx vitest run tests/       # Integration tests only
 
 ## Debugging
 
-- **Daemon logs** – Console output from the daemon process
-- **Socket check** – `ls -la /run/user/$(id -u)/openllm/`
-- **VS Code logs** – Output panel → "Open LLM Provider"
+- **Daemon logs** - Console output from the daemon process
+- **Socket check** - `ls -la /run/user/$(id -u)/openllm/`
+- **VS Code logs** - Output panel -> "Open LLM Provider"
 
 ## Common Issues
 
@@ -164,7 +212,7 @@ ls -la /run/user/$(id -u)/openllm/daemon.sock
 
 ```bash
 # Kill any stale processes
-pkill -f "node dist/index.js daemon"
+pkill -f "openllm-daemon"
 
 # Remove stale socket
 rm -f /run/user/$(id -u)/openllm/daemon.sock
@@ -173,7 +221,7 @@ rm -f /run/user/$(id -u)/openllm/daemon.sock
 lsof -i :8787
 
 # Restart
-node dist/index.js daemon
+npm run daemon
 ```
 
 ### Proto Mismatch
@@ -182,7 +230,7 @@ If TypeScript clients and daemon disagree on proto format:
 
 ```bash
 # Regenerate VS Code stubs
-cd proto && ./generate.sh
+node build.js --proto-only
 
 # Rebuild daemon (uses dynamic loading, no regeneration needed)
 cd packages/daemon && npm run build
@@ -190,7 +238,7 @@ cd packages/daemon && npm run build
 
 ### Extension Not Connecting
 
-1. Ensure daemon is running: `node dist/index.js status`
+1. Ensure daemon is running: `npm run status`
 2. Check Output panel for connection errors
 3. Reload VS Code window
 4. Verify socket path matches expected location

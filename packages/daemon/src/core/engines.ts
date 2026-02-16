@@ -15,20 +15,6 @@
 import { streamText, jsonSchema } from 'ai';
 import type { LanguageModel, ToolSet } from 'ai';
 
-import { createOpenAI } from '@ai-sdk/openai';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createMistral } from '@ai-sdk/mistral';
-import { createXai } from '@ai-sdk/xai';
-import { createDeepSeek } from '@ai-sdk/deepseek';
-import { createGroq } from '@ai-sdk/groq';
-import { createCohere } from '@ai-sdk/cohere';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createFireworks } from '@ai-sdk/fireworks';
-import { createTogetherAI } from '@ai-sdk/togetherai';
-import { createPerplexity } from '@ai-sdk/perplexity';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-
 import { mockStreamChat, getMockModels } from './mock.js';
 
 // ── Provider config type for factory functions ─────────────────────────
@@ -57,18 +43,44 @@ export interface EngineInfo {
   defaultEnvVar?: string;
   /** Whether this engine supports tool calling */
   supportsTools: boolean;
-  /** Factory: creates a Vercel AI SDK provider and returns a language model */
-  createModel: (modelId: string, config: ProviderFactoryConfig) => LanguageModel;
+  /** Factory: creates a Vercel AI SDK provider and returns a language model (async for dynamic loading) */
+  createModel: (modelId: string, config: ProviderFactoryConfig) => Promise<LanguageModel>;
 }
 
-// ── Helper factories ───────────────────────────────────────────────────
+// ── Dynamic provider loading ────────────────────────────────────────────
 
-/** Create model via a dedicated @ai-sdk/* provider package */
-function dedicatedProvider(
-  factory: (config: any) => any,
+/**
+ * Dynamically import an @ai-sdk/* provider package.
+ * This allows provider packages to be truly optional — only the engines
+ * a consumer actually uses need to be installed.
+ */
+async function loadProviderFactory(packageName: string, exportName: string): Promise<any> {
+  try {
+    const mod = await import(packageName);
+    const factory = mod[exportName];
+    if (!factory) {
+      throw new Error(`Package '${packageName}' does not export '${exportName}'`);
+    }
+    return factory;
+  } catch (err: any) {
+    if (err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'MODULE_NOT_FOUND') {
+      throw new Error(
+        `AI SDK provider package '${packageName}' is not installed. ` +
+        `Install it with: npm install ${packageName}`
+      );
+    }
+    throw err;
+  }
+}
+
+/** Create model via a dedicated @ai-sdk/* provider package (dynamically loaded) */
+async function dedicatedProvider(
+  packageName: string,
+  exportName: string,
   config: ProviderFactoryConfig,
   modelId: string,
-): LanguageModel {
+): Promise<LanguageModel> {
+  const factory = await loadProviderFactory(packageName, exportName);
   const provider = factory({
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
     ...(config.baseURL ? { baseURL: config.baseURL } : {}),
@@ -76,14 +88,15 @@ function dedicatedProvider(
   return provider(modelId);
 }
 
-/** Create model via @ai-sdk/openai-compatible */
-function openaiCompatibleProvider(
+/** Create model via @ai-sdk/openai-compatible (dynamically loaded) */
+async function openaiCompatibleProvider(
   name: string,
   defaultBaseURL: string,
   config: ProviderFactoryConfig,
   modelId: string,
-): LanguageModel {
-  const provider = createOpenAICompatible({
+): Promise<LanguageModel> {
+  const factory = await loadProviderFactory('@ai-sdk/openai-compatible', 'createOpenAICompatible');
+  const provider = factory({
     name,
     baseURL: config.baseURL || defaultBaseURL,
     ...(config.apiKey ? { apiKey: config.apiKey } : {}),
@@ -114,7 +127,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.openai.com/v1',
     defaultEnvVar: 'OPENAI_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createOpenAI, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/openai', 'createOpenAI', config, modelId),
   },
   anthropic: {
     id: 'anthropic',
@@ -122,7 +135,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.anthropic.com',
     defaultEnvVar: 'ANTHROPIC_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createAnthropic, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/anthropic', 'createAnthropic', config, modelId),
   },
   gemini: {
     id: 'gemini',
@@ -130,7 +143,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://generativelanguage.googleapis.com',
     defaultEnvVar: 'GOOGLE_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createGoogleGenerativeAI, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/google', 'createGoogleGenerativeAI', config, modelId),
   },
   mistral: {
     id: 'mistral',
@@ -138,7 +151,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.mistral.ai',
     defaultEnvVar: 'MISTRAL_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createMistral, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/mistral', 'createMistral', config, modelId),
   },
   xai: {
     id: 'xai',
@@ -146,7 +159,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.x.ai/v1',
     defaultEnvVar: 'XAI_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createXai, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/xai', 'createXai', config, modelId),
   },
   deepseek: {
     id: 'deepseek',
@@ -154,7 +167,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.deepseek.com/v1',
     defaultEnvVar: 'DEEPSEEK_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createDeepSeek, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/deepseek', 'createDeepSeek', config, modelId),
   },
   groq: {
     id: 'groq',
@@ -162,7 +175,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.groq.com/openai/v1',
     defaultEnvVar: 'GROQ_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createGroq, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/groq', 'createGroq', config, modelId),
   },
   cohere: {
     id: 'cohere',
@@ -170,13 +183,13 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.cohere.com',
     defaultEnvVar: 'COHERE_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createCohere, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/cohere', 'createCohere', config, modelId),
   },
   bedrock: {
     id: 'bedrock',
     requiresKey: false, // Uses AWS credentials
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createAmazonBedrock, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/amazon-bedrock', 'createAmazonBedrock', config, modelId),
   },
   fireworks: {
     id: 'fireworks',
@@ -184,7 +197,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.fireworks.ai/inference/v1',
     defaultEnvVar: 'FIREWORKS_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createFireworks, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/fireworks', 'createFireworks', config, modelId),
   },
   togetherai: {
     id: 'togetherai',
@@ -192,7 +205,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.together.xyz/v1',
     defaultEnvVar: 'TOGETHER_AI_API_KEY',
     supportsTools: true,
-    createModel: (modelId, config) => dedicatedProvider(createTogetherAI, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/togetherai', 'createTogetherAI', config, modelId),
   },
   perplexity: {
     id: 'perplexity',
@@ -200,7 +213,7 @@ const ENGINES: Record<string, EngineInfo> = {
     defaultBaseUrl: 'https://api.perplexity.ai',
     defaultEnvVar: 'PERPLEXITY_API_KEY',
     supportsTools: false,
-    createModel: (modelId, config) => dedicatedProvider(createPerplexity, config, modelId),
+    createModel: (modelId, config) => dedicatedProvider('@ai-sdk/perplexity', 'createPerplexity', config, modelId),
   },
 
   // ── Azure (uses OpenAI SDK with compatibility mode) ─────────────────
@@ -562,7 +575,7 @@ async function fetchGeminiModels(
 export async function* streamChat(
   engineId: string,
   engineModelId: string,
-  messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
+  messages: Array<{ role: string; content: string; name?: string; tool_call_id?: string; tool_calls?: any[] }>,
   apiKey?: string,
   baseUrl?: string,
   params?: ChatParams,
@@ -587,8 +600,8 @@ export async function* streamChat(
   console.log(`[Adapter] streamChat: engine="${engineId}", model="${engineModelId}", messages=${messages.length}, tools=${tools?.length || 0}`);
 
   try {
-    // Create the Vercel AI SDK model instance
-    const model = engineInfo.createModel(engineModelId, {
+    // Create the Vercel AI SDK model instance (async — loads provider package on demand)
+    const model = await engineInfo.createModel(engineModelId, {
       apiKey,
       baseURL: baseUrl,
     });
@@ -711,7 +724,7 @@ export async function* streamChat(
  * Convert our internal message format to Vercel AI SDK ModelMessage format.
  */
 function convertMessages(
-  messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
+  messages: Array<{ role: string; content: string; name?: string; tool_call_id?: string; tool_calls?: any[] }>,
 ): any[] {
   return messages.map(m => {
     switch (m.role) {
@@ -733,7 +746,7 @@ function convertMessages(
               type: 'tool-call',
               toolCallId: tc.id,
               toolName: tc.name,
-              args: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : tc.arguments,
+              input: typeof tc.arguments === 'string' ? JSON.parse(tc.arguments) : (tc.arguments || {}),
             });
           }
           return { role: 'assistant' as const, content: parts };
@@ -746,7 +759,8 @@ function convertMessages(
           content: [{
             type: 'tool-result',
             toolCallId: m.tool_call_id || '',
-            result: m.content,
+            toolName: m.name || '',
+            output: { type: 'text' as const, value: m.content || '' },
           }],
         };
 

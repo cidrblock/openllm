@@ -1,173 +1,209 @@
 # OpenLLM
 
-A unified AI daemon for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and more.
+A unified AI daemon and library for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and 10+ more providers.
+
+## Packages
+
+OpenLLM produces two packages from a single source tree:
+
+| Package | What | For |
+|---------|------|-----|
+| **@openllm/core** | Lightweight library — LLM engine abstraction, streaming chat, model discovery, config, secret store interface. Zero transport deps. | Agent developers, web developers, custom apps |
+| **@openllm/daemon** | Complete application — gRPC server, web dashboard, CLI, VS Code backchannel, SEA binary. Bundles core internally. | End users running the daemon |
 
 ## Features
 
-- **Unified daemon**: TypeScript/Node.js daemon serves all clients via gRPC
-- **Multi-provider**: 15+ LLM providers via multi-llm-ts with consistent API
-- **Web dashboard**: Configure providers, API keys, and models via browser UI (Red Hat Design System)
+- **15+ LLM engines** via the [Vercel AI SDK](https://sdk.vercel.ai/) with dynamic provider loading
+- **Unified daemon**: TypeScript/Node.js service serves all clients via gRPC
+- **Web dashboard**: Configure providers, API keys, and models via browser UI
 - **VS Code integration**: Models appear in VS Code's Language Model picker
+- **Reusable core library**: Use `@openllm/core` in your own apps without the daemon
 - **Dynamic model discovery**: Fetches available models from provider APIs
-- **Mock provider**: Built-in mock provider for testing without API keys
+- **Tool calling**: Full tool execution loop with approval tiers
+- **Single Executable Application (SEA)**: Self-contained binary, no Node.js install required
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Clients                                                             │
-│  ├── VS Code Extension                                               │
-│  ├── Web Dashboard                                                   │
-│  ├── Python scripts                                                  │
-│  ├── Node.js apps                                                    │
-│  └── CLI                                                             │
-└─────────────────────────────────────────────────────────────────────┘
-                              │ gRPC (Unix socket)
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Clients                                                                 │
+│  ├── VS Code Extension (gRPC)                                            │
+│  ├── Web Dashboard (HTTP, embedded)                                      │
+│  ├── Python scripts (gRPC)                                               │
+│  └── Custom apps (@openllm/core)                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │ gRPC (Unix socket) or direct library use
                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  openllm daemon (TypeScript/Node.js)                                 │
-│  ├── @grpc/grpc-js      # gRPC server                                │
-│  ├── multi-llm-ts       # LLM providers                              │
-│  ├── keytar             # Secrets (keychain)                         │
-│  └── Express            # Embedded web server                        │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  openllm daemon (TypeScript/Node.js)                                     │
+│                                                                          │
+│  ┌─ @openllm/core ──────────────────────────────────────────────────┐   │
+│  │  CoreState       engines.ts (Vercel AI SDK)    config.ts (YAML)   │   │
+│  │  SecretStore     streaming chat + tools        model discovery    │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+│  ┌─ daemon layer ────────────────────────────────────────────────────┐   │
+│  │  DaemonState     gRPC server         Web UI (Express)             │   │
+│  │  CLI (Commander) VS Code backchannel KeychainSecretStore (keytar) │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└──────────────────────────────────────────┬──────────────────────────────┘
+                                           │ HTTP
+                                           ▼
+                               ┌──────────────────────┐
+                               │   LLM Provider APIs   │
+                               │   (OpenAI, Anthropic,  │
+                               │    Gemini, Ollama...)   │
+                               └──────────────────────┘
 ```
 
 ## Quick Start
 
-### 1. Install and run
+### Using the daemon
 
 ```bash
 cd packages/daemon
 npm install
-npm run build
-node dist/index.js daemon
+npm run daemon    # Start daemon (foreground)
+npm run web       # Start web dashboard at http://localhost:8787
 ```
 
-### 2. Start web dashboard
+### Using the core library
+
+```typescript
+import { CoreState, MemorySecretStore } from '@openllm/core';
+
+const core = new CoreState({ secretStore: new MemorySecretStore() });
+
+// Add a provider on the fly — no config files needed
+await core.addProvider('my-openai', {
+  engine: 'openai',
+  apiKey: process.env.OPENAI_API_KEY!,
+  models: { 'gpt-4o': {} },
+});
+
+for await (const chunk of core.chat('my-openai/gpt-4o', [
+  { role: 'user', content: 'Hello!' },
+])) {
+  if (chunk.type === 'text') process.stdout.write(chunk.text);
+}
+```
+
+See [docs/CORE.md](docs/CORE.md) for the full library API reference.
+
+### Building everything
 
 ```bash
-node dist/index.js web
-# Opens http://localhost:8787
+# Full build: proto generation + SEA binary + VSIX extension
+node build.js
+
+# Install the VSIX into VS Code
+node build.js --code-install
 ```
 
-### 3. Install VS Code Extension
+## Supported Engines
 
-```bash
-cd packages/vscode
-npm install
-npm run package
-code --install-extension open-llm-provider-0.1.0.vsix
-```
+| Engine | ID | Key Required | Tool Calling | SDK Package |
+|--------|----|-------------|-------------|-------------|
+| OpenAI | `openai` | Yes | Yes | `@ai-sdk/openai` |
+| Anthropic | `anthropic` | Yes | Yes | `@ai-sdk/anthropic` |
+| Google Gemini | `gemini` | Yes | Yes | `@ai-sdk/google` |
+| Mistral | `mistral` | Yes | Yes | `@ai-sdk/mistral` |
+| xAI (Grok) | `xai` | Yes | Yes | `@ai-sdk/xai` |
+| DeepSeek | `deepseek` | Yes | Yes | `@ai-sdk/deepseek` |
+| Groq | `groq` | Yes | Yes | `@ai-sdk/groq` |
+| Cohere | `cohere` | Yes | Yes | `@ai-sdk/cohere` |
+| Amazon Bedrock | `bedrock` | No* | Yes | `@ai-sdk/amazon-bedrock` |
+| Fireworks | `fireworks` | Yes | Yes | `@ai-sdk/fireworks` |
+| Together AI | `togetherai` | Yes | Yes | `@ai-sdk/togetherai` |
+| Perplexity | `perplexity` | Yes | No | `@ai-sdk/perplexity` |
+| Azure OpenAI | `azure` | Yes | Yes | `@ai-sdk/openai-compatible` |
+| OpenRouter | `openrouter` | Yes | Yes | `@ai-sdk/openai-compatible` |
+| Ollama | `ollama` | No | Yes | `@ai-sdk/openai-compatible` |
+| LM Studio | `lmstudio` | No | Yes | `@ai-sdk/openai-compatible` |
+| Cerebras | `cerebras` | Yes | Yes | `@ai-sdk/openai-compatible` |
+| Meta (Llama) | `meta` | Yes | Yes | `@ai-sdk/openai-compatible` |
+| Mock | `mock` | No | No | *(built-in)* |
 
-## Supported Providers
+\* Amazon Bedrock uses AWS credential chain, not an API key.
 
-| Provider | Tool Calling | Vision | Streaming |
-|----------|-------------|--------|-----------|
-| OpenAI | ✓ | ✓ | ✓ |
-| Anthropic | ✓ | ✓ | ✓ |
-| Google Gemini | ✓ | ✓ | ✓ |
-| Mistral | ✓ | ✗ | ✓ |
-| Ollama | ✗ | ✗ | ✓ |
-| Azure OpenAI | ✓ | ✓ | ✓ |
-| OpenRouter | ✓ | ✓ | ✓ |
-| DeepSeek | ✓ | ✗ | ✓ |
-| Groq | ✓ | ✗ | ✓ |
-| xAI (Grok) | ✓ | ✗ | ✓ |
-| Cerebras | ✓ | ✗ | ✓ |
-| LM Studio | ✓ | ✗ | ✓ |
-| Meta | ✓ | ✗ | ✓ |
-| Mock | ✓ | ✓ | ✓ |
-
-*Mock provider is for testing without API keys.*
+AI SDK provider packages are **dynamically loaded** — install only the ones you use.
 
 ## Configuration
 
-### API Keys
+### Config files
 
-Two options per provider (mutually exclusive):
+- **User level**: `~/.openllm/config.yaml`
+- **Workspace level**: `<workspace>/.config/openllm/config.yaml`
 
-1. **Keychain storage**: Enter key value → stored securely in system keychain
-2. **Environment variable**: Specify env var name (e.g., `OPENAI_API_KEY`)
-
-### Config Files
-
-- **User config**: `~/.openllm/config.yaml`
-- **Workspace config**: `<workspace>/.openllm/config.yaml`
+### Example
 
 ```yaml
-# Example config.yaml
 providers:
-  openai:
+  my-openai:
+    engine: openai
     api_key_keychain_name: "OPENAI_API_KEY"
-    enabled_models:
-      - gpt-4o
-      - gpt-4o-mini
-  anthropic:
+    models:
+      gpt-4o: {}
+      gpt-4o-mini:
+        temperature: 0.3
+
+  anthropic-work:
+    engine: anthropic
     api_key_env_var_name: "ANTHROPIC_API_KEY"
-    enabled_models:
-      - claude-3-5-sonnet-20241022
+    models:
+      claude-sonnet-4-20250514: {}
+
+  local-ollama:
+    engine: ollama
+    models:
+      llama3.2: {}
 ```
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full config reference.
 
 ## Project Structure
 
 ```
 openllm/
 ├── packages/
-│   ├── daemon/              # TypeScript daemon (gRPC + web server)
+│   ├── daemon/                # TypeScript daemon + core library
 │   │   ├── src/
-│   │   │   ├── index.ts     # CLI entrypoint (commander.js)
-│   │   │   ├── daemon.ts    # Daemon lifecycle
-│   │   │   ├── state.ts     # Central DaemonState
-│   │   │   ├── transport.ts # Socket/PID management
-│   │   │   ├── server/      # gRPC service handlers
-│   │   │   ├── providers/   # LLM providers (via multi-llm-ts)
-│   │   │   ├── secrets/     # Keychain + env var secrets
-│   │   │   ├── config/      # YAML config loader
-│   │   │   └── web/         # Embedded Express web server
-│   │   ├── static/          # Web dashboard HTML
-│   │   └── tests/           # Integration tests
-│   ├── python/              # Python gRPC client
-│   └── vscode/              # VS Code extension
-├── proto/
-│   └── openllm/v1/service.proto
-├── tests/                   # Test documentation
-└── docs/                    # Documentation
+│   │   │   ├── core/          # @openllm/core (reusable library)
+│   │   │   │   ├── index.ts   # Public API exports
+│   │   │   │   ├── state.ts   # CoreState class
+│   │   │   │   ├── engines.ts # Engine registry (Vercel AI SDK)
+│   │   │   │   ├── config.ts  # YAML config loader
+│   │   │   │   ├── secrets.ts # SecretStore interface + MemorySecretStore
+│   │   │   │   ├── paths.ts   # Platform-aware paths
+│   │   │   │   └── mock.ts    # Mock engine for testing
+│   │   │   └── daemon/        # Daemon-specific (gRPC, web, CLI)
+│   │   │       ├── index.ts   # CLI entry point (Commander)
+│   │   │       ├── state.ts   # DaemonState extends CoreState
+│   │   │       ├── daemon.ts  # Process lifecycle
+│   │   │       ├── transport.ts
+│   │   │       ├── server/    # gRPC service handlers
+│   │   │       ├── web/       # Express web server
+│   │   │       └── secrets/   # KeychainSecretStore (keytar)
+│   │   ├── static/            # Web dashboard HTML
+│   │   ├── tests/             # Integration tests
+│   │   └── build.js           # SEA + core package builder
+│   ├── vscode/                # VS Code extension
+│   ├── python/                # Python gRPC client
+│   └── proto-ts/              # Generated TypeScript proto stubs
+├── proto/                     # gRPC service definition
+├── docs/                      # Documentation
+└── build.js                   # Monorepo build orchestrator
 ```
-
-## gRPC Services
-
-The daemon exposes the `OpenLLM` service:
-
-- **Chat** – Streaming chat
-- **ListModels** / **ListProviders** – Discovery
-- **GetSecret** / **SetSecret** / **DeleteSecret** – Secrets management
-- **Register** / **Unregister** – Client lifecycle
-- **VSCodeStream** – Bidirectional backchannel for VS Code extension
-- **StartWebServer** / **StopWebServer** – Web dashboard control
-- **HealthCheck** – Liveness probe
-- **GetStatus** – Daemon status
-- **GetConfig** / **UpdateConfig** – Configuration
-
-## Development
-
-```bash
-cd packages/daemon
-npm run build && node dist/index.js daemon
-npm test  # runs vitest (53 tests)
-```
-
-## Testing
-
-- Unit tests co-located with source (`src/**/*.test.ts`)
-- Integration tests in `tests/integration/`
-- Mock provider for testing without API keys
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - System architecture
-- [Daemon Vision](docs/DAEMON_VISION.md) - Full design document
-- [Configuration](docs/CONFIGURATION.md) - Config file reference
+- [Core Library (API Reference)](docs/CORE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Testing](docs/TESTING.md)
+- [Product Overview](docs/PRODUCT_OVERVIEW.md)
 
 ## License
 

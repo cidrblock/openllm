@@ -8,33 +8,44 @@ OpenLLM uses YAML configuration files and system keychain for secrets.
 `~/.openllm/config.yaml` - Applies globally to all workspaces
 
 ### Workspace Level
-`<workspace>/.openllm/config.yaml` - Workspace-specific settings
+`<workspace>/.config/openllm/config.yaml` - Workspace-specific settings (overrides user-level)
 
 ## Config File Format
 
 ```yaml
 providers:
-  openai:
-    # Option 1: API key stored in system keychain
-    api_key_keychain_name: "OPENAI_API_KEY"
-    enabled_models:
-      - gpt-4o
-      - gpt-4o-mini
-      - gpt-4-turbo
+  my-openai:                        # Virtual provider name (user-defined)
+    engine: openai                  # Engine type (see Supported Engines below)
+    api_key_keychain_name: "OPENAI_API_KEY"  # Option 1: keychain
+    models:
+      gpt-4o: {}                    # Enabled with defaults
+      gpt-4o-mini:
+        temperature: 0.3
+        max_tokens: 4096
   
-  anthropic:
-    # Option 2: API key from environment variable
-    api_key_env_var_name: "ANTHROPIC_API_KEY"
-    enabled_models:
-      - claude-3-5-sonnet-20241022
-      - claude-3-opus-20240229
+  anthropic-work:
+    engine: anthropic
+    api_key_env_var_name: "ANTHROPIC_API_KEY"  # Option 2: env var
+    models:
+      claude-sonnet-4-20250514: {}
+      claude-3-5-haiku-20241022:
+        temperature: 0.7
   
-  ollama:
-    # Ollama doesn't require an API key
-    enabled_models:
-      - llama3.2
-      - qwen2.5-coder:7b
+  local-ollama:
+    engine: ollama
+    base_url: "http://127.0.0.1:11434/v1"   # Optional: custom base URL
+    models:
+      llama3.2: {}
+      qwen2.5-coder:
+        model_id: "qwen2.5-coder:7b"        # Map virtual name to actual model ID
 ```
+
+### Key Concepts
+
+- **Virtual provider name** - The YAML key (e.g., `my-openai`). User-defined, must be lowercase alphanumeric with dots, hyphens, or underscores.
+- **Engine** - The actual API backend (`openai`, `anthropic`, `ollama`, etc.). Fixed set defined in `core/engines.ts`.
+- **Virtual model name** - The YAML key under `models`. Usually matches the engine model ID, but can be a custom alias via `model_id`.
+- **Composite ID** - `{provider}/{model}` (e.g., `my-openai/gpt-4o`). Used in chat requests.
 
 ## API Key Storage Options
 
@@ -48,7 +59,8 @@ Each provider can specify exactly ONE of these (mutually exclusive):
 
 ```yaml
 providers:
-  openai:
+  my-openai:
+    engine: openai
     api_key_keychain_name: "OPENAI_API_KEY"
 ```
 
@@ -60,41 +72,69 @@ providers:
 
 ```yaml
 providers:
-  anthropic:
+  anthropic-work:
+    engine: anthropic
     api_key_env_var_name: "ANTHROPIC_API_KEY"
 ```
 
-## Supported Providers
+### Fallback
 
-| Provider | ID | Default Env Var |
-|----------|-----|-----------------|
-| OpenAI | `openai` | `OPENAI_API_KEY` |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` |
-| Google Gemini | `gemini` | `GOOGLE_API_KEY` |
-| Mistral | `mistral` | `MISTRAL_API_KEY` |
-| Ollama | `ollama` | *(none needed)* |
-| Azure OpenAI | `azure` | `AZURE_OPENAI_API_KEY` |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
-| Groq | `groq` | `GROQ_API_KEY` |
-| xAI (Grok) | `xai` | `XAI_API_KEY` |
-| Cerebras | `cerebras` | `CEREBRAS_API_KEY` |
-| LM Studio | `lmstudio` | *(none needed)* |
-| Meta (Llama) | `meta` | `META_API_KEY` |
-| Mock (Testing) | `mock` | *(none needed)* |
+If neither option is set, the engine's default environment variable is checked (e.g., `OPENAI_API_KEY` for the `openai` engine).
+
+## Supported Engines
+
+| Engine | ID | Default Env Var | Key Required |
+|--------|----|-----------------|-------------|
+| OpenAI | `openai` | `OPENAI_API_KEY` | Yes |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Yes |
+| Google Gemini | `gemini` | `GOOGLE_API_KEY` | Yes |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | Yes |
+| xAI (Grok) | `xai` | `XAI_API_KEY` | Yes |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | Yes |
+| Groq | `groq` | `GROQ_API_KEY` | Yes |
+| Cohere | `cohere` | `COHERE_API_KEY` | Yes |
+| Amazon Bedrock | `bedrock` | *(AWS credentials)* | No |
+| Fireworks | `fireworks` | `FIREWORKS_API_KEY` | Yes |
+| Together AI | `togetherai` | `TOGETHER_AI_API_KEY` | Yes |
+| Perplexity | `perplexity` | `PERPLEXITY_API_KEY` | Yes |
+| Azure OpenAI | `azure` | `AZURE_OPENAI_API_KEY` | Yes |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | Yes |
+| Ollama | `ollama` | *(none needed)* | No |
+| LM Studio | `lmstudio` | *(none needed)* | No |
+| Cerebras | `cerebras` | `CEREBRAS_API_KEY` | Yes |
+| Meta (Llama) | `meta` | `META_API_KEY` | Yes |
+| Mock (Testing) | `mock` | *(none needed)* | No |
+
+## Per-Model Configuration
+
+Each model entry supports these optional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model_id` | string | Actual engine model ID (when the key is a virtual alias) |
+| `system_prompt` | string | System prompt text |
+| `system_prompt_mode` | `"prepend"` \| `"replace"` | How to combine with request system prompt (default: `"prepend"`) |
+| `temperature` | number | Sampling temperature (0.0 - 2.0) |
+| `top_p` | number | Nucleus sampling (0.0 - 1.0) |
+| `top_k` | number | Top-k sampling |
+| `max_tokens` | number | Maximum output tokens |
+| `timeout` | number | Request timeout in milliseconds |
+
+An empty object `{}` means "enabled with all defaults."
 
 ## Web Dashboard Configuration
 
 The easiest way to configure OpenLLM is via the web dashboard:
 
-1. Start the daemon: `openllm daemon`
-2. Start the web server: `openllm web`
+1. Start the daemon: `npm run daemon` (or `openllm daemon`)
+2. Start the web server: `npm run web` (or `openllm web`)
 3. Open http://localhost:8787
 
 ### Provider Cards
 
 Each provider shows:
-- **Name**: Provider display name
+- **Name**: Virtual provider name
+- **Engine**: The underlying API backend
 - **Toggle**: Choose "Key" (keychain) or "Env" (environment variable)
 - **Input field**: Enter API key value (for keychain) or env var name
 - **Status badge**: "Configured", "Key missing", or "Not configured"
@@ -104,7 +144,7 @@ Each provider shows:
 
 Click the settings icon to choose where config is saved:
 - **User**: `~/.openllm/config.yaml` (default)
-- **Workspace**: `<workspace>/.openllm/config.yaml` (requires VS Code connection)
+- **Workspace**: `<workspace>/.config/openllm/config.yaml` (requires VS Code connection)
 
 ## VS Code Extension
 
@@ -117,30 +157,24 @@ No configuration is stored in the extension itself.
 
 ## CLI Configuration
 
-### View Config
+### View Status
 ```bash
-# Check daemon status
-openllm status
-```
+# From packages/daemon
+npm run status
 
-For development (from `packages/daemon`):
-```bash
-node dist/index.js status
+# Or with compiled binary
+openllm status
 ```
 
 ### Start Services
 ```bash
-# Start daemon (background)
+# Development
+npm run daemon    # Start daemon (foreground)
+npm run web       # Start web dashboard
+
+# Production
 openllm daemon &
-
-# Start web server
 openllm web
-```
-
-For development (from `packages/daemon`):
-```bash
-node dist/index.js daemon &
-node dist/index.js web
 ```
 
 ## Example Configurations
@@ -149,43 +183,68 @@ node dist/index.js web
 ```yaml
 providers:
   openai:
+    engine: openai
     api_key_env_var_name: "OPENAI_API_KEY"
-    enabled_models:
-      - gpt-4o
+    models:
+      gpt-4o: {}
 ```
 
 ### Multiple Providers
 ```yaml
 providers:
   openai:
+    engine: openai
     api_key_keychain_name: "OPENAI_API_KEY"
-    enabled_models:
-      - gpt-4o
-      - gpt-4o-mini
+    models:
+      gpt-4o: {}
+      gpt-4o-mini: {}
   
   anthropic:
+    engine: anthropic
     api_key_keychain_name: "ANTHROPIC_API_KEY"
-    enabled_models:
-      - claude-3-5-sonnet-20241022
+    models:
+      claude-sonnet-4-20250514: {}
   
-  ollama:
-    enabled_models:
-      - llama3.2
-      - qwen2.5-coder:7b
+  local:
+    engine: ollama
+    models:
+      llama3.2: {}
+      qwen2.5-coder:
+        model_id: "qwen2.5-coder:7b"
+```
+
+### Multiple Instances of Same Engine
+```yaml
+providers:
+  work-openai:
+    engine: openai
+    api_key_env_var_name: "WORK_OPENAI_KEY"
+    base_url: "https://corp-proxy.example.com/v1"
+    models:
+      gpt-4o: {}
+
+  personal-openai:
+    engine: openai
+    api_key_keychain_name: "PERSONAL_OPENAI_KEY"
+    models:
+      gpt-4o: {}
+      gpt-4o-mini: {}
 ```
 
 ### Local Development (All from Env Vars)
 ```yaml
 providers:
   openai:
+    engine: openai
     api_key_env_var_name: "OPENAI_API_KEY"
-    enabled_models:
-      - gpt-4o
+    models:
+      gpt-4o: {}
   
   anthropic:
+    engine: anthropic
     api_key_env_var_name: "ANTHROPIC_API_KEY"
-    enabled_models:
-      - claude-3-5-sonnet-20241022
+    models:
+      claude-sonnet-4-20250514: {}
 ```
 
 ## Best Practices
@@ -195,7 +254,7 @@ providers:
 - Configure via web dashboard for easy management
 
 ### Team Projects
-- Use workspace-level config (`.openllm/config.yaml`)
+- Use workspace-level config (`.config/openllm/config.yaml`)
 - Reference env vars for API keys
 - Team members set their own env vars
 - Commit config file, add env var docs to README

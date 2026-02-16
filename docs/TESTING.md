@@ -10,15 +10,18 @@ This project follows the "hybrid" test layout:
 ```
 packages/daemon/
 ├── src/
-│   └── providers/
-│       ├── mock.ts
-│       └── mock.test.ts              ← Unit test (co-located)
+│   ├── core/
+│   │   ├── mock.ts
+│   │   ├── mock.test.ts              <- Unit test (co-located)
+│   │   ├── config.ts
+│   │   └── config.test.ts            <- Unit test (co-located)
+│   └── state.test.ts                 <- Unit test (DaemonState)
 ├── tests/
 │   └── integration/
-│       ├── grpc-streaming.test.ts    ← Integration (real gRPC server/client)
-│       ├── web-sse.test.ts           ← Integration (real Express + HTTP)
+│       ├── grpc-streaming.test.ts    <- Integration (real gRPC server/client)
+│       ├── web-sse.test.ts           <- Integration (real Express + HTTP)
 │       └── helpers/
-│           └── mock-daemon.ts        ← Shared mock gRPC server
+│           └── mock-daemon.ts        <- Shared mock gRPC server
 ├── vitest.config.ts
 └── package.json
 ```
@@ -49,26 +52,28 @@ npx vitest
 
 Pure unit tests with no I/O, no network, no processes.
 
-| File | Tests | What it covers |
-|------|-------|----------------|
-| `src/providers/mock.test.ts` | 24 | Mock provider: echo, fixed, error, empty, slow modes |
+| File | What it covers |
+|------|----------------|
+| `src/core/mock.test.ts` | Mock engine: echo, fixed, error, empty, slow modes |
+| `src/core/config.test.ts` | Config loading, merging, validation |
+| `src/state.test.ts` | DaemonState: provider listing, model listing, chat flow |
 
 ### Layer 2: Integration Tests
 
 Tests that start real servers, make real HTTP/gRPC calls.
 
-| File | Tests | What it covers |
-|------|-------|----------------|
-| `tests/integration/grpc-streaming.test.ts` | 13 | gRPC unary RPCs + streaming + cancellation + concurrency |
-| `tests/integration/web-sse.test.ts` | 16 | Web API endpoints + SSE chat streaming + errors + disconnect |
+| File | What it covers |
+|------|----------------|
+| `tests/integration/grpc-streaming.test.ts` | gRPC unary RPCs + streaming + cancellation + concurrency |
+| `tests/integration/web-sse.test.ts` | Web API endpoints + SSE chat streaming + errors + disconnect |
 
-### Mock Provider
+### Mock Engine
 
-The `mock` provider (`mock/echo`, `mock/fixed`, `mock/error`, etc.) is a real provider
-registered in the adapter. No API keys or network needed. Use it for end-to-end testing:
+The `mock` engine (`mock/echo`, `mock/fixed`, `mock/error`, etc.) is a real engine
+registered in `core/engines.ts`. No API keys or network needed. Use it for end-to-end testing:
 
 ```bash
-# Chat with the mock provider
+# Chat with the mock engine via web API
 curl -X POST http://localhost:8787/api/chat \
   -H 'Content-Type: application/json' \
   -d '{"model":"mock/echo","messages":[{"role":"user","content":"Hello!"}]}'
@@ -76,5 +81,5 @@ curl -X POST http://localhost:8787/api/chat \
 
 ## Adding Tests
 
-New unit tests should be co-located with their source files (e.g., `src/foo.test.ts`).
+New unit tests should be co-located with their source files (e.g., `src/core/foo.test.ts`).
 New integration tests should go in `packages/daemon/tests/integration/`.

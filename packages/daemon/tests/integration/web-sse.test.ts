@@ -17,9 +17,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as http from 'node:http';
-import { createWebApp } from '../../src/web/server.js';
-import type { DaemonState, ProviderInfo, ModelInfo, ConnectedClient } from '../../src/state.js';
-import type { SecretStore } from '../../src/secrets/types.js';
+import { createWebApp } from '../../src/daemon/web/server.js';
+import type { DaemonState } from '../../src/daemon/state.js';
+import type { ProviderInfo, ModelInfo } from '../../src/core/state.js';
+import type { ConnectedClient } from '../../src/daemon/state.js';
+import type { SecretStore } from '../../src/core/secrets.js';
 
 // ─── Mock DaemonState ───────────────────────────────────────────────────
 

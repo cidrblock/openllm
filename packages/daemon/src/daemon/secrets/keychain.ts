@@ -2,7 +2,7 @@
  * Keychain secret store using keytar
  */
 
-import type { SecretStore } from './types.js';
+import type { SecretStore } from '../../core/secrets.js';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 

@@ -4,7 +4,7 @@
 
 import * as grpc from '@grpc/grpc-js';
 import { DaemonState, ClientType, type ChatToolOptions } from '../state.js';
-import { getEngines, getEngine, type ToolDefinition } from '../providers/adapter.js';
+import { getEngines, getEngine, type ToolDefinition } from '../../core/engines.js';
 import {
   startEmbeddedWebServer,
   stopEmbeddedWebServer,
@@ -220,6 +220,7 @@ export function createOpenLLMService(state: DaemonState) {
         role: toRole(m.role),
         content: m.content || '',
         // Preserve tool-related fields for conversation history
+        name: m.name || undefined,
         tool_call_id: m.tool_call_id || m.toolCallId || undefined,
         tool_calls: m.tool_calls || m.toolCalls || undefined,
       }));
@@ -271,17 +272,19 @@ export function createOpenLLMService(state: DaemonState) {
               // call: { params, result } — params always present, result when done=true
               if (chunk.call && chunk.done) {
                 // Tool execution completed — emit both tool_call and tool_result
+                const callId = `call_${chunk.name}_${Date.now()}`;
                 call.write({
                   tool_call: {
-                    id: `${chunk.name}-${Date.now()}`,
+                    id: callId,
                     name: chunk.name || '',
-                    arguments_json: chunk.call.params ? JSON.stringify(chunk.call.params) : '{}',
+                    arguments: chunk.call.params ? JSON.stringify(chunk.call.params) : '{}',
                   },
                 });
                 call.write({
                   tool_result: {
-                    tool_call_id: `${chunk.name}-${Date.now()}`,
-                    result_json: typeof chunk.call.result === 'string' ? chunk.call.result : JSON.stringify(chunk.call.result || {}),
+                    tool_call_id: callId,
+                    name: chunk.name || '',
+                    content: typeof chunk.call.result === 'string' ? chunk.call.result : JSON.stringify(chunk.call.result || {}),
                     is_error: false,
                   },
                 });
@@ -289,9 +292,9 @@ export function createOpenLLMService(state: DaemonState) {
                 // Tool in progress — emit a tool_call with what we know
                 call.write({
                   tool_call: {
-                    id: `${chunk.name}-${Date.now()}`,
+                    id: `call_${chunk.name}_${Date.now()}`,
                     name: chunk.name || '',
-                    arguments_json: chunk.call?.params ? JSON.stringify(chunk.call.params) : '{}',
+                    arguments: chunk.call?.params ? JSON.stringify(chunk.call.params) : '{}',
                   },
                 });
               }

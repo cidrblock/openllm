@@ -4,15 +4,15 @@
  * Tests the virtual provider/model layer: listModels, listProviders, 
  * discoverModels, chat, and health checks.
  *
- * Mocks: config/loader, providers/adapter, secrets/keychain.
+ * Mocks: core/config, core/engines, daemon/secrets/keychain.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { ModelInfo, ProviderInfo } from './state.js';
-import type { ProviderConfig, ConfigFile, ModelConfig } from './config/loader.js';
-import type { EngineInfo, DiscoveredModel, ChatParams } from './providers/adapter.js';
+import type { ProviderInfo, ModelInfo } from './core/state.js';
+import type { ProviderConfig, ConfigFile, ModelConfig } from './core/config.js';
+import type { EngineInfo, DiscoveredModel, ChatParams } from './core/engines.js';
 
-// ── Mock: config/loader ──────────────────────────────────────────────────────
+// ── Mock: core/config ────────────────────────────────────────────────────────
 
 const mockLoadConfig = vi.fn<any>().mockReturnValue({ providers: {} });
 const mockLoadWorkspaceConfig = vi.fn<any>().mockReturnValue(null);
@@ -22,7 +22,7 @@ const mockResolveEngineModelId = vi.fn<any>().mockImplementation(
   (name: string, cfg: ModelConfig) => cfg.model_id || name
 );
 
-vi.mock('./config/loader.js', () => ({
+vi.mock('./core/config.js', () => ({
   loadConfig: (...a: any[]) => mockLoadConfig(...a),
   loadWorkspaceConfig: (...a: any[]) => mockLoadWorkspaceConfig(...a),
   mergeConfigs: (...a: any[]) => mockMergeConfigs(...a),
@@ -30,22 +30,22 @@ vi.mock('./config/loader.js', () => ({
   resolveEngineModelId: (...a: any[]) => mockResolveEngineModelId(...a),
 }));
 
-// ── Mock: providers/adapter ──────────────────────────────────────────────────
+// ── Mock: core/engines ───────────────────────────────────────────────────────
 
 const MOCK_ENGINE: EngineInfo = {
   id: 'mock',
-  multiLlmName: 'mock',
-  displayName: 'Mock (Testing)',
   requiresKey: false,
+  supportsTools: false,
+  createModel: () => { throw new Error('mock'); },
 };
 
 const OPENROUTER_ENGINE: EngineInfo = {
   id: 'openrouter',
-  multiLlmName: 'openrouter',
-  displayName: 'OpenRouter',
   requiresKey: true,
   defaultBaseUrl: 'https://openrouter.ai/api/v1',
   defaultEnvVar: 'OPENROUTER_API_KEY',
+  supportsTools: true,
+  createModel: () => { throw new Error('mock'); },
 };
 
 const mockGetEngines = vi.fn<any>().mockReturnValue([MOCK_ENGINE, OPENROUTER_ENGINE]);
@@ -57,18 +57,18 @@ const mockGetEngine = vi.fn<any>().mockImplementation((id: string) => {
 const mockFetchModels = vi.fn<any>().mockResolvedValue([]);
 const mockStreamChat = vi.fn<any>();
 
-vi.mock('./providers/adapter.js', () => ({
+vi.mock('./core/engines.js', () => ({
   getEngines: (...a: any[]) => mockGetEngines(...a),
   getEngine: (...a: any[]) => mockGetEngine(...a),
   fetchModels: (...a: any[]) => mockFetchModels(...a),
   streamChat: (...a: any[]) => mockStreamChat(...a),
 }));
 
-// ── Mock: secrets/keychain ───────────────────────────────────────────────────
+// ── Mock: daemon/secrets/keychain ────────────────────────────────────────────
 
 const mockSecretStoreData = new Map<string, string>();
 
-vi.mock('./secrets/keychain.js', () => ({
+vi.mock('./daemon/secrets/keychain.js', () => ({
   KeychainSecretStore: class {
     async get(key: string): Promise<string | null> {
       return mockSecretStoreData.get(key) ?? null;
@@ -87,7 +87,7 @@ vi.mock('./secrets/keychain.js', () => ({
 
 // ── Import DaemonState (after mocks) ─────────────────────────────────────────
 
-import { DaemonState } from './state.js';
+import { DaemonState } from './daemon/state.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ import { DaemonState } from './state.js';
 function makeDiscovered(ids: string[]): DiscoveredModel[] {
   return ids.map(id => ({
     id,
-    displayName: id.split('/').pop() || id,
+    engine: 'mock',
     contextWindow: 128000,
     capabilities: { supportsTools: true, supportsVision: false },
   }));
@@ -116,7 +116,6 @@ beforeEach(() => {
   mockLoadWorkspaceConfig.mockReturnValue(null);
   mockMergeConfigs.mockImplementation((user: ConfigFile, ws: ConfigFile | null) => {
     if (!ws) return user;
-    // Provider-level replacement
     return { providers: { ...user.providers, ...ws.providers } };
   });
   mockMergeMultipleWorkspaceConfigs.mockReturnValue({ providers: {} });
@@ -159,7 +158,6 @@ describe('DaemonState.listModels', () => {
 
     const models = await state.listModels();
 
-    // Only the 2 configured models
     expect(models).toHaveLength(2);
     expect(models[0].id).toBe('openrouter/openrouter/anthropic/claude-opus-4.5');
     expect(models[0].name).toBe('openrouter/anthropic/claude-opus-4.5');
@@ -180,7 +178,6 @@ describe('DaemonState.listModels', () => {
 
     mockLoadConfig.mockReturnValue(config);
     mockMergeConfigs.mockReturnValue(config);
-    // No key in secret store
 
     const models = await state.listModels();
 
@@ -215,7 +212,7 @@ describe('DaemonState.listModels', () => {
         openrouter: {
           engine: 'openrouter',
           api_key_keychain_name: 'KEY',
-          models: {}, // empty
+          models: {},
         },
       },
     };
@@ -307,8 +304,6 @@ describe('DaemonState.listModels', () => {
 
     const models = await state.listModels();
 
-    // bad-provider errored during fetch, but its model should still be created
-    // (with empty discovery data)
     const mockModels = models.filter(m => m.provider === 'good-mock');
     expect(mockModels).toHaveLength(1);
   });
@@ -460,9 +455,9 @@ describe('DaemonState.chat', () => {
       chunks.push(chunk);
     }
 
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].type).toBe('done');
-    expect(chunks[0].finishReason).toBe('error');
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].type).toBe('error');
+    expect(chunks[1].type).toBe('done');
   });
 
   it('should yield error for unknown provider', async () => {
@@ -474,9 +469,9 @@ describe('DaemonState.chat', () => {
       chunks.push(chunk);
     }
 
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].type).toBe('done');
-    expect(chunks[0].finishReason).toBe('error');
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0].type).toBe('error');
+    expect(chunks[1].type).toBe('done');
   });
 });
 
@@ -496,7 +491,6 @@ describe('DaemonState.runHealthChecks', () => {
 
     await state.runHealthChecks();
 
-    // Health data is private, but we can verify via listProviders
     const providers = await state.listProviders();
     expect(providers[0].healthy).toBe(true);
   });
@@ -512,9 +506,6 @@ describe('DaemonState.runHealthChecks', () => {
     mockMergeConfigs.mockReturnValue(config);
 
     await state.runHealthChecks();
-
-    // Provider with unknown engine won't appear in listProviders, 
-    // but healthCheck should have run without crashing
   });
 });
 

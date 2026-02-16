@@ -12,7 +12,7 @@ import {
   getRuntimeDir,
   getSocketPath,
   getPidPath,
-} from './paths.js';
+} from '../core/paths.js';
 
 export interface Transport {
   type: 'unix' | 'tcp';

@@ -1,13 +1,14 @@
 /**
- * Central daemon state
- * 
- * The "virtual" layer: manages user-defined provider instances and model entries.
- * Resolves virtual → actual via config + engine metadata from adapter.ts.
+ * CoreState — the reusable library core of OpenLLM.
+ *
+ * Contains pure provider/model logic with zero transport awareness.
+ * SecretStore is injected, ToolExecutor is injectable per-call.
+ *
+ * This class is the public API surface for @openllm/core consumers
+ * (agent devs, web devs, custom apps).
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import type { SecretStore } from './secrets/types.js';
-import { KeychainSecretStore } from './secrets/keychain.js';
+import type { SecretStore } from './secrets.js';
 import {
   loadConfig,
   loadWorkspaceConfig,
@@ -17,7 +18,7 @@ import {
   type ConfigFile,
   type ProviderConfig,
   type ModelConfig,
-} from './config/loader.js';
+} from './config.js';
 import {
   getEngines,
   getEngine,
@@ -30,33 +31,7 @@ import {
   type ToolDefinition,
   type ToolExecutor,
   type ToolValidationCallback,
-} from './providers/adapter.js';
-
-// ── Client types ───────────────────────────────────────────────────────
-
-/**
- * Client type enum (matches proto)
- */
-export enum ClientType {
-  UNSPECIFIED = 'UNSPECIFIED',
-  VSCODE = 'VSCODE',
-  CLI = 'CLI',
-  PYTHON = 'PYTHON',
-  NODEJS = 'NODEJS',
-  MCP = 'MCP',
-}
-
-/**
- * Connected client information
- */
-export interface ConnectedClient {
-  clientId: string;
-  clientType: ClientType;
-  connectedAt: Date;
-  isSpawner: boolean;
-  workspacePath?: string;
-  workspacePaths: string[];
-}
+} from './engines.js';
 
 // ── Virtual provider info (runtime, for API responses) ─────────────────
 
@@ -109,23 +84,6 @@ export interface ModelInfo {
   params?: ModelConfig;
 }
 
-// ── VS Code connection ─────────────────────────────────────────────────
-
-/**
- * VS Code connection for backchannel
- */
-export interface VSCodeConnection {
-  id: string;
-  workspacePath?: string;
-  workspaceFolders: string[];
-  stream?: any; // grpc.ServerDuplexStream
-  pendingRequests: Map<string, {
-    resolve: (response: any) => void;
-    reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>;
-}
-
 // ── Chat tool options ──────────────────────────────────────────────────
 
 /**
@@ -140,44 +98,201 @@ export interface ChatToolOptions {
   maxToolIterations?: number;
 }
 
-// ── Central daemon state ───────────────────────────────────────────────
+// ── Builder options ─────────────────────────────────────────────────────
 
 /**
- * Central daemon state
+ * Options for adding a provider programmatically.
+ * This is the ergonomic API — consumers don't need to understand the YAML schema.
  */
-export class DaemonState {
+export interface AddProviderOptions {
+  /** Engine type: "openai", "anthropic", "ollama", etc. */
+  engine: string;
+  /** API key value — stored in the SecretStore automatically */
+  apiKey?: string;
+  /** Custom base URL (overrides engine default) */
+  baseUrl?: string;
+  /** Environment variable name for API key (alternative to apiKey) */
+  apiKeyEnvVar?: string;
+  /** Models to enable: key = model name, value = config (or {} for defaults) */
+  models?: Record<string, ModelConfig>;
+}
+
+// ── CoreState ──────────────────────────────────────────────────────────
+
+export interface CoreStateOptions {
+  /** Injected secret store (e.g., MemorySecretStore, KeychainSecretStore) */
+  secretStore: SecretStore;
+  /** Optional config loader override (defaults to loadConfig()) */
+  configLoader?: () => ConfigFile;
+}
+
+/**
+ * Core daemon state — pure provider/model logic, no transport.
+ */
+export class CoreState {
   public readonly version = '0.1.0';
   public readonly startedAt = new Date();
-  
-  // Connected clients
-  private clients = new Map<string, ConnectedClient>();
-  
-  // VS Code connections for backchannel
-  private vscodeConnections = new Map<string, VSCodeConnection>();
-  
-  // Health status per virtual provider (lazy, updated in background)
-  private providerHealth = new Map<string, boolean>();
-  
-  // Secret store
+
+  /** Injected secret store */
   public readonly secretStore: SecretStore;
-  
-  constructor() {
-    this.secretStore = new KeychainSecretStore();
+
+  /** Optional config loader override */
+  private configLoader?: () => ConfigFile;
+
+  /** In-memory providers added via addProvider() — merged over disk config */
+  private inMemoryProviders = new Map<string, ProviderConfig>();
+
+  /** Health status per virtual provider (lazy, updated in background) */
+  protected providerHealth = new Map<string, boolean>();
+
+  constructor(options: CoreStateOptions) {
+    this.secretStore = options.secretStore;
+    this.configLoader = options.configLoader;
   }
-  
-  // ─── Config ──────────────────────────────────────────────────────────
-  
+
+  // ─── Builder API ────────────────────────────────────────────────────
+
   /**
-   * Load provider config from YAML, optionally merged with workspace config.
-   * Returns a Record keyed by virtual provider ID (= provider name).
+   * Add a provider programmatically (in-memory, no disk writes).
+   *
+   * If `apiKey` is provided, it is stored in the injected SecretStore
+   * automatically. The provider is immediately available for chat/listing.
+   *
+   * @example
+   * ```typescript
+   * await core.addProvider('my-openai', {
+   *   engine: 'openai',
+   *   apiKey: 'sk-...',
+   *   models: { 'gpt-4o': {}, 'gpt-4o-mini': { temperature: 0.3 } },
+   * });
+   * ```
+   */
+  async addProvider(providerId: string, options: AddProviderOptions): Promise<void> {
+    const engineInfo = getEngine(options.engine);
+    if (!engineInfo) {
+      throw new Error(`Unknown engine: "${options.engine}". Use listEngines() to see available engines.`);
+    }
+
+    const providerCfg: ProviderConfig = {
+      engine: options.engine,
+      models: options.models || {},
+    };
+
+    if (options.baseUrl) {
+      providerCfg.base_url = options.baseUrl;
+    }
+
+    // Store API key in SecretStore if provided
+    if (options.apiKey) {
+      const keychainName = `openllm.${providerId}`;
+      await this.secretStore.set(keychainName, options.apiKey);
+      providerCfg.api_key_keychain_name = keychainName;
+    } else if (options.apiKeyEnvVar) {
+      providerCfg.api_key_env_var_name = options.apiKeyEnvVar;
+    }
+
+    this.inMemoryProviders.set(providerId, providerCfg);
+  }
+
+  /**
+   * Remove a provider (in-memory only — does not modify disk config).
+   * Returns true if the provider existed, false otherwise.
+   */
+  removeProvider(providerId: string): boolean {
+    this.providerHealth.delete(providerId);
+    return this.inMemoryProviders.delete(providerId);
+  }
+
+  /**
+   * Add or update a model on an existing provider.
+   * Works on both in-memory and disk-loaded providers.
+   *
+   * @example
+   * ```typescript
+   * core.addModel('my-openai', 'gpt-4o-mini', { temperature: 0.3 });
+   * ```
+   */
+  addModel(providerId: string, modelName: string, modelConfig: ModelConfig = {}): void {
+    // Check in-memory first
+    const memProvider = this.inMemoryProviders.get(providerId);
+    if (memProvider) {
+      if (!memProvider.models) memProvider.models = {};
+      memProvider.models[modelName] = modelConfig;
+      return;
+    }
+
+    // If provider exists in disk config, promote it to in-memory so we can mutate
+    const diskConfig = this.loadProviderConfig();
+    const diskProvider = diskConfig[providerId];
+    if (!diskProvider) {
+      throw new Error(`Provider "${providerId}" not found. Use addProvider() first.`);
+    }
+
+    // Clone disk provider into in-memory so mutations don't affect the original
+    const cloned: ProviderConfig = { ...diskProvider, models: { ...diskProvider.models } };
+    cloned.models![modelName] = modelConfig;
+    this.inMemoryProviders.set(providerId, cloned);
+  }
+
+  /**
+   * Remove a model from a provider.
+   * Returns true if the model existed, false otherwise.
+   */
+  removeModel(providerId: string, modelName: string): boolean {
+    // Check in-memory first
+    const memProvider = this.inMemoryProviders.get(providerId);
+    if (memProvider?.models) {
+      const existed = modelName in memProvider.models;
+      delete memProvider.models[modelName];
+      return existed;
+    }
+
+    // If provider exists in disk config, promote to in-memory to mutate
+    const diskConfig = this.loadProviderConfig();
+    const diskProvider = diskConfig[providerId];
+    if (!diskProvider?.models || !(modelName in diskProvider.models)) {
+      return false;
+    }
+
+    const cloned: ProviderConfig = { ...diskProvider, models: { ...diskProvider.models } };
+    delete cloned.models![modelName];
+    this.inMemoryProviders.set(providerId, cloned);
+    return true;
+  }
+
+  /**
+   * Check whether a provider exists (in-memory or disk config).
+   */
+  hasProvider(providerId: string): boolean {
+    if (this.inMemoryProviders.has(providerId)) return true;
+    const diskConfig = this.configLoader ? this.configLoader() : loadConfig();
+    return !!(diskConfig.providers && providerId in diskConfig.providers);
+  }
+
+  // ─── Config ──────────────────────────────────────────────────────────
+
+  /**
+   * Load provider config, merging disk config with in-memory providers.
+   * In-memory providers take precedence over disk config for the same ID.
    */
   loadProviderConfig(workspacePath?: string): Record<string, ProviderConfig> {
-    const userConfig = loadConfig();
+    const userConfig = this.configLoader ? this.configLoader() : loadConfig();
     const wsConfig = workspacePath ? loadWorkspaceConfig(workspacePath) : null;
     const merged = mergeConfigs(userConfig, wsConfig);
-    return merged.providers || {};
+    const diskProviders = merged.providers || {};
+
+    // Merge in-memory providers over disk providers
+    if (this.inMemoryProviders.size === 0) {
+      return diskProviders;
+    }
+
+    const result = { ...diskProviders };
+    for (const [id, cfg] of this.inMemoryProviders) {
+      result[id] = cfg;
+    }
+    return result;
   }
-  
+
   /**
    * Resolve the API key for a virtual provider from config (keychain or env var).
    * Falls back to the engine's default env var if no explicit config.
@@ -187,31 +302,31 @@ export class DaemonState {
       const config = this.loadProviderConfig();
       providerCfg = config[providerId];
     }
-    
+
     if (!providerCfg) return null;
-    
+
     // Check keychain
     if (providerCfg.api_key_keychain_name) {
       const value = await this.secretStore.get(providerCfg.api_key_keychain_name);
       if (value) return value;
     }
-    
+
     // Check env var from config
     if (providerCfg.api_key_env_var_name) {
       const value = process.env[providerCfg.api_key_env_var_name];
       if (value && value.length > 0) return value;
     }
-    
+
     // Fall back to engine's default env var
     const engineInfo = getEngine(providerCfg.engine);
     if (engineInfo?.defaultEnvVar) {
       const value = process.env[engineInfo.defaultEnvVar];
       if (value && value.length > 0) return value;
     }
-    
+
     return null;
   }
-  
+
   /**
    * Resolve API key and base URL for an existing provider from config.
    * Used by the edit wizard to discover models without re-entering credentials.
@@ -220,16 +335,16 @@ export class DaemonState {
     const config = this.loadProviderConfig();
     const provCfg = config[providerId];
     if (!provCfg) return {};
-    
+
     const apiKey = await this.resolveApiKey(providerId, provCfg);
     return {
       apiKey: apiKey || undefined,
       baseUrl: provCfg.base_url || undefined,
     };
   }
-  
+
   // ─── Providers (virtual layer) ───────────────────────────────────────
-  
+
   /**
    * List all virtual providers with configuration status.
    * Returns only providers that exist in the config (user-created instances).
@@ -238,16 +353,16 @@ export class DaemonState {
     const config = workspacePaths.length > 0
       ? (mergeMultipleWorkspaceConfigs(workspacePaths).providers || {})
       : this.loadProviderConfig();
-    
+
     const providers: ProviderInfo[] = [];
-    
+
     for (const [providerId, providerCfg] of Object.entries(config)) {
       const engineInfo = getEngine(providerCfg.engine);
       if (!engineInfo) {
         console.warn(`[State] Unknown engine "${providerCfg.engine}" for provider "${providerId}", skipping`);
         continue;
       }
-      
+
       let configured = false;
       if (!engineInfo.requiresKey) {
         configured = true;
@@ -255,7 +370,7 @@ export class DaemonState {
         const key = await this.resolveApiKey(providerId, providerCfg);
         configured = key !== null;
       }
-      
+
       providers.push({
         id: providerId,
         engine: providerCfg.engine,
@@ -266,73 +381,60 @@ export class DaemonState {
         baseUrl: providerCfg.base_url,
       });
     }
-    
+
     return providers;
   }
-  
+
   /**
    * List engines available for the "Add Provider" wizard.
-   * Returns the fixed set of engine types from adapter.ts.
+   * Returns the fixed set of engine types from engines.ts.
    */
   listEngines(): EngineInfo[] {
     return getEngines();
   }
-  
+
   // ─── Models (virtual layer) ──────────────────────────────────────────
-  
+
   /**
    * List all virtual models across all configured providers.
-   * 
-   * For each virtual provider in config:
-   * 1. Fetch models from the engine (discovery)
-   * 2. Filter to only models enabled in config
-   * 3. Build composite IDs: {provider-id}/{model-name}
-   * 4. Attach per-model params from config
    */
   async listModels(workspacePaths: string[] = []): Promise<ModelInfo[]> {
     const config = workspacePaths.length > 0
       ? (mergeMultipleWorkspaceConfigs(workspacePaths).providers || {})
       : this.loadProviderConfig();
-    
+
     const allModels: ModelInfo[] = [];
-    
+
     for (const [providerId, providerCfg] of Object.entries(config)) {
       const engineInfo = getEngine(providerCfg.engine);
       if (!engineInfo) continue;
-      
-      // Must have models configured
+
       if (!providerCfg.models || Object.keys(providerCfg.models).length === 0) {
         continue;
       }
-      
-      // Resolve API key
+
       const apiKey = await this.resolveApiKey(providerId, providerCfg);
       if (engineInfo.requiresKey && !apiKey) {
         continue;
       }
-      
-      // Fetch all models from the engine for capability/contextWindow info
+
       let discoveredModels: DiscoveredModel[] = [];
       try {
         discoveredModels = await fetchModels(providerCfg.engine, apiKey || undefined, providerCfg.base_url);
       } catch (error) {
         console.error(`[State] Failed to fetch models for provider ${providerId}:`, error);
       }
-      
-      // Build a lookup from engine model ID to discovered model info
+
       const discoveryMap = new Map<string, DiscoveredModel>();
       for (const dm of discoveredModels) {
         discoveryMap.set(dm.id, dm);
       }
-      
-      // Create ModelInfo for each enabled model in config
+
       for (const [modelName, modelCfg] of Object.entries(providerCfg.models)) {
         const engineModelId = resolveEngineModelId(modelName, modelCfg);
         const compositeId = `${providerId}/${modelName}`;
-        
-        // Try to find discovery info for this model
         const discovered = discoveryMap.get(engineModelId);
-        
+
         allModels.push({
           id: compositeId,
           name: modelName,
@@ -345,23 +447,21 @@ export class DaemonState {
         });
       }
     }
-    
+
     return allModels;
   }
-  
+
   /**
    * Discover all models an engine offers, independent of config.
-   * Used for browsing/selection UI — does NOT trigger notifications.
-   * Operates on the actual layer (engine ID, not virtual provider).
    */
   async discoverModels(engineId: string, apiKey?: string, baseUrl?: string): Promise<DiscoveredModel[]> {
     const engineInfo = getEngine(engineId);
     if (!engineInfo) return [];
-    
+
     if (engineInfo.requiresKey && !apiKey) {
-      return []; // Can't discover without a key
+      return [];
     }
-    
+
     try {
       return await fetchModels(engineId, apiKey || undefined, baseUrl);
     } catch (error) {
@@ -369,40 +469,28 @@ export class DaemonState {
       return [];
     }
   }
-  
+
   // ─── Chat (virtual → actual resolution) ──────────────────────────────
-  
+
   /**
    * Stream a chat response for a virtual model.
-   * 
-   * Resolves the composite model ID to:
-   * - Virtual provider → engine, API key, base URL
-   * - Virtual model → engine model ID, config params
-   * 
+   *
+   * Resolves the composite model ID to engine, API key, base URL, model config.
    * Applies system prompt and merges params (request > config > engine default).
-   * 
-   * Tool modes:
-   * - "auto" (default): Tools are passed to Vercel AI SDK as tool() objects;
-   *   streamText() handles the orchestration loop (maxSteps). execute() calls
-   *   are delegated to the ToolExecutor (e.g., VS Code backchannel).
-   * - "passthrough": Tools are sent to the LLM but tool_call chunks are
-   *   streamed back to the caller without execution. The caller owns the loop.
-   * - "none": No tools sent to the LLM.
-   * 
-   * @param compositeModelId - "{provider-id}/{model-name}"
-   * @param messages - Chat messages
-   * @param requestParams - Per-request parameter overrides (from caller)
-   * @param toolOptions - Tool mode, definitions, and limits
+   *
+   * ToolExecutor is injectable per-call. CoreState does NOT default to any
+   * transport-specific executor — that's the daemon's job.
    */
   async* chat(
     compositeModelId: string,
-    messages: Array<{ role: string; content: string; tool_call_id?: string; tool_calls?: any[] }>,
+    messages: Array<{ role: string; content: string; name?: string; tool_call_id?: string; tool_calls?: any[] }>,
     requestParams?: ChatParams,
     toolOptions?: ChatToolOptions,
+    toolExecutor?: ToolExecutor,
   ): AsyncGenerator<ChatChunk> {
     const toolMode = toolOptions?.toolMode || 'auto';
     console.log(`[State] Chat request: compositeModelId="${compositeModelId}", messages=${messages.length}, toolMode="${toolMode}", tools=${toolOptions?.tools?.length || 0}`);
-    
+
     // ── Validate passthrough mode ──
     if (toolMode === 'passthrough' && (!toolOptions?.tools || toolOptions.tools.length === 0)) {
       console.error(`[State] passthrough mode requires client-provided tools`);
@@ -410,7 +498,7 @@ export class DaemonState {
       yield { type: 'done', finishReason: 'error' };
       return;
     }
-    
+
     // ── Split composite ID ──
     const slashIdx = compositeModelId.indexOf('/');
     if (slashIdx === -1) {
@@ -419,11 +507,11 @@ export class DaemonState {
       yield { type: 'done', finishReason: 'error' };
       return;
     }
-    
+
     const providerId = compositeModelId.substring(0, slashIdx);
     const modelName = compositeModelId.substring(slashIdx + 1);
     console.log(`[State] Chat: providerId="${providerId}", modelName="${modelName}"`);
-    
+
     // ── Look up virtual provider ──
     const config = this.loadProviderConfig();
     const providerCfg = config[providerId];
@@ -433,7 +521,7 @@ export class DaemonState {
       yield { type: 'done', finishReason: 'error' };
       return;
     }
-    
+
     const engineInfo = getEngine(providerCfg.engine);
     if (!engineInfo) {
       console.error(`[State] Unknown engine "${providerCfg.engine}" for provider "${providerId}"`);
@@ -441,7 +529,7 @@ export class DaemonState {
       yield { type: 'done', finishReason: 'error' };
       return;
     }
-    
+
     // ── Resolve API key ──
     const apiKey = await this.resolveApiKey(providerId, providerCfg);
     if (engineInfo.requiresKey && !apiKey) {
@@ -450,68 +538,44 @@ export class DaemonState {
       yield { type: 'done', finishReason: 'error' };
       return;
     }
-    
+
     // ── Look up virtual model ──
     const modelCfg = providerCfg.models?.[modelName];
     const engineModelId = modelCfg
       ? resolveEngineModelId(modelName, modelCfg)
-      : modelName; // If model not in config, use name as engine model ID
-    
+      : modelName;
+
     // ── Apply system prompt ──
     let processedMessages = [...messages];
     if (modelCfg?.system_prompt) {
       const mode = modelCfg.system_prompt_mode || 'prepend';
       processedMessages = applySystemPrompt(processedMessages, modelCfg.system_prompt, mode);
     }
-    
+
     // ── Merge params (3-tier: request > config > engine default) ──
     const mergedParams = mergeParams(modelCfg, requestParams);
-    
+
     console.log(`[State] Chat: engine="${providerCfg.engine}", engineModelId="${engineModelId}", toolMode="${toolMode}", baseUrl="${providerCfg.base_url || '(none)'}"`);
-    
+
     // ── Resolve tools based on mode ──
     let tools: ToolDefinition[] | undefined;
-    let toolExecutor: ToolExecutor | undefined;
-    
+    let resolvedExecutor: ToolExecutor | undefined;
+
     if (toolMode === 'none') {
-      // No tools — clean completion
       tools = undefined;
-      toolExecutor = undefined;
+      resolvedExecutor = undefined;
     } else if (toolMode === 'passthrough') {
-      // Passthrough: send tools to LLM but don't execute.
-      // We pass tools but no executor — adapter will use engine directly
-      // and raw tool_call chunks will come through without execution.
-      // For now passthrough is handled as no-tool (Vercel AI SDK's streamText
-      // always executes tools when provided — no "send but don't execute" mode).
-      // TODO: Implement passthrough properly when needed for external agents.
-      // External agents can use the gRPC/REST API with tool_mode=passthrough.
       tools = undefined;
-      toolExecutor = undefined;
+      resolvedExecutor = undefined;
       console.warn(`[State] passthrough mode: tools will be sent to LLM but not executed (delegated to caller)`);
     } else {
-      // Auto mode: use client tools if provided, otherwise future registry
+      // Auto mode: use client tools if provided
       if (toolOptions?.tools && toolOptions.tools.length > 0) {
         tools = toolOptions.tools;
-        
-        // Tool executor: delegate to VS Code backchannel for now (Phase 1)
-        // Phase 2 will use the ToolRouter for registry-based routing
-        toolExecutor = async (toolName: string, args: Record<string, any>) => {
-          console.log(`[State] Tool execution: ${toolName}`, JSON.stringify(args).substring(0, 200));
-          try {
-            const result = await this.invokeVSCodeTool(toolName, args);
-            if (result.isError) {
-              console.error(`[State] Tool error: ${toolName}:`, result.resultJson);
-              return { error: result.resultJson };
-            }
-            return JSON.parse(result.resultJson);
-          } catch (error: any) {
-            console.error(`[State] Tool execution failed: ${toolName}:`, error.message);
-            return { error: error.message };
-          }
-        };
+        resolvedExecutor = toolExecutor;
       }
     }
-    
+
     // ── Call the actual engine ──
     yield* streamChat(
       providerCfg.engine,
@@ -521,34 +585,32 @@ export class DaemonState {
       providerCfg.base_url,
       mergedParams,
       tools,
-      toolExecutor,
+      resolvedExecutor,
     );
   }
-  
+
   // ─── Health checks ───────────────────────────────────────────────────
-  
+
   /**
    * Run background health checks for all configured providers.
-   * Updates providerHealth map. Does not block.
    */
   async runHealthChecks(): Promise<void> {
     const config = this.loadProviderConfig();
-    
+
     for (const [providerId, providerCfg] of Object.entries(config)) {
       const engineInfo = getEngine(providerCfg.engine);
       if (!engineInfo) {
         this.providerHealth.set(providerId, false);
         continue;
       }
-      
+
       try {
         const apiKey = await this.resolveApiKey(providerId, providerCfg);
         if (engineInfo.requiresKey && !apiKey) {
           this.providerHealth.set(providerId, false);
           continue;
         }
-        
-        // Attempt model discovery as a health check
+
         const models = await fetchModels(providerCfg.engine, apiKey || undefined, providerCfg.base_url);
         this.providerHealth.set(providerId, models.length > 0);
       } catch {
@@ -556,297 +618,12 @@ export class DaemonState {
       }
     }
   }
-  
-  // ─── Clients ─────────────────────────────────────────────────────────
-  
-  /**
-   * Register a new client
-   */
-  registerClient(
-    clientType: ClientType,
-    isSpawner: boolean = false,
-    workspacePath?: string
-  ): string {
-    const clientId = uuidv4();
-    
-    this.clients.set(clientId, {
-      clientId,
-      clientType,
-      connectedAt: new Date(),
-      isSpawner,
-      workspacePath,
-      workspacePaths: workspacePath ? [workspacePath] : [],
-    });
-    
-    return clientId;
-  }
-  
-  /**
-   * Unregister a client
-   */
-  unregisterClient(clientId: string): boolean {
-    const removed = this.clients.delete(clientId);
-    if (removed) {
-      console.log(`[State] Client unregistered: ${clientId}`);
-    }
-    return removed;
-  }
-  
-  /**
-   * Get client count
-   */
-  get clientCount(): number {
-    return this.clients.size;
-  }
-  
-  /**
-   * Get all connected clients
-   */
-  getClients(): ConnectedClient[] {
-    return Array.from(this.clients.values());
-  }
-  
-  // ─── VS Code Backchannel ─────────────────────────────────────────────
-  
-  /**
-   * Register a VS Code connection with its stream
-   */
-  registerVSCodeConnection(stream?: any): string {
-    const id = uuidv4();
-    
-    this.vscodeConnections.set(id, {
-      id,
-      workspaceFolders: [],
-      stream,
-      pendingRequests: new Map(),
-    });
-    
-    console.log(`[State] VS Code connection registered: ${id}`);
-    return id;
-  }
-  
-  /**
-   * Unregister a VS Code connection
-   */
-  unregisterVSCodeConnection(id: string): boolean {
-    const conn = this.vscodeConnections.get(id);
-    if (conn) {
-      // Reject all pending requests
-      for (const [_reqId, pending] of conn.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error('VS Code connection closed'));
-      }
-      conn.pendingRequests.clear();
-    }
-    const removed = this.vscodeConnections.delete(id);
-    if (removed) {
-      console.log(`[State] VS Code connection unregistered: ${id}`);
-    }
-    return removed;
-  }
-  
-  /**
-   * Update VS Code workspace info
-   */
-  updateVSCodeWorkspace(id: string, workspacePath: string, workspaceFolders: string[]): void {
-    const conn = this.vscodeConnections.get(id);
-    if (conn) {
-      conn.workspacePath = workspacePath;
-      conn.workspaceFolders = workspaceFolders;
-      console.log(`[State] VS Code workspace updated for ${id}: ${workspacePath} (${workspaceFolders.length} folders)`);
-    }
-  }
-  
-  /**
-   * Handle a response from VS Code (resolve pending request)
-   */
-  handleVSCodeResponse(connId: string, response: any): void {
-    const conn = this.vscodeConnections.get(connId);
-    if (!conn) return;
-    
-    const requestId = response.request_id || response.requestId;
-    if (!requestId) return;
-    
-    const pending = conn.pendingRequests.get(requestId);
-    if (pending) {
-      clearTimeout(pending.timer);
-      conn.pendingRequests.delete(requestId);
-      pending.resolve(response);
-    }
-  }
-  
-  /**
-   * Send a request to VS Code via the backchannel stream and wait for response
-   */
-  async sendVSCodeRequest(connId: string, request: any, timeoutMs: number = 10000): Promise<any> {
-    const conn = this.vscodeConnections.get(connId);
-    if (!conn || !conn.stream) {
-      throw new Error('VS Code connection not available');
-    }
-    
-    const requestId = uuidv4();
-    const fullRequest = { request_id: requestId, ...request };
-    
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        conn.pendingRequests.delete(requestId);
-        reject(new Error(`VS Code request timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-      
-      conn.pendingRequests.set(requestId, { resolve, reject, timer });
-      
-      try {
-        conn.stream.write(fullRequest);
-      } catch (err) {
-        conn.pendingRequests.delete(requestId);
-        clearTimeout(timer);
-        reject(err);
-      }
-    });
-  }
-  
-  /**
-   * Send GetWorkspace request to a VS Code connection
-   */
-  async requestWorkspace(connId: string): Promise<{ workspacePath: string; workspaceFolders: string[] }> {
-    const response = await this.sendVSCodeRequest(connId, {
-      get_workspace: {},
-    });
-    
-    const ws = response.get_workspace || response.getWorkspace || {};
-    const workspacePath = ws.workspace_path || ws.workspacePath || '';
-    const workspaceFolders = ws.workspace_folders || ws.workspaceFolders || [];
-    
-    // Update local state
-    if (workspacePath || workspaceFolders.length > 0) {
-      this.updateVSCodeWorkspace(connId, workspacePath, workspaceFolders);
-    }
-    
-    return { workspacePath, workspaceFolders };
-  }
-  
-  /**
-   * Send InvokeTool request to VS Code
-   */
-  async invokeVSCodeTool(toolName: string, args: Record<string, unknown>): Promise<{ resultJson: string; isError: boolean }> {
-    const connId = this.getFirstVSCodeConnection();
-    if (!connId) throw new Error('No VS Code connection available');
-    
-    const response = await this.sendVSCodeRequest(connId, {
-      invoke_tool: {
-        tool_name: toolName,
-        arguments_json: JSON.stringify(args),
-      },
-    });
-    
-    const result = response.invoke_tool || response.invokeTool || {};
-    return {
-      resultJson: result.result_json || result.resultJson || '{}',
-      isError: result.is_error || result.isError || false,
-    };
-  }
-  
-  /**
-   * Send ListVSCodeModels request
-   */
-  async listVSCodeModels(familyFilter?: string): Promise<any[]> {
-    const connId = this.getFirstVSCodeConnection();
-    if (!connId) return [];
-    
-    const response = await this.sendVSCodeRequest(connId, {
-      list_models: {
-        family_filter: familyFilter || '',
-      },
-    });
-    
-    const result = response.list_models || response.listModels || {};
-    return result.models || [];
-  }
-  
-  /**
-   * Get the first available VS Code connection ID
-   */
-  private getFirstVSCodeConnection(): string | null {
-    for (const [id, conn] of this.vscodeConnections) {
-      if (conn.stream) return id;
-    }
-    return null;
-  }
-  
-  /**
-   * Notify all connected VS Code instances that models have changed.
-   * This triggers a model refresh on the VS Code side.
-   */
-  notifyModelsChanged(reason: string): void {
-    for (const conn of this.vscodeConnections.values()) {
-      if (conn.stream) {
-        try {
-          conn.stream.write({
-            request_id: `notify-${Date.now()}`,
-            models_changed: { reason },
-          });
-          console.log(`[State] Sent ModelsChanged notification to VS Code (reason: ${reason})`);
-        } catch (err: any) {
-          console.error(`[State] Failed to send ModelsChanged notification: ${err.message}`);
-        }
-      }
-    }
-  }
-  
-  /**
-   * Get all VS Code workspaces.
-   * Checks both backchannel connections and registered VS Code clients.
-   */
-  getVSCodeWorkspaces(): string[] {
-    const workspaces: string[] = [];
-    
-    // From backchannel connections
-    for (const conn of this.vscodeConnections.values()) {
-      if (conn.workspacePath && !workspaces.includes(conn.workspacePath)) {
-        workspaces.push(conn.workspacePath);
-      }
-      for (const folder of conn.workspaceFolders) {
-        if (!workspaces.includes(folder)) {
-          workspaces.push(folder);
-        }
-      }
-    }
-    
-    // From registered VS Code clients (Register RPC includes workspacePath)
-    for (const client of this.clients.values()) {
-      if (client.clientType === ClientType.VSCODE && client.workspacePath) {
-        if (!workspaces.includes(client.workspacePath)) {
-          workspaces.push(client.workspacePath);
-        }
-      }
-    }
-    
-    return workspaces.sort();
-  }
-  
-  /**
-   * Get all VS Code connection IDs
-   */
-  getVSCodeConnectionIds(): string[] {
-    return Array.from(this.vscodeConnections.keys());
-  }
-  
-  /**
-   * Check if any VS Code is connected
-   */
-  hasVSCodeConnection(): boolean {
-    return this.vscodeConnections.size > 0;
-  }
 }
 
 // ── Helper functions (module-level) ────────────────────────────────────
 
 /**
  * Apply system prompt to message thread.
- * Always produces exactly ONE system message (never multiple).
- * 
- * - "prepend": prefix config text to existing system message, or create one
- * - "replace": strip all system messages, insert config system_prompt at start
  */
 function applySystemPrompt(
   messages: Array<{ role: string; content: string }>,
@@ -854,16 +631,12 @@ function applySystemPrompt(
   mode: 'prepend' | 'replace',
 ): Array<{ role: string; content: string }> {
   if (mode === 'replace') {
-    // Strip all existing system messages
     const filtered = messages.filter(m => m.role !== 'system');
-    // Insert config system_prompt at start
     return [{ role: 'system', content: systemPrompt }, ...filtered];
   }
-  
-  // Mode: prepend
+
   const firstSystemIdx = messages.findIndex(m => m.role === 'system');
   if (firstSystemIdx >= 0) {
-    // Prefix config text to existing system message content
     const result = [...messages];
     result[firstSystemIdx] = {
       ...result[firstSystemIdx],
@@ -871,14 +644,12 @@ function applySystemPrompt(
     };
     return result;
   }
-  
-  // No existing system message — create one at the start
+
   return [{ role: 'system', content: systemPrompt }, ...messages];
 }
 
 /**
  * Merge chat params: request overrides > config defaults.
- * Returns a ChatParams object for adapter.streamChat().
  */
 function mergeParams(
   configParams?: ModelConfig,
@@ -886,20 +657,18 @@ function mergeParams(
 ): ChatParams | undefined {
   const merged: ChatParams = {};
   let hasAny = false;
-  
-  // Config defaults
+
   if (configParams?.temperature != null) { merged.temperature = configParams.temperature; hasAny = true; }
   if (configParams?.top_p != null) { merged.top_p = configParams.top_p; hasAny = true; }
   if (configParams?.top_k != null) { merged.top_k = configParams.top_k; hasAny = true; }
   if (configParams?.max_tokens != null) { merged.maxTokens = configParams.max_tokens; hasAny = true; }
   if (configParams?.timeout != null) { merged.timeout = configParams.timeout; hasAny = true; }
-  
-  // Request overrides (wins)
+
   if (requestParams?.temperature != null) { merged.temperature = requestParams.temperature; hasAny = true; }
   if (requestParams?.top_p != null) { merged.top_p = requestParams.top_p; hasAny = true; }
   if (requestParams?.top_k != null) { merged.top_k = requestParams.top_k; hasAny = true; }
   if (requestParams?.maxTokens != null) { merged.maxTokens = requestParams.maxTokens; hasAny = true; }
   if (requestParams?.timeout != null) { merged.timeout = requestParams.timeout; hasAny = true; }
-  
+
   return hasAny ? merged : undefined;
 }

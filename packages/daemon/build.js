@@ -51,7 +51,7 @@ async function build() {
 
   const bundlePath = path.join(PLATFORM_DIR, 'bundle.js');
   await esbuild.build({
-    entryPoints: [path.join(__dirname, 'src', 'index.ts')],
+    entryPoints: [path.join(__dirname, 'src', 'daemon', 'index.ts')],
     bundle: true,
     platform: 'node',
     format: 'cjs',
@@ -64,6 +64,82 @@ async function build() {
     },
   });
   console.log(`  Bundle: ${bundlePath} (${formatSize(fs.statSync(bundlePath).size)})`);
+
+  // ── 1b. Build @openllm/core package ──────────────────────────────────
+  console.log('[1b/5] Building @openllm/core package...');
+
+  const coreOutDir = path.join(__dirname, 'dist', 'core');
+  // Don't clean dist/core/ — tsc may have already written .d.ts files there.
+  // esbuild will overwrite index.js; .d.ts files are preserved.
+  fs.mkdirSync(coreOutDir, { recursive: true });
+
+  await esbuild.build({
+    entryPoints: [path.join(__dirname, 'src', 'core', 'index.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node20',
+    outfile: path.join(coreOutDir, 'index.js'),
+    external: [
+      'ai', '@ai-sdk/*', 'zod', 'js-yaml',
+    ],
+  });
+
+  // Ensure type declarations exist (tsc --emitDeclarationOnly if missing)
+  if (!fs.existsSync(path.join(coreOutDir, 'index.d.ts'))) {
+    console.log('  Generating type declarations...');
+    execSync('npx tsc --project tsconfig.json --emitDeclarationOnly --outDir dist', {
+      cwd: __dirname,
+      stdio: 'inherit',
+    });
+  }
+
+  // Generate package.json for core
+  const rootPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
+  const corePkg = {
+    name: '@openllm/core',
+    version: rootPkg.version || '0.1.0',
+    type: 'module',
+    main: 'index.js',
+    types: 'index.d.ts',
+    dependencies: {
+      ai: '^5',
+      'js-yaml': '^4',
+      zod: '^3',
+    },
+    peerDependencies: {
+      '@ai-sdk/openai': '^2',
+      '@ai-sdk/anthropic': '^2',
+      '@ai-sdk/google': '^2',
+      '@ai-sdk/mistral': '^2',
+      '@ai-sdk/xai': '^1',
+      '@ai-sdk/deepseek': '^1',
+      '@ai-sdk/groq': '^1',
+      '@ai-sdk/cohere': '^2',
+      '@ai-sdk/amazon-bedrock': '^2',
+      '@ai-sdk/fireworks': '^1',
+      '@ai-sdk/togetherai': '^1',
+      '@ai-sdk/perplexity': '^1',
+      '@ai-sdk/openai-compatible': '^0',
+    },
+    peerDependenciesMeta: {
+      '@ai-sdk/openai': { optional: true },
+      '@ai-sdk/anthropic': { optional: true },
+      '@ai-sdk/google': { optional: true },
+      '@ai-sdk/mistral': { optional: true },
+      '@ai-sdk/xai': { optional: true },
+      '@ai-sdk/deepseek': { optional: true },
+      '@ai-sdk/groq': { optional: true },
+      '@ai-sdk/cohere': { optional: true },
+      '@ai-sdk/amazon-bedrock': { optional: true },
+      '@ai-sdk/fireworks': { optional: true },
+      '@ai-sdk/togetherai': { optional: true },
+      '@ai-sdk/perplexity': { optional: true },
+      '@ai-sdk/openai-compatible': { optional: true },
+    },
+  };
+  fs.writeFileSync(path.join(coreOutDir, 'package.json'), JSON.stringify(corePkg, null, 2));
+  console.log(`  Core package: ${coreOutDir} (${formatSize(fs.statSync(path.join(coreOutDir, 'index.js')).size)})`);
 
   // ── 3. Copy sidecar files ─────────────────────────────────────────────
   // Proto files (grpc proto-loader reads from disk at runtime)

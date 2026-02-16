@@ -13,7 +13,7 @@ import yaml from 'js-yaml';
 
 // Mock the paths module so loadConfig/loadWorkspaceConfig read from our temp dirs
 let mockUserConfigPath = '/tmp/nonexistent-user-config.yaml';
-vi.mock('../paths.js', () => ({
+vi.mock('./paths.js', () => ({
   getUserConfigPath: () => mockUserConfigPath,
   getWorkspaceConfigPath: (wsPath: string) => path.join(wsPath, '.config', 'openllm', 'config.yaml'),
 }));
@@ -26,7 +26,7 @@ import {
   resolveEngineModelId,
   type ConfigFile,
   type ModelConfig,
-} from './loader.js';
+} from './config.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -172,12 +172,11 @@ describe('loadConfigFromPath (old schema migration)', () => {
 
     expect(config).not.toBeNull();
     const prov = config!.providers!.openrouter;
-    expect(prov.engine).toBe('openrouter'); // auto-migrated from key
+    expect(prov.engine).toBe('openrouter');
     expect(prov.models).toBeDefined();
     expect(Object.keys(prov.models!)).toHaveLength(2);
     expect(prov.models!['openrouter/anthropic/claude-opus-4.5']).toEqual({});
     expect(prov.models!['openrouter/anthropic/claude-opus-4.6']).toEqual({});
-    // Old fields should be gone
     expect((prov as any).enabled_models).toBeUndefined();
   });
 
@@ -233,7 +232,6 @@ describe('mergeConfigs', () => {
 
     const result = mergeConfigs(userConfig, wsConfig);
 
-    // Workspace completely replaces the provider
     expect(result.providers!.openrouter.api_key_keychain_name).toBe('WS_KEY');
     expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a']);
   });
@@ -319,7 +317,6 @@ describe('mergeMultipleWorkspaceConfigs', () => {
 
     const result = mergeMultipleWorkspaceConfigs([wsDir]);
 
-    // Workspace replaces user at provider level
     expect(Object.keys(result.providers!.openrouter.models!)).toEqual(['model-a']);
   });
 
@@ -392,7 +389,6 @@ describe('mergeMultipleWorkspaceConfigs', () => {
       },
     });
 
-    // Old format workspace config
     const wsDir = createWorkspace('ws-old', {
       providers: {
         openrouter: {
@@ -404,7 +400,6 @@ describe('mergeMultipleWorkspaceConfigs', () => {
 
     const result = mergeMultipleWorkspaceConfigs([wsDir]);
 
-    // Migration should convert enabled_models to models map
     expect(result.providers!.openrouter.models).toBeDefined();
     expect(result.providers!.openrouter.models!['openrouter/anthropic/claude-opus-4.5']).toEqual({});
   });

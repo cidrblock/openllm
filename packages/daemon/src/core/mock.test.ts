@@ -42,11 +42,11 @@ describe('Mock Provider - Model List', () => {
     expect(models.length).toBeGreaterThanOrEqual(4);
     
     const ids = models.map(m => m.id);
-    expect(ids).toContain('mock/echo');
-    expect(ids).toContain('mock/fixed');
-    expect(ids).toContain('mock/error');
-    expect(ids).toContain('mock/empty');
-    expect(ids).toContain('mock/slow');
+    expect(ids).toContain('echo');
+    expect(ids).toContain('fixed');
+    expect(ids).toContain('error');
+    expect(ids).toContain('empty');
+    expect(ids).toContain('slow');
   });
   
   it('should have mock as provider for all models', () => {
@@ -158,13 +158,8 @@ describe('Mock Provider - Empty Mode', () => {
 
 describe('Mock Provider - Slow Mode', () => {
   it('should echo with delay', async () => {
-    const start = Date.now();
     const { text } = await collectChat('slow', userMessage('Hi'));
-    const elapsed = Date.now() - start;
-    
     expect(text).toContain('Echo: Hi');
-    // At least some delay (1 chunk + done = very little delay, but multi-chunk should show some)
-    // The message is short so it might be 1 chunk. Let's test with a longer message.
   });
   
   it('should respect custom delay', async () => {
@@ -176,7 +171,6 @@ describe('Mock Provider - Slow Mode', () => {
     const elapsed = Date.now() - start;
     
     expect(text).toContain('Echo: This is a longer message');
-    // With 50ms per chunk and multiple chunks, should take noticeable time
     expect(elapsed).toBeGreaterThan(50);
   });
   
@@ -199,7 +193,6 @@ describe('Mock Provider - Case Insensitivity', () => {
   
   it('should handle FIXED with custom text (preserves case in response)', async () => {
     const { text } = await collectChat('FIXED:Hello World', userMessage('x'));
-    // Note: the "FIXED:" prefix is case-insensitive but text after colon is preserved
     expect(text).toBe('Hello World');
   });
 });

@@ -15,7 +15,7 @@ import yaml from 'js-yaml';
 import {
   getUserConfigPath as _getUserConfigPath,
   getWorkspaceConfigPath as _getWorkspaceConfigPath,
-} from '../paths.js';
+} from './paths.js';
 
 // ── Name validation ────────────────────────────────────────────────────
 
