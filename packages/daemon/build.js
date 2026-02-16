@@ -196,10 +196,16 @@ async function build() {
 
   const postjectBin = findPostject();
   const sentinel = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
+  const machoFlag = PLATFORM === 'darwin' ? ' --macho-segment-name NODE_SEA' : '';
   execSync(
-    `"${postjectBin}" "${seaBinary}" NODE_SEA_BLOB "${seaBlob}" --sentinel-fuse ${sentinel} --overwrite`,
+    `"${postjectBin}" "${seaBinary}" NODE_SEA_BLOB "${seaBlob}" --sentinel-fuse ${sentinel}${machoFlag} --overwrite`,
     { stdio: 'inherit' }
   );
+
+  if (PLATFORM === 'darwin') {
+    execSync(`codesign --sign - "${seaBinary}"`, { stdio: 'inherit' });
+    console.log('  Re-signed binary (ad-hoc) for macOS');
+  }
   console.log(`  Binary: ${seaBinary} (${formatSize(fs.statSync(seaBinary).size)})`);
 
   // Clean up intermediate files
