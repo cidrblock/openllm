@@ -93,13 +93,23 @@ See [docs/CORE.md](docs/CORE.md) for the full library API reference.
 
 ### Building everything
 
-```bash
-# Full build: proto generation + SEA binary + VSIX extension
-node build.js
+**Prerequisites:** Node.js 20+, npm, protoc, and an official Node.js binary for SEA packaging (Homebrew/apt/nvm node does not work for SEA — download from [nodejs.org](https://nodejs.org/)).
 
-# Install the VSIX into VS Code
-node build.js --code-install
+```bash
+# Install dependencies
+npm install
+
+# Download official Node.js for SEA (example: macOS arm64)
+curl -fsSL https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-arm64.tar.xz | tar xJ -C /tmp
+
+# Full build: proto + SEA binary + VSIX + distribution zip
+NODE_SEA_BASE=/tmp/node-v22.22.0-darwin-arm64/bin/node node build.js
+
+# Build + install the VSIX into VS Code
+NODE_SEA_BASE=/tmp/node-v22.22.0-darwin-arm64/bin/node node build.js --code-install
 ```
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for all platform download URLs and detailed setup.
 
 ## Supported Engines
 

@@ -2,10 +2,49 @@
 
 ## Prerequisites
 
-- **Node.js** (20+)
-- **npm**
-- **protoc** - Protocol buffer compiler (for client generation)
-- **VS Code** (for extension development)
+- **Node.js** (20+) and **npm** — for development and building
+- **Node.js official binary** — for SEA packaging (see below)
+- **protoc** — Protocol buffer compiler (for gRPC client generation)
+- **python3** — For Python gRPC client generation (optional — build skips if missing)
+- **VS Code** — for extension development
+
+### macOS (Homebrew)
+
+```bash
+brew install node protobuf python3
+```
+
+### Linux (apt)
+
+```bash
+sudo apt install -y nodejs npm protobuf-compiler python3 python3-venv
+```
+
+### Node.js for SEA (required for full build)
+
+The full build produces a Single Executable Application (SEA) binary. This requires an **official Node.js binary** downloaded from [nodejs.org](https://nodejs.org/) — package-manager-installed Node.js (Homebrew, apt, nvm, etc.) does **not** include the `NODE_SEA_FUSE` sentinel needed for SEA injection.
+
+Download the official binary and set `NODE_SEA_BASE`:
+
+```bash
+# macOS (Apple Silicon)
+curl -fsSL https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-arm64.tar.xz | tar xJ -C /tmp
+export NODE_SEA_BASE=/tmp/node-v22.22.0-darwin-arm64/bin/node
+
+# macOS (Intel)
+curl -fsSL https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-x64.tar.xz | tar xJ -C /tmp
+export NODE_SEA_BASE=/tmp/node-v22.22.0-darwin-x64/bin/node
+
+# Linux (x64)
+curl -fsSL https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-x64.tar.xz | tar xJ -C /tmp
+export NODE_SEA_BASE=/tmp/node-v22.22.0-linux-x64/bin/node
+
+# Linux (arm64)
+curl -fsSL https://nodejs.org/dist/v22.22.0/node-v22.22.0-linux-arm64.tar.xz | tar xJ -C /tmp
+export NODE_SEA_BASE=/tmp/node-v22.22.0-linux-arm64/bin/node
+```
+
+If `NODE_SEA_BASE` is not set, the build checks your system node for the fuse and fails with a clear error message.
 
 ## Repository Structure
 
@@ -68,13 +107,30 @@ node dist/daemon/index.js stop
 ## Full Build (SEA + VSIX)
 
 ```bash
-# From repo root
-node build.js                  # Full build: proto + SEA + VSIX + zip
-node build.js --skip-proto     # Skip proto generation
+# From repo root — install dependencies first
+npm install
+
+# Full build: proto generation + SEA binary + VSIX extension + zip
+node build.js
+
+# Common variations
+node build.js --skip-proto     # Skip proto generation (use existing stubs)
 node build.js --code-install   # Build + install VSIX into VS Code
+node build.js --skip-zip       # Skip creating distribution zip
+
+# If your system node lacks the SEA fuse:
+NODE_SEA_BASE=/path/to/official/node node build.js
 ```
 
-Requires `NODE_SEA_BASE` env var pointing to a Node.js binary with the SEA fuse if your system node doesn't have it.
+The build pipeline runs 6 stages:
+1. Generate Python gRPC client (requires python3 — skips if missing)
+2. Generate TypeScript gRPC client (requires protoc)
+3. Build daemon: tsc type-check, esbuild bundle, core package, SEA binary
+4. Package VS Code extension (VSIX)
+5. Create distribution zip
+6. Install VSIX into VS Code (only with `--code-install`)
+
+> **macOS note:** The build automatically handles macOS-specific SEA requirements — it passes `--macho-segment-name NODE_SEA` to postject and re-signs the binary with an ad-hoc signature (`codesign --sign -`). No manual steps are needed.
 
 ## Development Workflow
 
