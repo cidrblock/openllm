@@ -421,12 +421,20 @@ export function createOpenLLMService(state: DaemonState) {
       
       console.log(`[gRPC] VS Code stream started: ${connId}`);
       
-      // Immediately request workspace info from VS Code
+      // Immediately request workspace info and tools from VS Code
       setTimeout(async () => {
         try {
           console.log(`[gRPC] Requesting workspace from VS Code (${connId})...`);
           const ws = await state.requestWorkspace(connId);
           console.log(`[gRPC] Got workspace: ${ws.workspacePath} (${ws.workspaceFolders.length} folders)`);
+          
+          // Request available tools after workspace is known (for namespacing)
+          try {
+            console.log(`[gRPC] Requesting tools from VS Code (${connId})...`);
+            await state.requestVSCodeTools(connId);
+          } catch (toolErr: any) {
+            console.warn(`[gRPC] Failed to get VS Code tools: ${toolErr.message}`);
+          }
         } catch (err: any) {
           console.error(`[gRPC] Failed to get workspace from VS Code: ${err.message}`);
         }
@@ -435,6 +443,13 @@ export function createOpenLLMService(state: DaemonState) {
       // Handle incoming responses from VS Code
       call.on('data', (response: any) => {
         console.log(`[gRPC] VS Code response received:`, Object.keys(response));
+        
+        // Check for unsolicited register_tools notification
+        const registerTools = response.register_tools || response.registerTools;
+        if (registerTools) {
+          state.handleRegisterToolsNotification(connId, registerTools);
+          return;
+        }
         
         // Route the response to the pending request handler
         state.handleVSCodeResponse(connId, response);

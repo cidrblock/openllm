@@ -80,6 +80,22 @@ export type { ProviderConfig } from './config.js';
 /** Per-model configuration block */
 export type { ModelConfig } from './config.js';
 
+/** MCP server connection configuration */
+export type { McpServerConfig } from './config.js';
+
+// ─── Tool Registry ──────────────────────────────────────────────────────
+
+/** Tool collection, namespacing, and policy filtering */
+export { ToolRegistry } from './tool-registry.js';
+
+/** Tool registry types */
+export type {
+  RegisteredTool,
+  ToolRegistrationInput,
+  ToolPolicyConfig,
+  ToolSourceType,
+} from './tool-registry.js';
+
 // ─── Engine Listing ─────────────────────────────────────────────────────
 
 /** Get all available engines (the fixed set of LLM API implementations) */

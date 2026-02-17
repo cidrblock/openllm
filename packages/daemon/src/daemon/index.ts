@@ -70,6 +70,7 @@ program
   .command('web')
   .description('Start web dashboard')
   .option('-p, --port <port>', 'Port to listen on', '8787')
+  .option('--mcp', 'Start MCP server on /mcp endpoint')
   .action(async (options) => {
     const port = parseInt(options.port, 10);
     let daemonStartedHere = false;
@@ -107,8 +108,15 @@ program
         
         const daemonState = await startDaemon({ keepAlive: false });
         
-        const { url } = await startEmbeddedWebServer(daemonState, port);
+        const { url, app } = await startEmbeddedWebServer(daemonState, port);
         console.log(`OpenLLM Web Dashboard: ${url}`);
+        
+        // Start MCP server if --mcp flag is set
+        if (options.mcp && app) {
+          await daemonState.mcpServer.start(app);
+          console.log(`MCP Server: ${url}/mcp`);
+        }
+        
         console.log('Press Ctrl+C to stop');
         
         // Keep alive until Ctrl+C (shutdown handler is already registered by startDaemon)

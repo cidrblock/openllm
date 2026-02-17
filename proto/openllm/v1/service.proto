@@ -963,6 +963,7 @@ message VSCodeRequest {
     GetWorkspaceRequest get_workspace = 6;
     // Note: field 5 (get_secret) removed - secrets managed by daemon
     ModelsChangedNotification models_changed = 7;  // Push: daemon tells VS Code models changed
+    ListVSCodeToolsRequest list_tools = 8;         // Request VS Code's available tools
   }
 }
 
@@ -983,6 +984,8 @@ message VSCodeResponse {
     VSCodeError error = 6;
     GetWorkspaceResponse get_workspace = 7;
     // Note: field 5 (get_secret) removed - secrets managed by daemon
+    ListVSCodeToolsResponse list_tools = 8;
+    RegisterToolsNotification register_tools = 9;  // Unsolicited: VS Code pushes tool updates
   }
 }
 
@@ -1008,6 +1011,26 @@ message InvokeToolRequest {
 message InvokeToolResponse {
   string result_json = 1;
   bool is_error = 2;
+}
+
+// List VS Code tools (vscode.lm.tools)
+message ListVSCodeToolsRequest {}
+
+message ListVSCodeToolsResponse {
+  repeated VSCodeToolInfo tools = 1;
+}
+
+// Unsolicited notification: VS Code pushes updated tool list
+message RegisterToolsNotification {
+  repeated VSCodeToolInfo tools = 1;
+}
+
+// VS Code tool metadata
+message VSCodeToolInfo {
+  string name = 1;
+  string description = 2;
+  string input_schema = 3;  // JSON Schema string
+  repeated string tags = 4;
 }
 
 // List VS Code LM models (Copilot, etc.)

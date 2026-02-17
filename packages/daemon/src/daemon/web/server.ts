@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
 import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../../core/config.js';
 import type { DaemonState } from '../state.js';
+import type { ChatToolOptions } from '../../core/state.js';
 import { getEngines, getEngine, getProviderTemplates } from '../../core/engines.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -252,6 +253,9 @@ export function createWebApp(state: DaemonState): Express {
       
       res.json({ success: true, path: savedPath });
       state.notifyModelsChanged('config_changed');
+      state.refreshMcpConnections().catch((err: any) => {
+        console.error('[Web] MCP refresh after config change failed:', err.message);
+      });
     } catch (err: any) {
       console.error('[Web] /api/config POST error:', err.message);
       res.status(500).json({ error: err.message });
@@ -487,12 +491,14 @@ export function createWebApp(state: DaemonState): Express {
       inputSchema: typeof t.input_schema === 'string' ? t.input_schema : JSON.stringify(t.input_schema || {}),
     })).filter((t: any) => t.name) : undefined;
     
-    const toolOptions = (toolDefs && toolDefs.length > 0) || tool_mode ? {
+    // Always set toolMode 'auto' so registry tools are used when no client tools provided
+    const toolOptions: ChatToolOptions = {
       toolMode: tool_mode || 'auto',
       tools: toolDefs && toolDefs.length > 0 ? toolDefs : undefined,
-    } : undefined;
+    };
     
-    console.log('[Web] Starting Chat stream:', model, `messages: ${chatMessages.length}`, `tools: ${toolDefs?.length || 0}`, `toolMode: ${tool_mode || 'auto'}`);
+    const registryCount = state.toolRegistry?.size || 0;
+    console.log('[Web] Starting Chat stream:', model, `messages: ${chatMessages.length}`, `tools: ${toolDefs?.length || 0}`, `registry: ${registryCount}`, `toolMode: ${toolOptions.toolMode}`);
     
     // Detect actual client disconnect (connection close, not request body consumed)
     // IMPORTANT: use res.on('close') — NOT req.on('close') which fires
@@ -619,6 +625,78 @@ export function createWebApp(state: DaemonState): Express {
     }
   });
   
+  // ── MCP Server Management ──────────────────────────────────────────────
+
+  // GET /api/mcp-servers — list configured MCP servers with connection status
+  app.get('/api/mcp-servers', (_req, res) => {
+    try {
+      const statuses = state.mcpClientPool.getStatuses();
+      res.json({ mcp_servers: statuses });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/mcp-servers/:id/reconnect — reconnect a failed MCP server
+  app.post('/api/mcp-servers/:id/reconnect', async (req, res) => {
+    try {
+      await state.mcpClientPool.reconnect(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/tools — list all registered tools from the registry
+  app.get('/api/tools', (_req, res) => {
+    try {
+      const tools = state.toolRegistry?.getAll() || [];
+      res.json({
+        tools: tools.map(t => ({
+          name: t.namespacedName,
+          originalName: t.originalName,
+          source: t.source,
+          sourceType: t.sourceType,
+          description: t.description,
+        })),
+        total: tools.length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/mcp-server/status — MCP server (our exposed server) status
+  app.get('/api/mcp-server/status', (_req, res) => {
+    res.json({
+      running: state.mcpServer.isRunning,
+    });
+  });
+
+  // POST /api/mcp-server/start — start the MCP server on this Express app
+  app.post('/api/mcp-server/start', async (_req, res) => {
+    try {
+      if (state.mcpServer.isRunning) {
+        res.json({ success: true, message: 'MCP server already running' });
+        return;
+      }
+      await state.mcpServer.start(app);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/mcp-server/stop — stop the MCP server
+  app.post('/api/mcp-server/stop', async (_req, res) => {
+    try {
+      await state.mcpServer.stop();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return app;
 }
 
@@ -626,6 +704,7 @@ export function createWebApp(state: DaemonState): Express {
 
 let _httpServer: http.Server | null = null;
 let _webPort: number | null = null;
+let _lastApp: Express | null = null;
 
 /**
  * Start the embedded web server in the daemon process.
@@ -634,9 +713,9 @@ let _webPort: number | null = null;
 export async function startEmbeddedWebServer(
   state: DaemonState,
   port: number = 8787,
-): Promise<{ port: number; url: string }> {
+): Promise<{ port: number; url: string; app: Express }> {
   if (_httpServer) {
-    return { port: _webPort!, url: `http://localhost:${_webPort}` };
+    return { port: _webPort!, url: `http://localhost:${_webPort}`, app: _lastApp! };
   }
   
   const app = createWebApp(state);
@@ -661,7 +740,8 @@ export async function startEmbeddedWebServer(
     _httpServer.on('error', reject);
   });
   
-  return { port, url: `http://localhost:${port}` };
+  _lastApp = app;
+  return { port, url: `http://localhost:${port}`, app };
 }
 
 /**

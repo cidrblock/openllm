@@ -32,6 +32,7 @@ import {
   type ToolExecutor,
   type ToolValidationCallback,
 } from './engines.js';
+import type { ToolRegistry } from './tool-registry.js';
 
 // ── Virtual provider info (runtime, for API responses) ─────────────────
 
@@ -144,6 +145,17 @@ export class CoreState {
 
   /** Health status per virtual provider (lazy, updated in background) */
   protected providerHealth = new Map<string, boolean>();
+
+  /**
+   * Optional tool registry for automatic tool aggregation.
+   *
+   * When set, chat() in 'auto' mode uses the registry's tools and executor
+   * automatically (unless the caller provides explicit tools in ChatToolOptions).
+   *
+   * Library consumers set this to collect tools from their own sources.
+   * The daemon sets this and wires in a fallback executor for VS Code / MCP routing.
+   */
+  public toolRegistry?: ToolRegistry;
 
   constructor(options: CoreStateOptions) {
     this.secretStore = options.secretStore;
@@ -569,10 +581,19 @@ export class CoreState {
       resolvedExecutor = undefined;
       console.warn(`[State] passthrough mode: tools will be sent to LLM but not executed (delegated to caller)`);
     } else {
-      // Auto mode: use client tools if provided
+      // Auto mode: use client tools if provided, otherwise fall back to registry
       if (toolOptions?.tools && toolOptions.tools.length > 0) {
         tools = toolOptions.tools;
         resolvedExecutor = toolExecutor;
+      } else if (this.toolRegistry && this.toolRegistry.size > 0) {
+        // Load tool policy from config for filtering
+        const config = this.configLoader ? this.configLoader() : loadConfig();
+        const policy = config.tool_policy;
+        tools = this.toolRegistry.listForChat(policy);
+        resolvedExecutor = this.toolRegistry.buildExecutor(
+          toolExecutor ? (tool, args) => toolExecutor!(tool.originalName, args) : undefined,
+        );
+        console.log(`[State] Auto-loaded ${tools.length} tools from registry`);
       }
     }
 

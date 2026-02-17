@@ -59,6 +59,9 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     };
     
+    // Listen for VS Code tool changes and push updates to daemon
+    context.subscriptions.push(backchannelHandler.setupToolChangeListener());
+    
     backchannelHandler.start().catch(e => {
       logger.warn('[Backchannel] Failed to start:', e);
     });

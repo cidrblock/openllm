@@ -1202,6 +1202,9 @@ export interface VSCodeRequest {
     | //
     /** Note: field 5 (get_secret) removed - secrets managed by daemon */
     { $case: "modelsChanged"; modelsChanged: ModelsChangedNotification }
+    | //
+    /** Request VS Code's available tools */
+    { $case: "listTools"; listTools: ListVSCodeToolsRequest }
     | undefined;
 }
 
@@ -1222,9 +1225,13 @@ export interface VSCodeResponse {
     | { $case: "listModels"; listModels: ListVSCodeModelsResponse }
     | { $case: "sendChat"; sendChat: SendVSCodeChatResponse }
     | { $case: "error"; error: VSCodeError }
+    | { $case: "getWorkspace"; getWorkspace: GetWorkspaceResponse }
     | //
     /** Note: field 5 (get_secret) removed - secrets managed by daemon */
-    { $case: "getWorkspace"; getWorkspace: GetWorkspaceResponse }
+    { $case: "listTools"; listTools: ListVSCodeToolsResponse }
+    | //
+    /** Unsolicited: VS Code pushes tool updates */
+    { $case: "registerTools"; registerTools: RegisterToolsNotification }
     | undefined;
 }
 
@@ -1253,6 +1260,28 @@ export interface InvokeToolRequest {
 export interface InvokeToolResponse {
   resultJson: string;
   isError: boolean;
+}
+
+/** List VS Code tools (vscode.lm.tools) */
+export interface ListVSCodeToolsRequest {
+}
+
+export interface ListVSCodeToolsResponse {
+  tools: VSCodeToolInfo[];
+}
+
+/** Unsolicited notification: VS Code pushes updated tool list */
+export interface RegisterToolsNotification {
+  tools: VSCodeToolInfo[];
+}
+
+/** VS Code tool metadata */
+export interface VSCodeToolInfo {
+  name: string;
+  description: string;
+  /** JSON Schema string */
+  inputSchema: string;
+  tags: string[];
 }
 
 /** List VS Code LM models (Copilot, etc.) */
@@ -12041,6 +12070,9 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
       case "modelsChanged":
         ModelsChangedNotification.encode(message.request.modelsChanged, writer.uint32(58).fork()).join();
         break;
+      case "listTools":
+        ListVSCodeToolsRequest.encode(message.request.listTools, writer.uint32(66).fork()).join();
+        break;
     }
     return writer;
   },
@@ -12109,6 +12141,14 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
           };
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.request = { $case: "listTools", listTools: ListVSCodeToolsRequest.decode(reader, reader.uint32()) };
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -12145,6 +12185,10 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
         ? { $case: "modelsChanged", modelsChanged: ModelsChangedNotification.fromJSON(object.modelsChanged) }
         : isSet(object.models_changed)
         ? { $case: "modelsChanged", modelsChanged: ModelsChangedNotification.fromJSON(object.models_changed) }
+        : isSet(object.listTools)
+        ? { $case: "listTools", listTools: ListVSCodeToolsRequest.fromJSON(object.listTools) }
+        : isSet(object.list_tools)
+        ? { $case: "listTools", listTools: ListVSCodeToolsRequest.fromJSON(object.list_tools) }
         : undefined,
     };
   },
@@ -12164,6 +12208,8 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
       obj.getWorkspace = GetWorkspaceRequest.toJSON(message.request.getWorkspace);
     } else if (message.request?.$case === "modelsChanged") {
       obj.modelsChanged = ModelsChangedNotification.toJSON(message.request.modelsChanged);
+    } else if (message.request?.$case === "listTools") {
+      obj.listTools = ListVSCodeToolsRequest.toJSON(message.request.listTools);
     }
     return obj;
   },
@@ -12213,6 +12259,15 @@ export const VSCodeRequest: MessageFns<VSCodeRequest> = {
           message.request = {
             $case: "modelsChanged",
             modelsChanged: ModelsChangedNotification.fromPartial(object.request.modelsChanged),
+          };
+        }
+        break;
+      }
+      case "listTools": {
+        if (object.request?.listTools !== undefined && object.request?.listTools !== null) {
+          message.request = {
+            $case: "listTools",
+            listTools: ListVSCodeToolsRequest.fromPartial(object.request.listTools),
           };
         }
         break;
@@ -12305,6 +12360,12 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
       case "getWorkspace":
         GetWorkspaceResponse.encode(message.response.getWorkspace, writer.uint32(58).fork()).join();
         break;
+      case "listTools":
+        ListVSCodeToolsResponse.encode(message.response.listTools, writer.uint32(66).fork()).join();
+        break;
+      case "registerTools":
+        RegisterToolsNotification.encode(message.response.registerTools, writer.uint32(74).fork()).join();
+        break;
     }
     return writer;
   },
@@ -12370,6 +12431,25 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
           };
           continue;
         }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.response = { $case: "listTools", listTools: ListVSCodeToolsResponse.decode(reader, reader.uint32()) };
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.response = {
+            $case: "registerTools",
+            registerTools: RegisterToolsNotification.decode(reader, reader.uint32()),
+          };
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -12404,6 +12484,14 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
         ? { $case: "getWorkspace", getWorkspace: GetWorkspaceResponse.fromJSON(object.getWorkspace) }
         : isSet(object.get_workspace)
         ? { $case: "getWorkspace", getWorkspace: GetWorkspaceResponse.fromJSON(object.get_workspace) }
+        : isSet(object.listTools)
+        ? { $case: "listTools", listTools: ListVSCodeToolsResponse.fromJSON(object.listTools) }
+        : isSet(object.list_tools)
+        ? { $case: "listTools", listTools: ListVSCodeToolsResponse.fromJSON(object.list_tools) }
+        : isSet(object.registerTools)
+        ? { $case: "registerTools", registerTools: RegisterToolsNotification.fromJSON(object.registerTools) }
+        : isSet(object.register_tools)
+        ? { $case: "registerTools", registerTools: RegisterToolsNotification.fromJSON(object.register_tools) }
         : undefined,
     };
   },
@@ -12423,6 +12511,10 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
       obj.error = VSCodeError.toJSON(message.response.error);
     } else if (message.response?.$case === "getWorkspace") {
       obj.getWorkspace = GetWorkspaceResponse.toJSON(message.response.getWorkspace);
+    } else if (message.response?.$case === "listTools") {
+      obj.listTools = ListVSCodeToolsResponse.toJSON(message.response.listTools);
+    } else if (message.response?.$case === "registerTools") {
+      obj.registerTools = RegisterToolsNotification.toJSON(message.response.registerTools);
     }
     return obj;
   },
@@ -12472,6 +12564,24 @@ export const VSCodeResponse: MessageFns<VSCodeResponse> = {
           message.response = {
             $case: "getWorkspace",
             getWorkspace: GetWorkspaceResponse.fromPartial(object.response.getWorkspace),
+          };
+        }
+        break;
+      }
+      case "listTools": {
+        if (object.response?.listTools !== undefined && object.response?.listTools !== null) {
+          message.response = {
+            $case: "listTools",
+            listTools: ListVSCodeToolsResponse.fromPartial(object.response.listTools),
+          };
+        }
+        break;
+      }
+      case "registerTools": {
+        if (object.response?.registerTools !== undefined && object.response?.registerTools !== null) {
+          message.response = {
+            $case: "registerTools",
+            registerTools: RegisterToolsNotification.fromPartial(object.response.registerTools),
           };
         }
         break;
@@ -12848,6 +12958,281 @@ export const InvokeToolResponse: MessageFns<InvokeToolResponse> = {
     const message = createBaseInvokeToolResponse();
     message.resultJson = object.resultJson ?? "";
     message.isError = object.isError ?? false;
+    return message;
+  },
+};
+
+function createBaseListVSCodeToolsRequest(): ListVSCodeToolsRequest {
+  return {};
+}
+
+export const ListVSCodeToolsRequest: MessageFns<ListVSCodeToolsRequest> = {
+  encode(_: ListVSCodeToolsRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListVSCodeToolsRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListVSCodeToolsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListVSCodeToolsRequest {
+    return {};
+  },
+
+  toJSON(_: ListVSCodeToolsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListVSCodeToolsRequest>): ListVSCodeToolsRequest {
+    return ListVSCodeToolsRequest.fromPartial(base ?? {});
+  },
+  fromPartial(_: DeepPartial<ListVSCodeToolsRequest>): ListVSCodeToolsRequest {
+    const message = createBaseListVSCodeToolsRequest();
+    return message;
+  },
+};
+
+function createBaseListVSCodeToolsResponse(): ListVSCodeToolsResponse {
+  return { tools: [] };
+}
+
+export const ListVSCodeToolsResponse: MessageFns<ListVSCodeToolsResponse> = {
+  encode(message: ListVSCodeToolsResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.tools) {
+      VSCodeToolInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListVSCodeToolsResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListVSCodeToolsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.tools.push(VSCodeToolInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListVSCodeToolsResponse {
+    return {
+      tools: globalThis.Array.isArray(object?.tools) ? object.tools.map((e: any) => VSCodeToolInfo.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ListVSCodeToolsResponse): unknown {
+    const obj: any = {};
+    if (message.tools?.length) {
+      obj.tools = message.tools.map((e) => VSCodeToolInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListVSCodeToolsResponse>): ListVSCodeToolsResponse {
+    return ListVSCodeToolsResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ListVSCodeToolsResponse>): ListVSCodeToolsResponse {
+    const message = createBaseListVSCodeToolsResponse();
+    message.tools = object.tools?.map((e) => VSCodeToolInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseRegisterToolsNotification(): RegisterToolsNotification {
+  return { tools: [] };
+}
+
+export const RegisterToolsNotification: MessageFns<RegisterToolsNotification> = {
+  encode(message: RegisterToolsNotification, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.tools) {
+      VSCodeToolInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RegisterToolsNotification {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRegisterToolsNotification();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.tools.push(VSCodeToolInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RegisterToolsNotification {
+    return {
+      tools: globalThis.Array.isArray(object?.tools) ? object.tools.map((e: any) => VSCodeToolInfo.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: RegisterToolsNotification): unknown {
+    const obj: any = {};
+    if (message.tools?.length) {
+      obj.tools = message.tools.map((e) => VSCodeToolInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<RegisterToolsNotification>): RegisterToolsNotification {
+    return RegisterToolsNotification.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<RegisterToolsNotification>): RegisterToolsNotification {
+    const message = createBaseRegisterToolsNotification();
+    message.tools = object.tools?.map((e) => VSCodeToolInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseVSCodeToolInfo(): VSCodeToolInfo {
+  return { name: "", description: "", inputSchema: "", tags: [] };
+}
+
+export const VSCodeToolInfo: MessageFns<VSCodeToolInfo> = {
+  encode(message: VSCodeToolInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.description !== "") {
+      writer.uint32(18).string(message.description);
+    }
+    if (message.inputSchema !== "") {
+      writer.uint32(26).string(message.inputSchema);
+    }
+    for (const v of message.tags) {
+      writer.uint32(34).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): VSCodeToolInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseVSCodeToolInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.description = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.inputSchema = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.tags.push(reader.string());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): VSCodeToolInfo {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      description: isSet(object.description) ? globalThis.String(object.description) : "",
+      inputSchema: isSet(object.inputSchema)
+        ? globalThis.String(object.inputSchema)
+        : isSet(object.input_schema)
+        ? globalThis.String(object.input_schema)
+        : "",
+      tags: globalThis.Array.isArray(object?.tags) ? object.tags.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: VSCodeToolInfo): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.description !== "") {
+      obj.description = message.description;
+    }
+    if (message.inputSchema !== "") {
+      obj.inputSchema = message.inputSchema;
+    }
+    if (message.tags?.length) {
+      obj.tags = message.tags;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<VSCodeToolInfo>): VSCodeToolInfo {
+    return VSCodeToolInfo.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<VSCodeToolInfo>): VSCodeToolInfo {
+    const message = createBaseVSCodeToolInfo();
+    message.name = object.name ?? "";
+    message.description = object.description ?? "";
+    message.inputSchema = object.inputSchema ?? "";
+    message.tags = object.tags?.map((e) => e) || [];
     return message;
   },
 };

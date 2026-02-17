@@ -85,11 +85,38 @@ export interface ProviderConfig {
 }
 
 /**
+ * MCP server connection configuration.
+ * Defines an external MCP server the daemon can connect to for tool aggregation.
+ */
+export interface McpServerConfig {
+  /** Command to run for stdio transport */
+  command?: string;
+  /** Arguments for the command */
+  args?: string[];
+  /** URL for HTTP/SSE transport */
+  url?: string;
+  /** Transport type */
+  transport: 'stdio' | 'http';
+  /** Whether this server is enabled */
+  enabled: boolean;
+  /** HTTP headers (for authenticated endpoints) */
+  headers?: Record<string, string>;
+  /** Environment variables to set for stdio subprocess */
+  env?: Record<string, string>;
+  /** Max tool response size in bytes (default 102400 = 100KB) */
+  max_response_size?: number;
+}
+
+/**
  * Full configuration file structure.
  * Keys in `providers` are virtual provider names (user-defined IDs).
  */
 export interface ConfigFile {
   providers?: Record<string, ProviderConfig>;
+  /** External MCP servers for tool aggregation */
+  mcp_servers?: Record<string, McpServerConfig>;
+  /** Tool execution policy (approval tiers, disabled tools, aliases) */
+  tool_policy?: import('./tool-registry.js').ToolPolicyConfig;
 }
 
 // ── Path helpers ───────────────────────────────────────────────────────

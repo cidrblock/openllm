@@ -181,9 +181,14 @@ export class DaemonClient {
         
         logger.info(`[Daemon] Spawning: ${cmd} ${[...args, 'daemon'].join(' ')}`);
         
+        // Log daemon stdout/stderr to a file so we can debug
+        const logPath = path.join(os.tmpdir(), 'openllm-daemon.log');
+        const logFd = fs.openSync(logPath, 'a');
+        logger.info(`[Daemon] Logging to: ${logPath}`);
+
         const daemon = spawn(cmd, [...args, 'daemon'], {
             detached: true,
-            stdio: 'ignore',
+            stdio: ['ignore', logFd, logFd],
             env: {
                 ...process.env,
                 OPENLLM_SOCKET: SOCKET_FILE,

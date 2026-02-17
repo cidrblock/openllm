@@ -300,6 +300,24 @@ function installExtension() {
 
     const vsixPath = path.join(VSCODE_ROOT, vsixFiles[0]);
     console.log(`  Installing ${vsixFiles[0]}...`);
+
+    // Uninstall first to force a clean install (--force alone doesn't always replace files)
+    try {
+        run('code --uninstall-extension open-llm.open-llm-provider 2>/dev/null || true');
+    } catch { /* ignore if not installed */ }
+
+    // Remove stale extension directories
+    const extDir = path.join(process.env.HOME || '~', '.vscode', 'extensions');
+    if (fs.existsSync(extDir)) {
+        for (const entry of fs.readdirSync(extDir)) {
+            if (entry.startsWith('open-llm.open-llm-provider-')) {
+                const fullPath = path.join(extDir, entry);
+                console.log(`  Removing stale: ${entry}`);
+                fs.rmSync(fullPath, { recursive: true, force: true });
+            }
+        }
+    }
+
     run(`code --install-extension "${vsixPath}" --force`);
     console.log('  Extension installed. Reload VS Code to activate.');
 }

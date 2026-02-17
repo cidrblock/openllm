@@ -134,9 +134,15 @@ export async function startDaemon(opts?: { keepAlive?: boolean }): Promise<Daemo
   console.log(`OpenLLM daemon listening on ${socketPath}`);
   console.log(`Version: ${state.version}`);
   
+  // Initialize MCP connections from config (non-blocking)
+  state.initMcpConnections().catch((err: any) => {
+    console.error('[Daemon] MCP initialization error:', err.message);
+  });
+  
   // Handle shutdown signals
   const shutdown = async () => {
     console.log('\nShutting down...');
+    await state!.mcpClientPool.disconnectAll().catch(() => {});
     await stopEmbeddedWebServer();
     await stopDaemonInternal();
     process.exit(0);

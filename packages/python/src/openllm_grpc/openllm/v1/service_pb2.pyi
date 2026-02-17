@@ -1143,20 +1143,22 @@ class StopWebServerRequest(_message.Message):
     def __init__(self) -> None: ...
 
 class VSCodeRequest(_message.Message):
-    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "get_workspace", "models_changed")
+    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "get_workspace", "models_changed", "list_tools")
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     INVOKE_TOOL_FIELD_NUMBER: _ClassVar[int]
     LIST_MODELS_FIELD_NUMBER: _ClassVar[int]
     SEND_CHAT_FIELD_NUMBER: _ClassVar[int]
     GET_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     MODELS_CHANGED_FIELD_NUMBER: _ClassVar[int]
+    LIST_TOOLS_FIELD_NUMBER: _ClassVar[int]
     request_id: str
     invoke_tool: InvokeToolRequest
     list_models: ListVSCodeModelsRequest
     send_chat: SendVSCodeChatRequest
     get_workspace: GetWorkspaceRequest
     models_changed: ModelsChangedNotification
-    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolRequest, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsRequest, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatRequest, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceRequest, _Mapping]] = ..., models_changed: _Optional[_Union[ModelsChangedNotification, _Mapping]] = ...) -> None: ...
+    list_tools: ListVSCodeToolsRequest
+    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolRequest, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsRequest, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatRequest, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceRequest, _Mapping]] = ..., models_changed: _Optional[_Union[ModelsChangedNotification, _Mapping]] = ..., list_tools: _Optional[_Union[ListVSCodeToolsRequest, _Mapping]] = ...) -> None: ...
 
 class ModelsChangedNotification(_message.Message):
     __slots__ = ("reason",)
@@ -1165,20 +1167,24 @@ class ModelsChangedNotification(_message.Message):
     def __init__(self, reason: _Optional[str] = ...) -> None: ...
 
 class VSCodeResponse(_message.Message):
-    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "error", "get_workspace")
+    __slots__ = ("request_id", "invoke_tool", "list_models", "send_chat", "error", "get_workspace", "list_tools", "register_tools")
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     INVOKE_TOOL_FIELD_NUMBER: _ClassVar[int]
     LIST_MODELS_FIELD_NUMBER: _ClassVar[int]
     SEND_CHAT_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     GET_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    LIST_TOOLS_FIELD_NUMBER: _ClassVar[int]
+    REGISTER_TOOLS_FIELD_NUMBER: _ClassVar[int]
     request_id: str
     invoke_tool: InvokeToolResponse
     list_models: ListVSCodeModelsResponse
     send_chat: SendVSCodeChatResponse
     error: VSCodeError
     get_workspace: GetWorkspaceResponse
-    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolResponse, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsResponse, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatResponse, _Mapping]] = ..., error: _Optional[_Union[VSCodeError, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceResponse, _Mapping]] = ...) -> None: ...
+    list_tools: ListVSCodeToolsResponse
+    register_tools: RegisterToolsNotification
+    def __init__(self, request_id: _Optional[str] = ..., invoke_tool: _Optional[_Union[InvokeToolResponse, _Mapping]] = ..., list_models: _Optional[_Union[ListVSCodeModelsResponse, _Mapping]] = ..., send_chat: _Optional[_Union[SendVSCodeChatResponse, _Mapping]] = ..., error: _Optional[_Union[VSCodeError, _Mapping]] = ..., get_workspace: _Optional[_Union[GetWorkspaceResponse, _Mapping]] = ..., list_tools: _Optional[_Union[ListVSCodeToolsResponse, _Mapping]] = ..., register_tools: _Optional[_Union[RegisterToolsNotification, _Mapping]] = ...) -> None: ...
 
 class GetWorkspaceRequest(_message.Message):
     __slots__ = ()
@@ -1215,6 +1221,34 @@ class InvokeToolResponse(_message.Message):
     result_json: str
     is_error: bool
     def __init__(self, result_json: _Optional[str] = ..., is_error: bool = ...) -> None: ...
+
+class ListVSCodeToolsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListVSCodeToolsResponse(_message.Message):
+    __slots__ = ("tools",)
+    TOOLS_FIELD_NUMBER: _ClassVar[int]
+    tools: _containers.RepeatedCompositeFieldContainer[VSCodeToolInfo]
+    def __init__(self, tools: _Optional[_Iterable[_Union[VSCodeToolInfo, _Mapping]]] = ...) -> None: ...
+
+class RegisterToolsNotification(_message.Message):
+    __slots__ = ("tools",)
+    TOOLS_FIELD_NUMBER: _ClassVar[int]
+    tools: _containers.RepeatedCompositeFieldContainer[VSCodeToolInfo]
+    def __init__(self, tools: _Optional[_Iterable[_Union[VSCodeToolInfo, _Mapping]]] = ...) -> None: ...
+
+class VSCodeToolInfo(_message.Message):
+    __slots__ = ("name", "description", "input_schema", "tags")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    INPUT_SCHEMA_FIELD_NUMBER: _ClassVar[int]
+    TAGS_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    description: str
+    input_schema: str
+    tags: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., input_schema: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ListVSCodeModelsRequest(_message.Message):
     __slots__ = ("family_filter",)
