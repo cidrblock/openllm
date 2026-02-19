@@ -916,6 +916,8 @@ export interface Model {
     | undefined;
   /** Actual engine model ID sent to API */
   engineModelId: string;
+  /** Assigned policy name (if any) */
+  policy?: string | undefined;
 }
 
 /** Per-model parameter configuration (virtual model layer) */
@@ -1322,6 +1324,68 @@ export interface VSCodeToolCall {
   callId: string;
   name: string;
   argumentsJson: string;
+}
+
+export interface ListPoliciesRequest {
+}
+
+export interface ListPoliciesResponse {
+  policies: PolicyInfo[];
+}
+
+export interface PolicyInfo {
+  name: string;
+  builtin: boolean;
+  config: PolicyConfig | undefined;
+}
+
+export interface PolicyConfig {
+  sampling?: PolicySampling | undefined;
+  output?: PolicyOutput | undefined;
+  context?: PolicyContext | undefined;
+  tool?: PolicyTool | undefined;
+  reliability?: PolicyReliability | undefined;
+}
+
+export interface PolicySampling {
+  temperature?: number | undefined;
+  topP?: number | undefined;
+  topK?: number | undefined;
+}
+
+export interface PolicyOutput {
+  maxTokens?: number | undefined;
+  reservedOutputTokens?:
+    | number
+    | undefined;
+  /** "text" | "json_only" | "markdown" */
+  format?: string | undefined;
+  systemPromptSnippet?:
+    | string
+    | undefined;
+  /** "prepend" | "append" | "replace" */
+  systemPromptMode?: string | undefined;
+}
+
+export interface PolicyContext {
+  contextThreshold?:
+    | number
+    | undefined;
+  /** "none" | "truncate" | "rolling_summary" */
+  compressionStrategy?: string | undefined;
+}
+
+export interface PolicyTool {
+  maxToolIterations?:
+    | number
+    | undefined;
+  /** "auto" | "ask" | "none" */
+  toolMode?: string | undefined;
+}
+
+export interface PolicyReliability {
+  retryOnInvalidJson?: boolean | undefined;
+  timeout?: number | undefined;
 }
 
 export interface RegisterMcpServerRequest {
@@ -8251,6 +8315,7 @@ function createBaseModel(): Model {
     engine: "",
     params: undefined,
     engineModelId: "",
+    policy: undefined,
   };
 }
 
@@ -8279,6 +8344,9 @@ export const Model: MessageFns<Model> = {
     }
     if (message.engineModelId !== "") {
       writer.uint32(66).string(message.engineModelId);
+    }
+    if (message.policy !== undefined) {
+      writer.uint32(74).string(message.policy);
     }
     return writer;
   },
@@ -8354,6 +8422,14 @@ export const Model: MessageFns<Model> = {
           message.engineModelId = reader.string();
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.policy = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -8377,6 +8453,7 @@ export const Model: MessageFns<Model> = {
         : isSet(object.engine_model_id)
         ? globalThis.String(object.engine_model_id)
         : "",
+      policy: isSet(object.policy) ? globalThis.String(object.policy) : undefined,
     };
   },
 
@@ -8406,6 +8483,9 @@ export const Model: MessageFns<Model> = {
     if (message.engineModelId !== "") {
       obj.engineModelId = message.engineModelId;
     }
+    if (message.policy !== undefined) {
+      obj.policy = message.policy;
+    }
     return obj;
   },
 
@@ -8426,6 +8506,7 @@ export const Model: MessageFns<Model> = {
       ? ModelParams.fromPartial(object.params)
       : undefined;
     message.engineModelId = object.engineModelId ?? "";
+    message.policy = object.policy ?? undefined;
     return message;
   },
 };
@@ -13861,6 +13942,833 @@ export const VSCodeToolCall: MessageFns<VSCodeToolCall> = {
   },
 };
 
+function createBaseListPoliciesRequest(): ListPoliciesRequest {
+  return {};
+}
+
+export const ListPoliciesRequest: MessageFns<ListPoliciesRequest> = {
+  encode(_: ListPoliciesRequest, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListPoliciesRequest {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListPoliciesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(_: any): ListPoliciesRequest {
+    return {};
+  },
+
+  toJSON(_: ListPoliciesRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListPoliciesRequest>): ListPoliciesRequest {
+    return ListPoliciesRequest.fromPartial(base ?? {});
+  },
+  fromPartial(_: DeepPartial<ListPoliciesRequest>): ListPoliciesRequest {
+    const message = createBaseListPoliciesRequest();
+    return message;
+  },
+};
+
+function createBaseListPoliciesResponse(): ListPoliciesResponse {
+  return { policies: [] };
+}
+
+export const ListPoliciesResponse: MessageFns<ListPoliciesResponse> = {
+  encode(message: ListPoliciesResponse, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    for (const v of message.policies) {
+      PolicyInfo.encode(v!, writer.uint32(10).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ListPoliciesResponse {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseListPoliciesResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.policies.push(PolicyInfo.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ListPoliciesResponse {
+    return {
+      policies: globalThis.Array.isArray(object?.policies)
+        ? object.policies.map((e: any) => PolicyInfo.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ListPoliciesResponse): unknown {
+    const obj: any = {};
+    if (message.policies?.length) {
+      obj.policies = message.policies.map((e) => PolicyInfo.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ListPoliciesResponse>): ListPoliciesResponse {
+    return ListPoliciesResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ListPoliciesResponse>): ListPoliciesResponse {
+    const message = createBaseListPoliciesResponse();
+    message.policies = object.policies?.map((e) => PolicyInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBasePolicyInfo(): PolicyInfo {
+  return { name: "", builtin: false, config: undefined };
+}
+
+export const PolicyInfo: MessageFns<PolicyInfo> = {
+  encode(message: PolicyInfo, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.builtin !== false) {
+      writer.uint32(16).bool(message.builtin);
+    }
+    if (message.config !== undefined) {
+      PolicyConfig.encode(message.config, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyInfo {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.builtin = reader.bool();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.config = PolicyConfig.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyInfo {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      builtin: isSet(object.builtin) ? globalThis.Boolean(object.builtin) : false,
+      config: isSet(object.config) ? PolicyConfig.fromJSON(object.config) : undefined,
+    };
+  },
+
+  toJSON(message: PolicyInfo): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.builtin !== false) {
+      obj.builtin = message.builtin;
+    }
+    if (message.config !== undefined) {
+      obj.config = PolicyConfig.toJSON(message.config);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyInfo>): PolicyInfo {
+    return PolicyInfo.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyInfo>): PolicyInfo {
+    const message = createBasePolicyInfo();
+    message.name = object.name ?? "";
+    message.builtin = object.builtin ?? false;
+    message.config = (object.config !== undefined && object.config !== null)
+      ? PolicyConfig.fromPartial(object.config)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePolicyConfig(): PolicyConfig {
+  return { sampling: undefined, output: undefined, context: undefined, tool: undefined, reliability: undefined };
+}
+
+export const PolicyConfig: MessageFns<PolicyConfig> = {
+  encode(message: PolicyConfig, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.sampling !== undefined) {
+      PolicySampling.encode(message.sampling, writer.uint32(10).fork()).join();
+    }
+    if (message.output !== undefined) {
+      PolicyOutput.encode(message.output, writer.uint32(18).fork()).join();
+    }
+    if (message.context !== undefined) {
+      PolicyContext.encode(message.context, writer.uint32(26).fork()).join();
+    }
+    if (message.tool !== undefined) {
+      PolicyTool.encode(message.tool, writer.uint32(34).fork()).join();
+    }
+    if (message.reliability !== undefined) {
+      PolicyReliability.encode(message.reliability, writer.uint32(42).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyConfig {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyConfig();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.sampling = PolicySampling.decode(reader, reader.uint32());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.output = PolicyOutput.decode(reader, reader.uint32());
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.context = PolicyContext.decode(reader, reader.uint32());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.tool = PolicyTool.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.reliability = PolicyReliability.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyConfig {
+    return {
+      sampling: isSet(object.sampling) ? PolicySampling.fromJSON(object.sampling) : undefined,
+      output: isSet(object.output) ? PolicyOutput.fromJSON(object.output) : undefined,
+      context: isSet(object.context) ? PolicyContext.fromJSON(object.context) : undefined,
+      tool: isSet(object.tool) ? PolicyTool.fromJSON(object.tool) : undefined,
+      reliability: isSet(object.reliability) ? PolicyReliability.fromJSON(object.reliability) : undefined,
+    };
+  },
+
+  toJSON(message: PolicyConfig): unknown {
+    const obj: any = {};
+    if (message.sampling !== undefined) {
+      obj.sampling = PolicySampling.toJSON(message.sampling);
+    }
+    if (message.output !== undefined) {
+      obj.output = PolicyOutput.toJSON(message.output);
+    }
+    if (message.context !== undefined) {
+      obj.context = PolicyContext.toJSON(message.context);
+    }
+    if (message.tool !== undefined) {
+      obj.tool = PolicyTool.toJSON(message.tool);
+    }
+    if (message.reliability !== undefined) {
+      obj.reliability = PolicyReliability.toJSON(message.reliability);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyConfig>): PolicyConfig {
+    return PolicyConfig.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyConfig>): PolicyConfig {
+    const message = createBasePolicyConfig();
+    message.sampling = (object.sampling !== undefined && object.sampling !== null)
+      ? PolicySampling.fromPartial(object.sampling)
+      : undefined;
+    message.output = (object.output !== undefined && object.output !== null)
+      ? PolicyOutput.fromPartial(object.output)
+      : undefined;
+    message.context = (object.context !== undefined && object.context !== null)
+      ? PolicyContext.fromPartial(object.context)
+      : undefined;
+    message.tool = (object.tool !== undefined && object.tool !== null)
+      ? PolicyTool.fromPartial(object.tool)
+      : undefined;
+    message.reliability = (object.reliability !== undefined && object.reliability !== null)
+      ? PolicyReliability.fromPartial(object.reliability)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePolicySampling(): PolicySampling {
+  return { temperature: undefined, topP: undefined, topK: undefined };
+}
+
+export const PolicySampling: MessageFns<PolicySampling> = {
+  encode(message: PolicySampling, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.temperature !== undefined) {
+      writer.uint32(13).float(message.temperature);
+    }
+    if (message.topP !== undefined) {
+      writer.uint32(21).float(message.topP);
+    }
+    if (message.topK !== undefined) {
+      writer.uint32(24).int32(message.topK);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicySampling {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicySampling();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 13) {
+            break;
+          }
+
+          message.temperature = reader.float();
+          continue;
+        }
+        case 2: {
+          if (tag !== 21) {
+            break;
+          }
+
+          message.topP = reader.float();
+          continue;
+        }
+        case 3: {
+          if (tag !== 24) {
+            break;
+          }
+
+          message.topK = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicySampling {
+    return {
+      temperature: isSet(object.temperature) ? globalThis.Number(object.temperature) : undefined,
+      topP: isSet(object.topP)
+        ? globalThis.Number(object.topP)
+        : isSet(object.top_p)
+        ? globalThis.Number(object.top_p)
+        : undefined,
+      topK: isSet(object.topK)
+        ? globalThis.Number(object.topK)
+        : isSet(object.top_k)
+        ? globalThis.Number(object.top_k)
+        : undefined,
+    };
+  },
+
+  toJSON(message: PolicySampling): unknown {
+    const obj: any = {};
+    if (message.temperature !== undefined) {
+      obj.temperature = message.temperature;
+    }
+    if (message.topP !== undefined) {
+      obj.topP = message.topP;
+    }
+    if (message.topK !== undefined) {
+      obj.topK = Math.round(message.topK);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicySampling>): PolicySampling {
+    return PolicySampling.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicySampling>): PolicySampling {
+    const message = createBasePolicySampling();
+    message.temperature = object.temperature ?? undefined;
+    message.topP = object.topP ?? undefined;
+    message.topK = object.topK ?? undefined;
+    return message;
+  },
+};
+
+function createBasePolicyOutput(): PolicyOutput {
+  return {
+    maxTokens: undefined,
+    reservedOutputTokens: undefined,
+    format: undefined,
+    systemPromptSnippet: undefined,
+    systemPromptMode: undefined,
+  };
+}
+
+export const PolicyOutput: MessageFns<PolicyOutput> = {
+  encode(message: PolicyOutput, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.maxTokens !== undefined) {
+      writer.uint32(8).int32(message.maxTokens);
+    }
+    if (message.reservedOutputTokens !== undefined) {
+      writer.uint32(16).int32(message.reservedOutputTokens);
+    }
+    if (message.format !== undefined) {
+      writer.uint32(26).string(message.format);
+    }
+    if (message.systemPromptSnippet !== undefined) {
+      writer.uint32(34).string(message.systemPromptSnippet);
+    }
+    if (message.systemPromptMode !== undefined) {
+      writer.uint32(42).string(message.systemPromptMode);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyOutput {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyOutput();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.maxTokens = reader.int32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.reservedOutputTokens = reader.int32();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.format = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.systemPromptSnippet = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.systemPromptMode = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyOutput {
+    return {
+      maxTokens: isSet(object.maxTokens)
+        ? globalThis.Number(object.maxTokens)
+        : isSet(object.max_tokens)
+        ? globalThis.Number(object.max_tokens)
+        : undefined,
+      reservedOutputTokens: isSet(object.reservedOutputTokens)
+        ? globalThis.Number(object.reservedOutputTokens)
+        : isSet(object.reserved_output_tokens)
+        ? globalThis.Number(object.reserved_output_tokens)
+        : undefined,
+      format: isSet(object.format) ? globalThis.String(object.format) : undefined,
+      systemPromptSnippet: isSet(object.systemPromptSnippet)
+        ? globalThis.String(object.systemPromptSnippet)
+        : isSet(object.system_prompt_snippet)
+        ? globalThis.String(object.system_prompt_snippet)
+        : undefined,
+      systemPromptMode: isSet(object.systemPromptMode)
+        ? globalThis.String(object.systemPromptMode)
+        : isSet(object.system_prompt_mode)
+        ? globalThis.String(object.system_prompt_mode)
+        : undefined,
+    };
+  },
+
+  toJSON(message: PolicyOutput): unknown {
+    const obj: any = {};
+    if (message.maxTokens !== undefined) {
+      obj.maxTokens = Math.round(message.maxTokens);
+    }
+    if (message.reservedOutputTokens !== undefined) {
+      obj.reservedOutputTokens = Math.round(message.reservedOutputTokens);
+    }
+    if (message.format !== undefined) {
+      obj.format = message.format;
+    }
+    if (message.systemPromptSnippet !== undefined) {
+      obj.systemPromptSnippet = message.systemPromptSnippet;
+    }
+    if (message.systemPromptMode !== undefined) {
+      obj.systemPromptMode = message.systemPromptMode;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyOutput>): PolicyOutput {
+    return PolicyOutput.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyOutput>): PolicyOutput {
+    const message = createBasePolicyOutput();
+    message.maxTokens = object.maxTokens ?? undefined;
+    message.reservedOutputTokens = object.reservedOutputTokens ?? undefined;
+    message.format = object.format ?? undefined;
+    message.systemPromptSnippet = object.systemPromptSnippet ?? undefined;
+    message.systemPromptMode = object.systemPromptMode ?? undefined;
+    return message;
+  },
+};
+
+function createBasePolicyContext(): PolicyContext {
+  return { contextThreshold: undefined, compressionStrategy: undefined };
+}
+
+export const PolicyContext: MessageFns<PolicyContext> = {
+  encode(message: PolicyContext, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.contextThreshold !== undefined) {
+      writer.uint32(13).float(message.contextThreshold);
+    }
+    if (message.compressionStrategy !== undefined) {
+      writer.uint32(18).string(message.compressionStrategy);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyContext {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyContext();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 13) {
+            break;
+          }
+
+          message.contextThreshold = reader.float();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.compressionStrategy = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyContext {
+    return {
+      contextThreshold: isSet(object.contextThreshold)
+        ? globalThis.Number(object.contextThreshold)
+        : isSet(object.context_threshold)
+        ? globalThis.Number(object.context_threshold)
+        : undefined,
+      compressionStrategy: isSet(object.compressionStrategy)
+        ? globalThis.String(object.compressionStrategy)
+        : isSet(object.compression_strategy)
+        ? globalThis.String(object.compression_strategy)
+        : undefined,
+    };
+  },
+
+  toJSON(message: PolicyContext): unknown {
+    const obj: any = {};
+    if (message.contextThreshold !== undefined) {
+      obj.contextThreshold = message.contextThreshold;
+    }
+    if (message.compressionStrategy !== undefined) {
+      obj.compressionStrategy = message.compressionStrategy;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyContext>): PolicyContext {
+    return PolicyContext.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyContext>): PolicyContext {
+    const message = createBasePolicyContext();
+    message.contextThreshold = object.contextThreshold ?? undefined;
+    message.compressionStrategy = object.compressionStrategy ?? undefined;
+    return message;
+  },
+};
+
+function createBasePolicyTool(): PolicyTool {
+  return { maxToolIterations: undefined, toolMode: undefined };
+}
+
+export const PolicyTool: MessageFns<PolicyTool> = {
+  encode(message: PolicyTool, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.maxToolIterations !== undefined) {
+      writer.uint32(8).int32(message.maxToolIterations);
+    }
+    if (message.toolMode !== undefined) {
+      writer.uint32(18).string(message.toolMode);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyTool {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyTool();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.maxToolIterations = reader.int32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.toolMode = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyTool {
+    return {
+      maxToolIterations: isSet(object.maxToolIterations)
+        ? globalThis.Number(object.maxToolIterations)
+        : isSet(object.max_tool_iterations)
+        ? globalThis.Number(object.max_tool_iterations)
+        : undefined,
+      toolMode: isSet(object.toolMode)
+        ? globalThis.String(object.toolMode)
+        : isSet(object.tool_mode)
+        ? globalThis.String(object.tool_mode)
+        : undefined,
+    };
+  },
+
+  toJSON(message: PolicyTool): unknown {
+    const obj: any = {};
+    if (message.maxToolIterations !== undefined) {
+      obj.maxToolIterations = Math.round(message.maxToolIterations);
+    }
+    if (message.toolMode !== undefined) {
+      obj.toolMode = message.toolMode;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyTool>): PolicyTool {
+    return PolicyTool.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyTool>): PolicyTool {
+    const message = createBasePolicyTool();
+    message.maxToolIterations = object.maxToolIterations ?? undefined;
+    message.toolMode = object.toolMode ?? undefined;
+    return message;
+  },
+};
+
+function createBasePolicyReliability(): PolicyReliability {
+  return { retryOnInvalidJson: undefined, timeout: undefined };
+}
+
+export const PolicyReliability: MessageFns<PolicyReliability> = {
+  encode(message: PolicyReliability, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.retryOnInvalidJson !== undefined) {
+      writer.uint32(8).bool(message.retryOnInvalidJson);
+    }
+    if (message.timeout !== undefined) {
+      writer.uint32(16).int32(message.timeout);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PolicyReliability {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePolicyReliability();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.retryOnInvalidJson = reader.bool();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.timeout = reader.int32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PolicyReliability {
+    return {
+      retryOnInvalidJson: isSet(object.retryOnInvalidJson)
+        ? globalThis.Boolean(object.retryOnInvalidJson)
+        : isSet(object.retry_on_invalid_json)
+        ? globalThis.Boolean(object.retry_on_invalid_json)
+        : undefined,
+      timeout: isSet(object.timeout) ? globalThis.Number(object.timeout) : undefined,
+    };
+  },
+
+  toJSON(message: PolicyReliability): unknown {
+    const obj: any = {};
+    if (message.retryOnInvalidJson !== undefined) {
+      obj.retryOnInvalidJson = message.retryOnInvalidJson;
+    }
+    if (message.timeout !== undefined) {
+      obj.timeout = Math.round(message.timeout);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<PolicyReliability>): PolicyReliability {
+    return PolicyReliability.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<PolicyReliability>): PolicyReliability {
+    const message = createBasePolicyReliability();
+    message.retryOnInvalidJson = object.retryOnInvalidJson ?? undefined;
+    message.timeout = object.timeout ?? undefined;
+    return message;
+  },
+};
+
 function createBaseRegisterMcpServerRequest(): RegisterMcpServerRequest {
   return { serverId: "", transport: "", capabilities: [] };
 }
@@ -14360,6 +15268,15 @@ export const OpenLLMDefinition = {
       responseStream: false,
       options: {},
     },
+    /** List all policies (built-in + custom) */
+    listPolicies: {
+      name: "ListPolicies",
+      requestType: ListPoliciesRequest,
+      requestStream: false,
+      responseType: ListPoliciesResponse,
+      responseStream: false,
+      options: {},
+    },
     /** List available tools (from MCP servers) */
     listTools: {
       name: "ListTools",
@@ -14605,6 +15522,11 @@ export interface OpenLLMServiceImplementation<CallContextExt = {}> {
     request: ListEnginesRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ListEnginesResponse>>;
+  /** List all policies (built-in + custom) */
+  listPolicies(
+    request: ListPoliciesRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<ListPoliciesResponse>>;
   /** List available tools (from MCP servers) */
   listTools(request: ListToolsRequest, context: CallContext & CallContextExt): Promise<DeepPartial<ListToolsResponse>>;
   /** Execute a tool directly */
@@ -14737,6 +15659,11 @@ export interface OpenLLMClient<CallOptionsExt = {}> {
     request: DeepPartial<ListEnginesRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ListEnginesResponse>;
+  /** List all policies (built-in + custom) */
+  listPolicies(
+    request: DeepPartial<ListPoliciesRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<ListPoliciesResponse>;
   /** List available tools (from MCP servers) */
   listTools(request: DeepPartial<ListToolsRequest>, options?: CallOptions & CallOptionsExt): Promise<ListToolsResponse>;
   /** Execute a tool directly */

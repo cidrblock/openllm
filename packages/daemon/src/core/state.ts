@@ -19,6 +19,7 @@ import {
   type ProviderConfig,
   type ModelConfig,
 } from './config.js';
+import { resolvePolicy, flattenPolicy, type FlattenedPolicy } from './policies.js';
 import {
   getEngines,
   getEngine,
@@ -557,15 +558,19 @@ export class CoreState {
       ? resolveEngineModelId(modelName, modelCfg)
       : modelName;
 
-    // ── Apply system prompt ──
+    // ── Resolve policy (runtime-only, never persisted) ──
+    const flatPolicy = modelCfg?.policy ? resolveFlatPolicy(modelCfg.policy) : undefined;
+
+    // ── Apply system prompt (policy snippet + model prompt) ──
     let processedMessages = [...messages];
-    if (modelCfg?.system_prompt) {
-      const mode = modelCfg.system_prompt_mode || 'prepend';
-      processedMessages = applySystemPrompt(processedMessages, modelCfg.system_prompt, mode);
+    const combinedSystemPrompt = combineSystemPrompts(flatPolicy, modelCfg);
+    if (combinedSystemPrompt) {
+      const mode = modelCfg?.system_prompt_mode || 'prepend';
+      processedMessages = applySystemPrompt(processedMessages, combinedSystemPrompt, mode);
     }
 
-    // ── Merge params (3-tier: request > config > engine default) ──
-    const mergedParams = mergeParams(modelCfg, requestParams);
+    // ── Merge params (4-tier: request > config > policy > engine default) ──
+    const mergedParams = mergeParams(modelCfg, requestParams, flatPolicy);
 
     console.log(`[State] Chat: engine="${providerCfg.engine}", engineModelId="${engineModelId}", toolMode="${toolMode}", baseUrl="${providerCfg.base_url || '(none)'}"`);
 
@@ -598,16 +603,30 @@ export class CoreState {
     }
 
     // ── Call the actual engine ──
-    yield* streamChat(
-      providerCfg.engine,
-      engineModelId,
-      processedMessages,
-      apiKey || undefined,
-      providerCfg.base_url,
-      mergedParams,
-      tools,
-      resolvedExecutor,
-    );
+    const isJsonStrict = flatPolicy?.outputFormat === 'json_only';
+    const shouldRetryJson = isJsonStrict && flatPolicy?.retryOnInvalidJson;
+
+    if (isJsonStrict && !shouldRetryJson) {
+      // json_strict without retry: stream normally (snippet already injected)
+      yield* streamChat(
+        providerCfg.engine, engineModelId, processedMessages,
+        apiKey || undefined, providerCfg.base_url, mergedParams,
+        tools, resolvedExecutor,
+      );
+    } else if (shouldRetryJson) {
+      // json_strict with retry: buffer response, validate JSON, retry once on failure
+      yield* streamChatWithJsonRetry(
+        providerCfg.engine, engineModelId, processedMessages,
+        apiKey || undefined, providerCfg.base_url, mergedParams,
+        tools, resolvedExecutor,
+      );
+    } else {
+      yield* streamChat(
+        providerCfg.engine, engineModelId, processedMessages,
+        apiKey || undefined, providerCfg.base_url, mergedParams,
+        tools, resolvedExecutor,
+      );
+    }
   }
 
   // ─── Health checks ───────────────────────────────────────────────────
@@ -645,6 +664,8 @@ export class CoreState {
 
 /**
  * Apply system prompt to message thread.
+ * - prepend: system prompt goes before existing system message content
+ * - replace: system prompt replaces all existing system messages
  */
 function applySystemPrompt(
   messages: Array<{ role: string; content: string }>,
@@ -670,21 +691,72 @@ function applySystemPrompt(
 }
 
 /**
- * Merge chat params: request overrides > config defaults.
+ * Resolve a policy name to its flattened representation.
+ * Returns undefined if the policy doesn't exist.
+ */
+function resolveFlatPolicy(policyName: string): FlattenedPolicy | undefined {
+  const policy = resolvePolicy(policyName);
+  if (!policy) return undefined;
+  return flattenPolicy(policy);
+}
+
+/**
+ * Combine the policy's system_prompt_snippet with the model's system_prompt.
+ * Returns the final system prompt string, or undefined if neither exists.
+ *
+ * Policy system_prompt_mode controls how snippet combines with model prompt:
+ *   prepend (default): [snippet]\n\n[model prompt]
+ *   append:            [model prompt]\n\n[snippet]
+ *   replace:           [snippet] (model prompt ignored)
+ */
+function combineSystemPrompts(
+  flatPolicy: FlattenedPolicy | undefined,
+  modelCfg: ModelConfig | undefined,
+): string | undefined {
+  const snippet = flatPolicy?.systemPromptSnippet;
+  const modelPrompt = modelCfg?.system_prompt;
+
+  if (!snippet && !modelPrompt) return undefined;
+  if (!snippet) return modelPrompt;
+  if (!modelPrompt) return snippet;
+
+  const mode = flatPolicy?.systemPromptMode || 'prepend';
+  switch (mode) {
+    case 'replace': return snippet;
+    case 'append':  return `${modelPrompt}\n\n${snippet}`;
+    case 'prepend':
+    default:        return `${snippet}\n\n${modelPrompt}`;
+  }
+}
+
+/**
+ * Merge chat params: request > config > policy > engine default.
+ * Policy provides the base, config overrides it, request overrides everything.
  */
 function mergeParams(
   configParams?: ModelConfig,
   requestParams?: ChatParams,
+  flatPolicy?: FlattenedPolicy,
 ): ChatParams | undefined {
   const merged: ChatParams = {};
   let hasAny = false;
 
+  // Layer 1: Policy defaults
+  const pp = flatPolicy?.params;
+  if (pp?.temperature != null) { merged.temperature = pp.temperature; hasAny = true; }
+  if (pp?.top_p != null) { merged.top_p = pp.top_p; hasAny = true; }
+  if (pp?.top_k != null) { merged.top_k = pp.top_k; hasAny = true; }
+  if (pp?.max_tokens != null) { merged.maxTokens = pp.max_tokens; hasAny = true; }
+  if (pp?.timeout != null) { merged.timeout = pp.timeout; hasAny = true; }
+
+  // Layer 2: Explicit model config (overrides policy)
   if (configParams?.temperature != null) { merged.temperature = configParams.temperature; hasAny = true; }
   if (configParams?.top_p != null) { merged.top_p = configParams.top_p; hasAny = true; }
   if (configParams?.top_k != null) { merged.top_k = configParams.top_k; hasAny = true; }
   if (configParams?.max_tokens != null) { merged.maxTokens = configParams.max_tokens; hasAny = true; }
   if (configParams?.timeout != null) { merged.timeout = configParams.timeout; hasAny = true; }
 
+  // Layer 3: Per-request params (overrides everything)
   if (requestParams?.temperature != null) { merged.temperature = requestParams.temperature; hasAny = true; }
   if (requestParams?.top_p != null) { merged.top_p = requestParams.top_p; hasAny = true; }
   if (requestParams?.top_k != null) { merged.top_k = requestParams.top_k; hasAny = true; }
@@ -692,4 +764,51 @@ function mergeParams(
   if (requestParams?.timeout != null) { merged.timeout = requestParams.timeout; hasAny = true; }
 
   return hasAny ? merged : undefined;
+}
+
+/**
+ * Stream chat with JSON validation and retry.
+ * Buffers the full response, attempts JSON.parse(), and retries once on failure.
+ */
+async function* streamChatWithJsonRetry(
+  engine: string,
+  engineModelId: string,
+  messages: Array<{ role: string; content: string; name?: string; tool_call_id?: string; tool_calls?: any[] }>,
+  apiKey: string | undefined,
+  baseUrl: string | undefined,
+  params: ChatParams | undefined,
+  tools: ToolDefinition[] | undefined,
+  toolExecutor: ToolExecutor | undefined,
+): AsyncGenerator<ChatChunk> {
+  let fullText = '';
+  const buffered: ChatChunk[] = [];
+
+  for await (const chunk of streamChat(engine, engineModelId, messages, apiKey, baseUrl, params, tools, toolExecutor)) {
+    buffered.push(chunk);
+    if (chunk.type === 'text') {
+      fullText += chunk.text;
+    }
+  }
+
+  // Attempt JSON parse
+  try {
+    JSON.parse(fullText.trim());
+    // Valid JSON — yield all buffered chunks as-is
+    for (const chunk of buffered) {
+      yield chunk;
+    }
+    return;
+  } catch {
+    // Invalid JSON — retry once
+    console.warn(`[State] json_strict: response is not valid JSON (${fullText.length} chars). Retrying once.`);
+  }
+
+  // Retry: add the invalid response and a fix-prompt, then stream fresh
+  const retryMessages = [
+    ...messages,
+    { role: 'assistant', content: fullText },
+    { role: 'user', content: 'Your previous response was not valid JSON. Respond with ONLY valid JSON. Fix the output — no explanation, no markdown fences, just the JSON.' },
+  ];
+
+  yield* streamChat(engine, engineModelId, retryMessages, apiKey, baseUrl, params, tools, toolExecutor);
 }

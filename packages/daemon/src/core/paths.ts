@@ -118,3 +118,8 @@ export function getUserConfigPath(): string {
 export function getWorkspaceConfigPath(workspacePath: string): string {
     return path.join(getWorkspaceConfigDir(workspacePath), 'config.yaml');
 }
+
+/** User policies file:  <configDir>/policies.yaml (user-level only, no workspace variant) */
+export function getUserPoliciesPath(): string {
+    return path.join(getConfigDir(), 'policies.yaml');
+}

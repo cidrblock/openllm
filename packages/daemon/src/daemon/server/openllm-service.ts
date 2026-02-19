@@ -11,6 +11,7 @@ import {
   isWebServerRunning,
   getWebServerPort,
 } from '../web/server.js';
+import { listAllPolicies, type PolicyConfig as PolicyCfg } from '../../core/policies.js';
 
 /**
  * Map proto client type to enum
@@ -159,6 +160,7 @@ export function createOpenLLMService(state: DaemonState) {
               top_k: m.params.top_k,
               timeout: m.params.timeout,
             } : undefined,
+            policy: m.params?.policy,
           })),
         });
       }).catch((error) => {
@@ -707,6 +709,24 @@ export function createOpenLLMService(state: DaemonState) {
     },
     
     /**
+     * List all policies (built-in + custom)
+     */
+    ListPolicies(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void {
+      try {
+        const policies = listAllPolicies();
+        callback(null, {
+          policies: policies.map(p => ({
+            name: p.name,
+            builtin: p.builtin,
+            config: policyToProto(p.config),
+          })),
+        });
+      } catch (error: any) {
+        callback({ code: grpc.status.INTERNAL, message: error.message });
+      }
+    },
+
+    /**
      * Tool RPCs (stub - future MCP integration)
      */
     ListTools(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void {
@@ -725,5 +745,34 @@ export function createOpenLLMService(state: DaemonState) {
     UnregisterMcpServer(call: grpc.ServerUnaryCall<any, any>, callback: grpc.sendUnaryData<any>): void {
       callback(null, {});
     },
+  };
+}
+
+function policyToProto(cfg: PolicyCfg): any {
+  return {
+    sampling: cfg.sampling ? {
+      temperature: cfg.sampling.temperature,
+      top_p: cfg.sampling.top_p,
+      top_k: cfg.sampling.top_k,
+    } : undefined,
+    output: cfg.output ? {
+      max_tokens: cfg.output.max_tokens,
+      reserved_output_tokens: cfg.output.reserved_output_tokens,
+      format: cfg.output.format,
+      system_prompt_snippet: cfg.output.system_prompt_snippet,
+      system_prompt_mode: cfg.output.system_prompt_mode,
+    } : undefined,
+    context: cfg.context ? {
+      context_threshold: cfg.context.context_threshold,
+      compression_strategy: cfg.context.compression_strategy,
+    } : undefined,
+    tool: cfg.tool ? {
+      max_tool_iterations: cfg.tool.max_tool_iterations,
+      tool_mode: cfg.tool.tool_mode,
+    } : undefined,
+    reliability: cfg.reliability ? {
+      retry_on_invalid_json: cfg.reliability.retry_on_invalid_json,
+      timeout: cfg.reliability.timeout,
+    } : undefined,
   };
 }

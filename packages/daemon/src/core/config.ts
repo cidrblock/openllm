@@ -48,6 +48,8 @@ export function isValidVirtualName(name: string): boolean {
 export interface ModelConfig {
   /** Actual engine model ID — required when the key is a virtual name */
   model_id?: string;
+  /** Named policy to apply as behavioral defaults for this model */
+  policy?: string;
   /** System prompt text (prepended to or replaces request system message) */
   system_prompt?: string;
   /** How to combine config system_prompt with request: "prepend" (default) or "replace" */
@@ -279,6 +281,24 @@ export function mergeConfigs(userConfig: ConfigFile, workspaceConfig: ConfigFile
     for (const [providerId, providerConfig] of Object.entries(workspaceConfig.providers)) {
       merged.providers![providerId] = providerConfig;
     }
+  }
+  
+  // Merge mcp_servers (workspace overrides user at server-level)
+  if (userConfig.mcp_servers || workspaceConfig.mcp_servers) {
+    merged.mcp_servers = { ...userConfig.mcp_servers, ...workspaceConfig.mcp_servers };
+  }
+  
+  // Merge tool_policy (workspace arrays append to user arrays)
+  if (userConfig.tool_policy || workspaceConfig.tool_policy) {
+    const up = userConfig.tool_policy || {};
+    const wp = workspaceConfig.tool_policy || {};
+    merged.tool_policy = {
+      max_tool_iterations: wp.max_tool_iterations ?? up.max_tool_iterations,
+      auto_approve: [...(up.auto_approve || []), ...(wp.auto_approve || [])],
+      require_approval: [...(up.require_approval || []), ...(wp.require_approval || [])],
+      disabled_tools: [...(up.disabled_tools || []), ...(wp.disabled_tools || [])],
+      aliases: { ...up.aliases, ...wp.aliases },
+    };
   }
   
   return merged;

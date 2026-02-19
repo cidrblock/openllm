@@ -85,6 +85,8 @@
     }
     .provider-card.configured { border-left: 4px solid #3e8635; }
     .provider-card.unhealthy { border-left: 4px solid #f0ab00; }
+    .provider-card.policy-builtin { border-left: 4px solid #06c; }
+    .provider-card.policy-custom  { border-left: 4px solid #3e8635; }
     .provider-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--rh-space-sm); }
     .provider-name { font-family: 'Red Hat Display', sans-serif; font-weight: 500; font-size: 1.125rem; }
     .provider-meta { font-size: 0.8rem; color: #6a6e73; margin-bottom: var(--rh-space-md); }
@@ -114,6 +116,9 @@
     .status-tag.not-configured { background: #f0f0f0; color: #151515; border: 1px solid #d2d2d2; }
     .status-tag.key-missing { background: #fdf7e7; color: #795600; border: 1px solid #f0ab00; }
     .engine-badge { display: inline-block; padding: 1px 6px; font-size: 11px; font-weight: 500; border-radius: 3px; background: #e7f1fa; color: #0066cc; border: 1px solid #b8daff; }
+    .source-pill { display: inline-block; padding: 1px 6px; font-size: 10px; font-weight: 500; border-radius: 3px; }
+    .source-pill.user { background: #f0f0f0; color: #6a6e73; border: 1px solid #d2d2d2; }
+    .source-pill.workspace { background: #e7f1fa; color: #004080; border: 1px solid #b8daff; }
     
     /* Form elements */
     .form-group { margin-bottom: var(--rh-space-md); }
@@ -296,37 +301,7 @@
       color: #06c;
       border-color: #06c;
     }
-    /* ── Preset quick buttons ─────────────────────── */
-    .preset-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 12px;
-      font-size: 0.78rem;
-      font-weight: 500;
-      border: 1px solid #d2d2d2;
-      border-radius: 16px;
-      background: #fff;
-      color: #151515;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      white-space: nowrap;
-    }
-    .preset-btn:hover {
-      border-color: #06c;
-      color: #06c;
-      background: #f0f6ff;
-    }
-    .preset-btn.active {
-      border-color: #06c;
-      background: #e7f1ff;
-      color: #004080;
-      font-weight: 600;
-    }
-    .preset-icon {
-      font-size: 0.85rem;
-      line-height: 1;
-    }
+
 
     #global-tooltip {
       position: fixed;
@@ -404,7 +379,7 @@
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C7.985 3.648 8.48 4 9 4h4.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/>
         </svg>
-        <span x-text="configLocation === 'user' ? 'User' : 'Workspace'"></span>
+        <span x-text="configLocation === 'all' ? 'All' : configLocation === 'user' ? 'User' : 'Workspace'"></span>
       </button>
       <span class="version-badge" x-show="status.version" x-text="'v' + status.version"></span>
       <button class="header-btn" @click="refresh()" :disabled="loading">
@@ -437,9 +412,9 @@
         <div style="font-size: 0.75rem; color: #6a6e73; margin-top: 0.25rem;">virtual instances</div>
       </div>
       <div class="stat-card">
-        <h3>Engines</h3>
-        <div class="value" x-text="engines.length"></div>
-        <div style="font-size: 0.75rem; color: #6a6e73; margin-top: 0.25rem;">available</div>
+        <h3>Tools</h3>
+        <div class="value" x-text="allTools.length"></div>
+        <div style="font-size: 0.75rem; color: #6a6e73; margin-top: 0.25rem;">registered</div>
       </div>
     </div>
 
@@ -450,7 +425,13 @@
         <div style="padding: var(--rh-space-lg);">
           <!-- Add Provider button -->
           <div style="margin-bottom: var(--rh-space-md);">
-            <button class="btn btn-primary" @click="openWizard()">+ Add Provider</button>
+            <span style="display: inline-block;"
+                  :data-tip="configLocation === 'all' ? 'Switch to User or Workspace to add a new provider' : ''"
+                  @mouseenter="configLocation === 'all' && showTip($el)"
+                  @mouseleave="hideTip()">
+              <button class="btn btn-primary" @click="openWizard()" :disabled="configLocation === 'all'"
+                      :style="configLocation === 'all' ? 'pointer-events: none;' : ''">+ Add Provider</button>
+            </span>
           </div>
 
           <template x-if="Object.keys(providerConfig).length === 0">
@@ -465,6 +446,10 @@
                 <div class="provider-header">
                   <span class="provider-name" x-text="provId"></span>
                   <div style="display: flex; gap: 8px; align-items: center;">
+                    <template x-if="provCfg._source">
+                      <span class="source-pill" :class="provCfg._source === 'user' ? 'user' : 'workspace'"
+                            x-text="provCfg._source === 'user' ? 'User' : provCfg._source.split('/').pop()"></span>
+                    </template>
                     <span class="engine-badge" x-text="provCfg.engine"></span>
                     <span class="status-tag" :class="getProviderStatus(provId)" x-text="getProviderStatusText(provId)"></span>
                   </div>
@@ -567,6 +552,220 @@
               <span x-text="chatStreaming ? 'Sending...' : 'Send'"></span>
             </button>
           </div>
+        </div>
+      </rh-tab-panel>
+
+      <!-- ═══════════ MCP SERVERS TAB ═══════════ -->
+      <rh-tab slot="tab">MCP Servers</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--rh-space-md);">
+            <p style="margin: 0; color: #6a6e73; font-size: 0.85rem;">
+              MCP servers provide tools to the LLM. Configure them in <code>~/.config/openllm/config.yaml</code> under <code>mcp_servers</code>.
+            </p>
+            <button class="btn btn-secondary btn-sm" @click="loadMcpServers()">Refresh</button>
+          </div>
+
+          <template x-if="mcpServers.length === 0">
+            <div class="empty-state">
+              <p>No MCP servers configured.</p>
+              <p style="font-size: 0.85rem; color: #6a6e73;">Add servers to your config under <code>mcp_servers:</code></p>
+            </div>
+          </template>
+
+          <template x-if="mcpServers.length > 0">
+            <table style="width: 100%; border-collapse: collapse; background: #fff; border-radius: 3px;">
+              <thead>
+                <tr style="background: #f0f0f0;">
+                  <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Name</th>
+                  <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Transport</th>
+                  <th style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Status</th>
+                  <th style="text-align: center; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Tools</th>
+                  <th style="text-align: center; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2;">Enabled</th>
+                  <th style="text-align: center; padding: 0.75rem 0.5rem; border-bottom: 1px solid #d2d2d2;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="srv in mcpServers" :key="srv.id">
+                  <tr style="border-bottom: 1px solid #f0f0f0;">
+                    <td style="padding: 0.5rem 1rem; font-weight: 500;" x-text="srv.id"></td>
+                    <td style="padding: 0.5rem 1rem;">
+                      <span class="engine-badge" x-text="srv.transport || 'stdio'"></span>
+                    </td>
+                    <td style="padding: 0.5rem 1rem;">
+                      <span class="status-tag" :class="srv.status === 'connected' ? 'configured' : srv.status === 'error' ? 'key-missing' : 'not-configured'"
+                            x-text="srv.status || 'unknown'"></span>
+                      <span x-show="srv.error" style="font-size: 0.75rem; color: #c9190b; display: block; margin-top: 2px;" x-text="srv.error"></span>
+                    </td>
+                    <td style="padding: 0.5rem 1rem; text-align: center;" x-text="srv.toolCount || 0"></td>
+                    <td style="padding: 0.5rem 1rem; text-align: center;">
+                      <label style="cursor: pointer;">
+                        <input type="checkbox" :checked="srv.enabled !== false" @change="toggleMcpServer(srv.id, $event.target.checked)"
+                               style="width: auto; accent-color: #3e8635;">
+                      </label>
+                    </td>
+                    <td style="padding: 0.5rem 0.5rem; text-align: center;">
+                      <button class="btn btn-secondary btn-sm" @click="reconnectMcpServer(srv.id)"
+                              :disabled="srv.status === 'connected'" title="Reconnect">Reconnect</button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </template>
+        </div>
+      </rh-tab-panel>
+
+      <!-- ═══════════ POLICIES TAB ═══════════ -->
+      <rh-tab slot="tab">Policies</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--rh-space-md);">
+            <p style="margin: 0; color: #6a6e73; font-size: 0.85rem;">
+              Policies are named behavioral bundles (sampling, output, reliability) assigned to models.
+              Built-in policies are read-only. Duplicate one to create a custom variant.
+            </p>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-sm" @click="openNewPolicy()">+ New Policy</button>
+              <button class="btn btn-secondary btn-sm" @click="loadPolicies()">Refresh</button>
+            </div>
+          </div>
+
+          <template x-if="allPolicies.length === 0">
+            <div class="empty-state"><p>No policies loaded.</p></div>
+          </template>
+
+          <template x-if="allPolicies.length > 0">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+              <template x-for="pol in allPolicies" :key="pol.name">
+                <div class="provider-card" :class="pol.builtin ? 'policy-builtin' : 'policy-custom'" style="padding: 16px;">
+                  <div class="provider-header" style="margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="provider-name" x-text="pol.name"></span>
+                      <span class="source-pill" :class="pol.builtin ? 'user' : 'workspace'"
+                            x-text="pol.builtin ? 'Built-in' : 'Custom'"></span>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                      <template x-if="!pol.builtin">
+                        <button class="btn btn-secondary btn-sm" @click="openEditPolicy(pol)"
+                                title="Edit policy">Edit</button>
+                      </template>
+                      <button class="btn btn-secondary btn-sm" @click="duplicatePolicy(pol.name)"
+                              title="Duplicate as custom policy">Duplicate</button>
+                      <template x-if="!pol.builtin">
+                        <button class="btn btn-sm" style="background: #c9190b; color: #fff; border-color: #a30000;"
+                                @click="deletePolicy(pol.name)">Delete</button>
+                      </template>
+                    </div>
+                  </div>
+
+                  <div style="font-size: 0.8rem; color: #6a6e73; line-height: 1.5;">
+                    <template x-if="pol.config.sampling">
+                      <div style="margin-bottom: 4px;">
+                        <strong>Sampling:</strong>
+                        <span x-show="pol.config.sampling.temperature != null" x-text="'temp=' + pol.config.sampling.temperature" style="margin-left: 4px;"></span>
+                        <span x-show="pol.config.sampling.top_p != null" x-text="'top_p=' + pol.config.sampling.top_p" style="margin-left: 4px;"></span>
+                        <span x-show="pol.config.sampling.top_k != null" x-text="'top_k=' + pol.config.sampling.top_k" style="margin-left: 4px;"></span>
+                      </div>
+                    </template>
+                    <template x-if="pol.config.output">
+                      <div style="margin-bottom: 4px;">
+                        <strong>Output:</strong>
+                        <span x-show="pol.config.output.max_tokens != null" x-text="'max=' + pol.config.output.max_tokens" style="margin-left: 4px;"></span>
+                        <span x-show="pol.config.output.format" x-text="'format=' + pol.config.output.format" style="margin-left: 4px;"></span>
+                      </div>
+                    </template>
+                    <template x-if="pol.config.output?.system_prompt_snippet">
+                      <div style="margin-bottom: 4px; font-style: italic; color: #8a8d90; max-height: 2.4em; overflow: hidden; text-overflow: ellipsis;"
+                           :title="pol.config.output.system_prompt_snippet"
+                           x-text="pol.config.output.system_prompt_snippet"></div>
+                    </template>
+                    <template x-if="pol.config.reliability">
+                      <div>
+                        <strong>Reliability:</strong>
+                        <span x-show="pol.config.reliability.retry_on_invalid_json" style="margin-left: 4px;">json-retry</span>
+                        <span x-show="pol.config.reliability.timeout != null" x-text="'timeout=' + pol.config.reliability.timeout" style="margin-left: 4px;"></span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </rh-tab-panel>
+
+      <!-- ═══════════ TOOLS TAB ═══════════ -->
+      <rh-tab slot="tab">Tools</rh-tab>
+      <rh-tab-panel>
+        <div style="padding: var(--rh-space-lg);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--rh-space-md);">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <p style="margin: 0; color: #6a6e73; font-size: 0.85rem;">
+                <span x-text="filteredTools.length"></span> tools registered
+                <span x-show="toolSourceFilter" style="color: #004080;">
+                  (filtered by <strong x-text="toolSourceFilter"></strong>)
+                </span>
+              </p>
+              <input type="text" x-model="toolSearch" placeholder="Search tools..." 
+                     style="max-width: 250px; padding: 4px 8px; font-size: 0.85rem;">
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <select x-model="toolSourceFilter" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
+                <option value="">All sources</option>
+                <template x-for="src in toolSources" :key="src">
+                  <option :value="src" x-text="src"></option>
+                </template>
+              </select>
+              <button class="btn btn-secondary btn-sm" @click="loadTools()">Refresh</button>
+            </div>
+          </div>
+
+          <template x-if="allTools.length === 0">
+            <div class="empty-state"><p>No tools registered. Connect VS Code or configure MCP servers to see tools.</p></div>
+          </template>
+
+          <template x-if="allTools.length > 0">
+            <div style="overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; background: #fff; border-radius: 3px;">
+                <thead>
+                  <tr style="background: #f0f0f0;">
+                    <th @click="sortToolsBy('originalName')" style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2; cursor: pointer; user-select: none;">
+                      Name <span x-text="toolSortCol === 'originalName' ? (toolSortAsc ? '&#9650;' : '&#9660;') : ''"></span>
+                    </th>
+                    <th @click="sortToolsBy('source')" style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2; cursor: pointer; user-select: none;">
+                      Source <span x-text="toolSortCol === 'source' ? (toolSortAsc ? '&#9650;' : '&#9660;') : ''"></span>
+                    </th>
+                    <th @click="sortToolsBy('description')" style="text-align: left; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2; cursor: pointer; user-select: none; max-width: 400px;">
+                      Description <span x-text="toolSortCol === 'description' ? (toolSortAsc ? '&#9650;' : '&#9660;') : ''"></span>
+                    </th>
+                    <th style="text-align: center; padding: 0.75rem 1rem; border-bottom: 1px solid #d2d2d2; min-width: 120px;">Policy</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="tool in filteredTools" :key="tool.name">
+                    <tr style="border-bottom: 1px solid #f0f0f0;">
+                      <td style="padding: 0.5rem 1rem; font-family: 'Red Hat Mono', monospace; font-size: 0.8rem;" x-text="tool.originalName"></td>
+                      <td style="padding: 0.5rem 1rem;">
+                        <span class="source-pill" :class="tool.sourceType === 'vscode' ? 'workspace' : 'user'"
+                              x-text="tool.source"></span>
+                      </td>
+                      <td style="padding: 0.5rem 1rem; font-size: 0.8rem; color: #6a6e73; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                          x-text="tool.description || '—'" :title="tool.description"></td>
+                      <td style="padding: 0.5rem 1rem; text-align: center;">
+                        <select :value="getToolPolicy(tool.name)" @change="setToolPolicy(tool.name, $event.target.value)"
+                                style="width: auto; padding: 2px 6px; font-size: 0.8rem;">
+                          <option value="always">Always</option>
+                          <option value="ask">Ask (soon)</option>
+                          <option value="disable">Disable</option>
+                        </select>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </div>
       </rh-tab-panel>
     </rh-tabs>
@@ -729,29 +928,19 @@
                     </div>
                   </div>
 
-                  <!-- Presets -->
-                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
-                    <span style="font-size: 0.8rem; font-weight: 600; color: #6a6e73;">Presets:</span>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'reset')"
-                            :class="{ active: cfg.temperature == null && cfg.top_p == null && cfg.top_k == null && cfg.max_tokens == null && cfg.timeout == null }">
-                      Defaults
-                    </button>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'precise')"
-                            :class="{ active: cfg.temperature === 0.1 && cfg.top_p === 0.2 }">
-                      <span class="preset-icon">&#9678;</span> Precise
-                    </button>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'balanced')"
-                            :class="{ active: cfg.temperature === 0.7 && cfg.top_p === 0.9 }">
-                      <span class="preset-icon">&#9670;</span> Balanced
-                    </button>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'creative')"
-                            :class="{ active: cfg.temperature === 1.2 && cfg.top_p === 1.0 }">
-                      <span class="preset-icon">&#10022;</span> Creative
-                    </button>
-                    <button class="preset-btn" @click="applyPreset(modelName, 'coder')"
-                            :class="{ active: cfg.temperature === 0.2 && cfg.max_tokens === 4000 }">
-                      <span class="preset-icon">&lt;/&gt;</span> Coder
-                    </button>
+                  <!-- Policy -->
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                    <span style="font-size: 0.8rem; font-weight: 600; color: #6a6e73;">Policy:</span>
+                    <select :value="cfg.policy || ''" @change="setModelPolicy(modelName, $event.target.value)"
+                            style="width: auto; padding: 4px 8px; font-size: 0.85rem; border-radius: 3px; border: 1px solid #d2d2d2;">
+                      <option value="">None (use defaults)</option>
+                      <template x-for="pol in allPolicies" :key="pol.name">
+                        <option :value="pol.name" x-text="pol.name + (pol.builtin ? '' : ' (custom)')"></option>
+                      </template>
+                    </select>
+                    <span x-show="cfg.policy" style="font-size: 0.75rem; color: #6a6e73; font-style: italic;">
+                      Policy sets defaults; fields below override it.
+                    </span>
                   </div>
 
                   <!-- Sampling Parameters -->
@@ -862,6 +1051,167 @@
 
   <!-- Edit Provider and Model Selector modals removed — "Edit" button reuses the wizard at step 2 -->
 
+  <!-- ═══════════ POLICY EDITOR MODAL ═══════════ -->
+  <template x-if="editingPolicy">
+  <div class="modal-backdrop" x-show="editingPolicy" x-cloak @click.self="cancelEditPolicy()">
+    <div class="modal" @click.stop style="max-width: 700px;">
+      <div class="modal-header">
+        <h2 x-text="editingPolicy.isNew ? 'New Policy' : ('Edit Policy: ' + editingPolicy.name)"></h2>
+        <button style="background: none; border: none; font-size: 1.25rem; cursor: pointer; color: #6a6e73;" @click="cancelEditPolicy()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px;">
+        <!-- Name -->
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 4px;">Policy Name</label>
+          <input type="text" x-model="editingPolicy.name" :disabled="!editingPolicy?.isNew"
+                 placeholder="my-policy" style="width: 100%;"
+                 :style="!editingPolicy?.isNew ? 'background: #f0f0f0; cursor: not-allowed;' : ''">
+        </div>
+
+        <!-- Sampling -->
+        <fieldset style="border: 1px solid #d2d2d2; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 8px;">Sampling</legend>
+          <div class="param-row">
+            <div class="param-field">
+              <label>Temperature</label>
+              <input type="number" min="0" max="2" step="0.05"
+                     :value="editingPolicy?.config?.sampling?.temperature"
+                     @input="editingPolicy.config.sampling = editingPolicy.config.sampling || {}; editingPolicy.config.sampling.temperature = $event.target.value ? parseFloat($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+            <div class="param-field">
+              <label>Top P</label>
+              <input type="number" min="0" max="1" step="0.05"
+                     :value="editingPolicy?.config?.sampling?.top_p"
+                     @input="editingPolicy.config.sampling = editingPolicy.config.sampling || {}; editingPolicy.config.sampling.top_p = $event.target.value ? parseFloat($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+            <div class="param-field">
+              <label>Top K</label>
+              <input type="number" min="0" step="1"
+                     :value="editingPolicy?.config?.sampling?.top_k"
+                     @input="editingPolicy.config.sampling = editingPolicy.config.sampling || {}; editingPolicy.config.sampling.top_k = $event.target.value ? parseInt($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Output -->
+        <fieldset style="border: 1px solid #d2d2d2; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 8px;">Output</legend>
+          <div class="param-row">
+            <div class="param-field">
+              <label>Max Tokens</label>
+              <input type="number" min="1" step="1"
+                     :value="editingPolicy?.config?.output?.max_tokens"
+                     @input="editingPolicy.config.output = editingPolicy.config.output || {}; editingPolicy.config.output.max_tokens = $event.target.value ? parseInt($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+            <div class="param-field">
+              <label>Format</label>
+              <select :value="editingPolicy?.config?.output?.format || ''"
+                      @change="editingPolicy.config.output = editingPolicy.config.output || {}; editingPolicy.config.output.format = $event.target.value || undefined">
+                <option value="">not set</option>
+                <option value="text">text</option>
+                <option value="json_only">json_only</option>
+                <option value="markdown">markdown</option>
+              </select>
+            </div>
+            <div class="param-field">
+              <label>Prompt Mode</label>
+              <select :value="editingPolicy?.config?.output?.system_prompt_mode || ''"
+                      @change="editingPolicy.config.output = editingPolicy.config.output || {}; editingPolicy.config.output.system_prompt_mode = $event.target.value || undefined">
+                <option value="">prepend (default)</option>
+                <option value="prepend">prepend</option>
+                <option value="append">append</option>
+                <option value="replace">replace</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <label style="font-size: 0.85rem; font-weight: 600; display: block; margin-bottom: 4px;">System Prompt Snippet</label>
+            <textarea x-model="editingPolicy.config.output.system_prompt_snippet"
+                      placeholder="Optional snippet prepended/appended to the model's system prompt..."
+                      rows="3" style="width: 100%; resize: vertical;"></textarea>
+          </div>
+        </fieldset>
+
+        <!-- Context -->
+        <fieldset style="border: 1px solid #d2d2d2; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 8px;">Context</legend>
+          <div class="param-row">
+            <div class="param-field">
+              <label>Context Threshold</label>
+              <input type="number" min="0" max="1" step="0.05"
+                     :value="editingPolicy?.config?.context?.context_threshold"
+                     @input="editingPolicy.config.context = editingPolicy.config.context || {}; editingPolicy.config.context.context_threshold = $event.target.value ? parseFloat($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+            <div class="param-field">
+              <label>Compression</label>
+              <select :value="editingPolicy?.config?.context?.compression_strategy || ''"
+                      @change="editingPolicy.config.context = editingPolicy.config.context || {}; editingPolicy.config.context.compression_strategy = $event.target.value || undefined">
+                <option value="">not set</option>
+                <option value="none">none</option>
+                <option value="truncate">truncate</option>
+                <option value="rolling_summary">rolling_summary</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Tool -->
+        <fieldset style="border: 1px solid #d2d2d2; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 8px;">Tool</legend>
+          <div class="param-row">
+            <div class="param-field">
+              <label>Max Tool Iterations</label>
+              <input type="number" min="0" step="1"
+                     :value="editingPolicy?.config?.tool?.max_tool_iterations"
+                     @input="editingPolicy.config.tool = editingPolicy.config.tool || {}; editingPolicy.config.tool.max_tool_iterations = $event.target.value ? parseInt($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+            <div class="param-field">
+              <label>Tool Mode</label>
+              <select :value="editingPolicy?.config?.tool?.tool_mode || ''"
+                      @change="editingPolicy.config.tool = editingPolicy.config.tool || {}; editingPolicy.config.tool.tool_mode = $event.target.value || undefined">
+                <option value="">not set</option>
+                <option value="auto">auto</option>
+                <option value="ask">ask</option>
+                <option value="none">none</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Reliability -->
+        <fieldset style="border: 1px solid #d2d2d2; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+          <legend style="font-size: 0.85rem; font-weight: 600; padding: 0 8px;">Reliability</legend>
+          <div class="param-row">
+            <div class="param-field" style="display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" :checked="editingPolicy?.config?.reliability?.retry_on_invalid_json"
+                     @change="editingPolicy.config.reliability = editingPolicy.config.reliability || {}; editingPolicy.config.reliability.retry_on_invalid_json = $event.target.checked || undefined"
+                     style="width: auto; accent-color: #3e8635;">
+              <label style="margin: 0;">Retry on invalid JSON</label>
+            </div>
+            <div class="param-field">
+              <label>Timeout (seconds)</label>
+              <input type="number" min="0" step="1"
+                     :value="editingPolicy?.config?.reliability?.timeout"
+                     @input="editingPolicy.config.reliability = editingPolicy.config.reliability || {}; editingPolicy.config.reliability.timeout = $event.target.value ? parseInt($event.target.value) : undefined"
+                     placeholder="not set">
+            </div>
+          </div>
+        </fieldset>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" @click="cancelEditPolicy()">Cancel</button>
+        <button class="btn" style="background: #ee0000; color: #fff; border-color: #a30000;" @click="saveEditingPolicy()">Save Policy</button>
+      </div>
+    </div>
+  </div>
+  </template>
+
   <!-- ═══════════ CONFIG LOCATION MODAL ═══════════ -->
   <div class="modal-backdrop" x-show="showConfigModal" x-cloak @click.self="showConfigModal = false"
        style="z-index: 1100;">
@@ -871,6 +1221,24 @@
         <button class="rh-close-btn" @click="showConfigModal = false">&times;</button>
       </div>
       <div class="rh-modal-body">
+        <div class="rh-tile" :class="{ 'rh-tile--selected': configLocation === 'all' }" 
+             @click="configLocation = 'all'; workspacePath = (!workspacePath && connectedWorkspaces.length > 0) ? connectedWorkspaces[0] : workspacePath">
+          <div class="rh-tile-radio"><input type="radio" name="cfg" value="all" x-model="configLocation"></div>
+          <div class="rh-tile-content">
+            <div class="rh-tile-title">All (Merged)</div>
+            <div class="rh-tile-desc">Combined view — shows providers from all sources. Edits save to the original scope.</div>
+            <template x-if="configLocation === 'all' && connectedWorkspaces.length > 0">
+              <div style="margin-top: 8px;">
+                <code class="rh-tile-path" x-text="'Includes workspace: ' + (workspacePath ? workspacePath.split('/').pop() : 'none')"></code>
+              </div>
+            </template>
+            <template x-if="configLocation === 'all' && connectedWorkspaces.length === 0">
+              <div style="margin-top: 8px;">
+                <p class="rh-helper-text">No VS Code workspace connected. Showing user config only.</p>
+              </div>
+            </template>
+          </div>
+        </div>
         <div class="rh-tile" :class="{ 'rh-tile--selected': configLocation === 'user' }" @click="configLocation = 'user'">
           <div class="rh-tile-radio"><input type="radio" name="cfg" value="user" x-model="configLocation"></div>
           <div class="rh-tile-content">
@@ -908,7 +1276,7 @@
       <div class="rh-modal-footer">
         <button class="rh-btn rh-btn--secondary" @click="showConfigModal = false">Cancel</button>
         <button class="rh-btn rh-btn--primary" @click="applyConfigLocation()"
-                :disabled="configLocation === 'workspace' && !workspacePath">Apply</button>
+                :disabled="(configLocation === 'workspace' && !workspacePath)">Apply</button>
       </div>
     </div>
   </div>
@@ -935,6 +1303,21 @@ function dashboard() {
     chatInput: '',
     chatMessages: [],
     chatStreaming: false,
+    
+    // MCP Servers
+    mcpServers: [],
+    
+    // Tools
+    allTools: [],
+    toolSearch: '',
+    toolSourceFilter: '',
+    toolSortCol: 'originalName',
+    toolSortAsc: true,
+    toolPolicy: {},  // { toolName: 'always' | 'ask' | 'disable' }
+    
+    // Policies
+    allPolicies: [],  // [{ name, builtin, config }]
+    editingPolicy: null,  // { name, isNew, config: { sampling, output, context, tool, reliability } }
     
     // ── Wizard state ──
     wizardOpen: false,
@@ -972,32 +1355,121 @@ function dashboard() {
         const data = await resp.json();
         this.engines = data.engines || [];
       } catch {}
+      // Auto-detect connected workspaces and default to "all" if one exists
+      try {
+        const wsResp = await fetch('/api/workspaces');
+        this.connectedWorkspaces = (await wsResp.json()).workspaces || [];
+        if (this.connectedWorkspaces.length > 0) {
+          this.workspacePath = this.connectedWorkspaces[0];
+          this.configLocation = 'all';
+        }
+      } catch {}
       await this.loadConfig();
       await this.refresh();
+      // Load MCP servers, tools, and policies in background
+      this.loadMcpServers();
+      this.loadTools();
+      this.loadPolicies();
     },
     
     // ── Config helpers ──
     getConfigLocation() {
+      if (this.configLocation === 'all') return 'all';
       return this.configLocation === 'workspace' && this.workspacePath ? this.workspacePath : 'user';
     },
     
     async loadConfig() {
       try {
-        const loc = this.getConfigLocation();
-        const resp = await fetch(`/api/config?location=${encodeURIComponent(loc)}`);
-        const data = await resp.json();
-        this.providerConfig = data.config?.providers || {};
+        if (this.configLocation === 'all') {
+          // Fetch both user and workspace configs, merge client-side with source tags
+          const userResp = await fetch('/api/config?location=user');
+          const userData = await userResp.json();
+          const userProviders = userData.config?.providers || {};
+          
+          // Tag user providers
+          const merged = {};
+          for (const [id, cfg] of Object.entries(userProviders)) {
+            merged[id] = { ...cfg, _source: 'user' };
+          }
+          
+          // If workspace is selected, fetch and overlay workspace providers
+          if (this.workspacePath) {
+            const wsResp = await fetch(`/api/config?location=${encodeURIComponent(this.workspacePath)}`);
+            const wsData = await wsResp.json();
+            const wsProviders = wsData.config?.providers || {};
+            for (const [id, cfg] of Object.entries(wsProviders)) {
+              merged[id] = { ...cfg, _source: this.workspacePath };
+            }
+          }
+          
+          this.providerConfig = merged;
+        } else {
+          const loc = this.getConfigLocation();
+          const resp = await fetch(`/api/config?location=${encodeURIComponent(loc)}`);
+          const data = await resp.json();
+          this.providerConfig = data.config?.providers || {};
+        }
       } catch (e) { console.error('Failed to load config:', e); }
     },
     
     async saveFullConfig() {
       try {
-        const loc = this.getConfigLocation();
-        await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ location: loc, config: { providers: this.providerConfig } }),
-        });
+        if (this.configLocation === 'all') {
+          // In "all" mode, split providers back to their original scopes and save each
+          const userProviders = {};
+          const wsProviders = {};
+          for (const [id, cfg] of Object.entries(this.providerConfig)) {
+            const clean = { ...cfg };
+            const source = clean._source || 'user';
+            delete clean._source;
+            if (source === 'user') {
+              userProviders[id] = clean;
+            } else {
+              wsProviders[id] = clean;
+            }
+          }
+          // Read-modify-write user config to preserve mcp_servers, tool_policy, etc.
+          const userExist = await fetch('/api/config?location=user');
+          const userExistData = await userExist.json();
+          const userConfig = userExistData.config || {};
+          userConfig.providers = userProviders;
+          await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ location: 'user', config: userConfig }),
+          });
+          // Save workspace config if we have one
+          if (this.workspacePath && Object.keys(wsProviders).length > 0) {
+            const wsExist = await fetch(`/api/config?location=${encodeURIComponent(this.workspacePath)}`);
+            const wsExistData = await wsExist.json();
+            const wsConfig = wsExistData.config || {};
+            wsConfig.providers = wsProviders;
+            await fetch('/api/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ location: this.workspacePath, config: wsConfig }),
+            });
+          }
+        } else {
+          const loc = this.getConfigLocation();
+          // Read existing config first to preserve mcp_servers, tool_policy, etc.
+          const existResp = await fetch(`/api/config?location=${encodeURIComponent(loc)}`);
+          const existData = await existResp.json();
+          const existConfig = existData.config || {};
+          // Strip _source tags before saving
+          const clean = {};
+          for (const [id, cfg] of Object.entries(this.providerConfig)) {
+            const c = { ...cfg };
+            delete c._source;
+            clean[id] = c;
+          }
+          existConfig.providers = clean;
+          await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ location: loc, config: existConfig }),
+          });
+        }
       } catch (e) { console.error('Failed to save config:', e); }
     },
     
@@ -1005,7 +1477,8 @@ function dashboard() {
       this.loading = true;
       try {
         const loc = this.getConfigLocation();
-        const modelsUrl = loc !== 'user' ? `/api/models?workspace=${encodeURIComponent(loc)}` : '/api/models';
+        const wsParam = this.workspacePath ? `?workspace=${encodeURIComponent(this.workspacePath)}` : '';
+        const modelsUrl = (loc === 'all' || loc !== 'user') ? `/api/models${wsParam}` : '/api/models';
         const [statusRes, modelsRes] = await Promise.all([fetch('/api/status'), fetch(modelsUrl)]);
         this.status = await statusRes.json();
         const modelsData = await modelsRes.json();
@@ -1039,6 +1512,7 @@ function dashboard() {
     formatParams(params) {
       if (!params) return 'default';
       const parts = [];
+      if (params.policy) parts.push(`policy=${params.policy}`);
       if (params.temperature != null) parts.push(`temp=${params.temperature}`);
       if (params.top_p != null) parts.push(`top_p=${params.top_p}`);
       if (params.top_k != null) parts.push(`top_k=${params.top_k}`);
@@ -1279,48 +1753,7 @@ function dashboard() {
       this.wizardEnabledModels = { ...this.wizardEnabledModels };
     },
     
-    applyPreset(name, preset) {
-      if (!this.wizardEnabledModels[name]) return;
-      const cfg = this.wizardEnabledModels[name];
-      const PRESETS = {
-        precise:  { temperature: 0.1, top_p: 0.2 },
-        balanced: { temperature: 0.7, top_p: 0.9 },
-        creative: { temperature: 1.2, top_p: 1.0 },
-        coder:    { temperature: 0.2, max_tokens: 4000 },
-      };
-      const PRESET_NAMES = Object.keys(PRESETS);
-      const presetSuffixRe = new RegExp('-(' + PRESET_NAMES.join('|') + ')$');
-      
-      // Clear sampling params first
-      delete cfg.temperature; delete cfg.top_p; delete cfg.top_k; delete cfg.max_tokens; delete cfg.timeout;
-      if (preset !== 'reset' && PRESETS[preset]) {
-        Object.assign(cfg, PRESETS[preset]);
-      }
-      
-      // Auto-rename: only if name is default (= engine model ID) or ends with a preset suffix
-      const engineModelId = cfg.model_id || name;
-      const baseName = name.replace(presetSuffixRe, '');  // strip any existing preset suffix
-      const isDefault = (name === engineModelId) || presetSuffixRe.test(name);
-      
-      if (isDefault) {
-        let newName;
-        if (preset === 'reset') {
-          newName = engineModelId;  // revert to engine model ID
-        } else {
-          newName = baseName + '-' + preset;
-        }
-        if (newName !== name && !this.wizardEnabledModels[newName]) {
-          if (!cfg.model_id) cfg.model_id = engineModelId;
-          delete this.wizardEnabledModels[name];
-          this.wizardEnabledModels[newName] = cfg;
-          if (this.wizardEditingModel === name) this.wizardEditingModel = newName;
-          // For reset, if name reverts to engine model ID, clear model_id
-          if (preset === 'reset' && newName === cfg.model_id) delete cfg.model_id;
-        }
-      }
-      
-      this.wizardEnabledModels = { ...this.wizardEnabledModels };
-    },
+    // (presets replaced by policy system)
     
     renameModel(oldName, newName) {
       if (!newName || newName === oldName || this.wizardEnabledModels[newName]) return;
@@ -1359,6 +1792,253 @@ function dashboard() {
       this.providerConfig = { ...this.providerConfig };
       await this.saveFullConfig();
       await this.refresh();
+    },
+    
+    // ── MCP Servers ──
+    async loadMcpServers() {
+      try {
+        const resp = await fetch('/api/mcp-servers');
+        const data = await resp.json();
+        this.mcpServers = data.mcp_servers || [];
+      } catch (e) { console.error('Failed to load MCP servers:', e); }
+    },
+    
+    async reconnectMcpServer(serverId) {
+      try {
+        await fetch(`/api/mcp-servers/${encodeURIComponent(serverId)}/reconnect`, { method: 'POST' });
+        await this.loadMcpServers();
+      } catch (e) { console.error('Reconnect failed:', e); }
+    },
+    
+    async toggleMcpServer(serverId, enabled) {
+      try {
+        // Load current config, toggle the server's enabled flag, save back
+        const resp = await fetch('/api/config?location=user');
+        const data = await resp.json();
+        const config = data.config || {};
+        if (config.mcp_servers && config.mcp_servers[serverId]) {
+          config.mcp_servers[serverId].enabled = enabled;
+          await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ location: 'user', config }),
+          });
+          await this.loadMcpServers();
+          await this.loadTools();
+        }
+      } catch (e) { console.error('Toggle MCP server failed:', e); }
+    },
+    
+    // ── Tools ──
+    async loadTools() {
+      try {
+        const resp = await fetch('/api/tools');
+        const data = await resp.json();
+        this.allTools = data.tools || [];
+        
+        // Load tool policy from config
+        const cfgResp = await fetch('/api/config?location=user');
+        const cfgData = await cfgResp.json();
+        const policy = cfgData.config?.tool_policy || {};
+        this.toolPolicy = {};
+        for (const name of (policy.disabled_tools || [])) {
+          this.toolPolicy[name] = 'disable';
+        }
+        for (const name of (policy.require_approval || [])) {
+          this.toolPolicy[name] = 'ask';
+        }
+        for (const name of (policy.auto_approve || [])) {
+          this.toolPolicy[name] = 'always';
+        }
+      } catch (e) { console.error('Failed to load tools:', e); }
+    },
+    
+    get toolSources() {
+      const sources = new Set(this.allTools.map(t => t.source));
+      return [...sources].sort();
+    },
+    
+    get filteredTools() {
+      let tools = this.allTools;
+      if (this.toolSourceFilter) {
+        tools = tools.filter(t => t.source === this.toolSourceFilter);
+      }
+      if (this.toolSearch) {
+        const q = this.toolSearch.toLowerCase();
+        tools = tools.filter(t => 
+          (t.originalName || '').toLowerCase().includes(q) || 
+          (t.description || '').toLowerCase().includes(q) ||
+          (t.source || '').toLowerCase().includes(q)
+        );
+      }
+      // Sort
+      const col = this.toolSortCol;
+      const asc = this.toolSortAsc;
+      tools = [...tools].sort((a, b) => {
+        const av = (a[col] || '').toLowerCase();
+        const bv = (b[col] || '').toLowerCase();
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+      return tools;
+    },
+    
+    sortToolsBy(col) {
+      if (this.toolSortCol === col) {
+        this.toolSortAsc = !this.toolSortAsc;
+      } else {
+        this.toolSortCol = col;
+        this.toolSortAsc = true;
+      }
+    },
+    
+    getToolPolicy(toolName) {
+      return this.toolPolicy[toolName] || 'always';
+    },
+    
+    async setToolPolicy(toolName, policy) {
+      this.toolPolicy[toolName] = policy;
+      // Rebuild the tool_policy config arrays
+      const disabled_tools = [];
+      const require_approval = [];
+      const auto_approve = [];
+      for (const [name, p] of Object.entries(this.toolPolicy)) {
+        if (p === 'disable') disabled_tools.push(name);
+        else if (p === 'ask') require_approval.push(name);
+        else if (p === 'always') auto_approve.push(name);
+      }
+      // Only write non-default entries (default is 'always', so no need to save those)
+      const tool_policy = {};
+      if (disabled_tools.length > 0) tool_policy.disabled_tools = disabled_tools;
+      if (require_approval.length > 0) tool_policy.require_approval = require_approval;
+      // auto_approve is the default, only include if explicitly set
+      if (auto_approve.length > 0) tool_policy.auto_approve = auto_approve;
+      
+      try {
+        // Read current config, update tool_policy, save
+        const resp = await fetch('/api/config?location=user');
+        const data = await resp.json();
+        const config = data.config || {};
+        config.tool_policy = tool_policy;
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location: 'user', config }),
+        });
+      } catch (e) { console.error('Failed to save tool policy:', e); }
+    },
+    
+    // ── Policies ──
+    async loadPolicies() {
+      try {
+        const resp = await fetch('/api/policies');
+        const data = await resp.json();
+        this.allPolicies = data.policies || [];
+      } catch (e) { console.error('Failed to load policies:', e); }
+    },
+    
+    async duplicatePolicy(name) {
+      const src = this.allPolicies.find(p => p.name === name);
+      if (!src) return;
+      let newName = name + '-custom';
+      let i = 2;
+      while (this.allPolicies.find(p => p.name === newName)) {
+        newName = name + '-custom-' + i++;
+      }
+      try {
+        await fetch('/api/policies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName, config: JSON.parse(JSON.stringify(src.config)) }),
+        });
+        await this.loadPolicies();
+      } catch (e) { console.error('Failed to duplicate policy:', e); }
+    },
+    
+    async deletePolicy(name) {
+      if (!confirm(`Delete custom policy "${name}"?`)) return;
+      try {
+        await fetch(`/api/policies/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        await this.loadPolicies();
+      } catch (e) { console.error('Failed to delete policy:', e); }
+    },
+    
+    formatPolicyFields(config) {
+      if (!config) return '';
+      const parts = [];
+      if (config.sampling?.temperature != null) parts.push(`temp=${config.sampling.temperature}`);
+      if (config.sampling?.top_p != null) parts.push(`top_p=${config.sampling.top_p}`);
+      if (config.sampling?.top_k != null) parts.push(`top_k=${config.sampling.top_k}`);
+      if (config.output?.max_tokens != null) parts.push(`max=${config.output.max_tokens}`);
+      if (config.output?.format) parts.push(`format=${config.output.format}`);
+      if (config.output?.system_prompt_snippet) parts.push('snippet');
+      if (config.reliability?.retry_on_invalid_json) parts.push('json-retry');
+      if (config.reliability?.timeout != null) parts.push(`timeout=${config.reliability.timeout}`);
+      return parts.join(', ');
+    },
+    
+    setModelPolicy(modelName, policyName) {
+      if (!this.wizardEnabledModels[modelName]) return;
+      const cfg = this.wizardEnabledModels[modelName];
+      if (policyName) {
+        cfg.policy = policyName;
+      } else {
+        delete cfg.policy;
+      }
+      this.wizardEnabledModels = { ...this.wizardEnabledModels };
+    },
+
+    openNewPolicy() {
+      this.editingPolicy = {
+        name: '',
+        isNew: true,
+        config: { sampling: {}, output: {}, context: {}, tool: {}, reliability: {} },
+      };
+    },
+
+    openEditPolicy(pol) {
+      this.editingPolicy = {
+        name: pol.name,
+        isNew: false,
+        config: JSON.parse(JSON.stringify({
+          sampling: pol.config.sampling || {},
+          output: pol.config.output || {},
+          context: pol.config.context || {},
+          tool: pol.config.tool || {},
+          reliability: pol.config.reliability || {},
+        })),
+      };
+    },
+
+    async saveEditingPolicy() {
+      if (!this.editingPolicy) return;
+      const name = (this.editingPolicy.name || '').trim();
+      if (!name) { alert('Policy name is required.'); return; }
+      if (/[^a-zA-Z0-9_-]/.test(name)) { alert('Policy name may only contain letters, digits, hyphens, and underscores.'); return; }
+
+      const cfg = JSON.parse(JSON.stringify(this.editingPolicy.config));
+      const clean = (obj) => { if (!obj) return undefined; const k = Object.keys(obj).filter(k => obj[k] != null); return k.length ? Object.fromEntries(k.map(k => [k, obj[k]])) : undefined; };
+      const payload = {};
+      const s = clean(cfg.sampling); if (s) payload.sampling = s;
+      const o = clean(cfg.output);   if (o) payload.output = o;
+      const c = clean(cfg.context);  if (c) payload.context = c;
+      const t = clean(cfg.tool);     if (t) payload.tool = t;
+      const r = clean(cfg.reliability); if (r) payload.reliability = r;
+
+      try {
+        const resp = await fetch('/api/policies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, config: payload }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.error || 'Failed to save policy'); return; }
+        this.editingPolicy = null;
+        await this.loadPolicies();
+      } catch (e) { console.error('Failed to save policy:', e); alert('Failed to save policy.'); }
+    },
+
+    cancelEditPolicy() {
+      this.editingPolicy = null;
     },
     
     // ── Chat ──

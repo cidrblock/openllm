@@ -83,6 +83,11 @@ export type { ModelConfig } from './config.js';
 /** MCP server connection configuration */
 export type { McpServerConfig } from './config.js';
 
+// ─── Types: Policies ────────────────────────────────────────────────────
+
+/** Named behavioral policy assigned to a model */
+export type { PolicyConfig, PolicyInfo, PolicySampling, PolicyOutput, PolicyContext, PolicyTool, PolicyReliability } from './policies.js';
+
 // ─── Tool Registry ──────────────────────────────────────────────────────
 
 /** Tool collection, namespacing, and policy filtering */
@@ -131,6 +136,18 @@ export {
   getEnabledModelNames,
   isValidVirtualName,
 } from './config.js';
+
+/** Policy management */
+export {
+  BUILTIN_POLICIES,
+  BUILTIN_POLICY_NAMES,
+  loadCustomPolicies,
+  saveCustomPolicies,
+  resolvePolicy,
+  flattenPolicy,
+  listAllPolicies,
+  getUserPoliciesPath,
+} from './policies.js';
 
 /** Platform-aware path utilities */
 export {

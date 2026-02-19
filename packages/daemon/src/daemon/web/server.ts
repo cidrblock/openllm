@@ -15,7 +15,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { getDefaultSocketPath } from '../transport.js';
-import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, type ConfigFile } from '../../core/config.js';
+import { loadConfig, saveConfig, loadWorkspaceConfig, saveWorkspaceConfig, getUserConfigPath, getWorkspaceConfigPath, isValidVirtualName, type ConfigFile } from '../../core/config.js';
+import { listAllPolicies, loadCustomPolicies, saveCustomPolicies, BUILTIN_POLICY_NAMES, type PolicyConfig } from '../../core/policies.js';
 import type { DaemonState } from '../state.js';
 import type { ChatToolOptions } from '../../core/state.js';
 import { getEngines, getEngine, getProviderTemplates } from '../../core/engines.js';
@@ -73,6 +74,14 @@ export function createWebApp(state: DaemonState): Express {
     next();
   });
   
+  // Prevent browser caching of HTML so dashboard always serves fresh content
+  app.use((req, res, next) => {
+    if (req.path.endsWith('.html') || req.path === '/') {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+    next();
+  });
+
   // Serve static files
   if (fs.existsSync(STATIC_PATH)) {
     app.use(express.static(STATIC_PATH));
@@ -631,7 +640,39 @@ export function createWebApp(state: DaemonState): Express {
   app.get('/api/mcp-servers', (_req, res) => {
     try {
       const statuses = state.mcpClientPool.getStatuses();
-      res.json({ mcp_servers: statuses });
+      // Also include servers from config that might not have a status yet (disabled ones)
+      const config = loadConfig();
+      const mcpCfg = config.mcp_servers || {};
+      const statusMap = new Map(statuses.map(s => [s.id, s]));
+      
+      const result = [];
+      // Add configured servers (with status if available)
+      for (const [id, cfg] of Object.entries(mcpCfg)) {
+        const st = statusMap.get(id);
+        result.push({
+          id,
+          transport: cfg.transport || 'stdio',
+          enabled: cfg.enabled !== false,
+          status: st ? (st.connected ? 'connected' : (st.error ? 'error' : 'disconnected')) : (cfg.enabled === false ? 'disabled' : 'not started'),
+          toolCount: st?.toolCount || 0,
+          error: st?.error || null,
+        });
+      }
+      // Add any statuses that aren't in config (shouldn't happen, but just in case)
+      for (const st of statuses) {
+        if (!mcpCfg[st.id]) {
+          result.push({
+            id: st.id,
+            transport: st.config?.transport || 'stdio',
+            enabled: st.config?.enabled !== false,
+            status: st.connected ? 'connected' : (st.error ? 'error' : 'disconnected'),
+            toolCount: st.toolCount || 0,
+            error: st.error || null,
+          });
+        }
+      }
+      
+      res.json({ mcp_servers: result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -661,6 +702,69 @@ export function createWebApp(state: DaemonState): Express {
         })),
         total: tools.length,
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Policy Management ──────────────────────────────────────────────────
+
+  // GET /api/policies — list all policies (built-in + custom)
+  app.get('/api/policies', (_req, res) => {
+    try {
+      const policies = listAllPolicies();
+      res.json({ policies });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/policies — upsert a custom policy
+  app.post('/api/policies', (req, res) => {
+    try {
+      const { name, config } = req.body as { name: string; config: PolicyConfig };
+      if (!name || typeof name !== 'string') {
+        res.status(400).json({ error: 'Policy name is required' });
+        return;
+      }
+      if (!isValidVirtualName(name)) {
+        res.status(400).json({ error: 'Policy name must be lowercase alphanumeric with dots, hyphens, or underscores' });
+        return;
+      }
+      if (BUILTIN_POLICY_NAMES.includes(name)) {
+        res.status(400).json({ error: `Cannot overwrite built-in policy "${name}". Duplicate it with a different name.` });
+        return;
+      }
+      if (!config || typeof config !== 'object') {
+        res.status(400).json({ error: 'Policy config is required' });
+        return;
+      }
+
+      const custom = loadCustomPolicies();
+      custom[name] = config;
+      saveCustomPolicies(custom);
+      res.json({ success: true, name });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/policies/:name — delete a custom policy
+  app.delete('/api/policies/:name', (req, res) => {
+    try {
+      const { name } = req.params;
+      if (BUILTIN_POLICY_NAMES.includes(name)) {
+        res.status(400).json({ error: `Cannot delete built-in policy "${name}"` });
+        return;
+      }
+      const custom = loadCustomPolicies();
+      if (!(name in custom)) {
+        res.status(404).json({ error: `Custom policy "${name}" not found` });
+        return;
+      }
+      delete custom[name];
+      saveCustomPolicies(custom);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

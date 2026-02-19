@@ -300,6 +300,13 @@ service OpenLLM {
   rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse);
   
   //
+  // Policies
+  //
+  
+  // List all policies (built-in + custom)
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+  
+  //
   // Tools
   //
   
@@ -685,6 +692,7 @@ message Model {
   string engine = 6;                    // Actual engine type
   optional ModelParams params = 7;      // Per-model config params
   string engine_model_id = 8;           // Actual engine model ID sent to API
+  optional string policy = 9;           // Assigned policy name (if any)
 }
 
 // Per-model parameter configuration (virtual model layer)
@@ -1073,6 +1081,59 @@ message VSCodeToolCall {
   string call_id = 1;
   string name = 2;
   string arguments_json = 3;
+}
+
+//
+// Policies
+//
+
+message ListPoliciesRequest {}
+
+message ListPoliciesResponse {
+  repeated PolicyInfo policies = 1;
+}
+
+message PolicyInfo {
+  string name = 1;
+  bool builtin = 2;
+  PolicyConfig config = 3;
+}
+
+message PolicyConfig {
+  optional PolicySampling sampling = 1;
+  optional PolicyOutput output = 2;
+  optional PolicyContext context = 3;
+  optional PolicyTool tool = 4;
+  optional PolicyReliability reliability = 5;
+}
+
+message PolicySampling {
+  optional float temperature = 1;
+  optional float top_p = 2;
+  optional int32 top_k = 3;
+}
+
+message PolicyOutput {
+  optional int32 max_tokens = 1;
+  optional int32 reserved_output_tokens = 2;
+  optional string format = 3;              // "text" | "json_only" | "markdown"
+  optional string system_prompt_snippet = 4;
+  optional string system_prompt_mode = 5;  // "prepend" | "append" | "replace"
+}
+
+message PolicyContext {
+  optional float context_threshold = 1;
+  optional string compression_strategy = 2; // "none" | "truncate" | "rolling_summary"
+}
+
+message PolicyTool {
+  optional int32 max_tool_iterations = 1;
+  optional string tool_mode = 2;           // "auto" | "ask" | "none"
+}
+
+message PolicyReliability {
+  optional bool retry_on_invalid_json = 1;
+  optional int32 timeout = 2;
 }
 
 //

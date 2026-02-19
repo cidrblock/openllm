@@ -769,7 +769,7 @@ class DiscoverModelsResponse(_message.Message):
     def __init__(self, models: _Optional[_Iterable[_Union[Model, _Mapping]]] = ...) -> None: ...
 
 class Model(_message.Message):
-    __slots__ = ("id", "provider", "name", "capabilities", "source", "engine", "params", "engine_model_id")
+    __slots__ = ("id", "provider", "name", "capabilities", "source", "engine", "params", "engine_model_id", "policy")
     ID_FIELD_NUMBER: _ClassVar[int]
     PROVIDER_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
@@ -778,6 +778,7 @@ class Model(_message.Message):
     ENGINE_FIELD_NUMBER: _ClassVar[int]
     PARAMS_FIELD_NUMBER: _ClassVar[int]
     ENGINE_MODEL_ID_FIELD_NUMBER: _ClassVar[int]
+    POLICY_FIELD_NUMBER: _ClassVar[int]
     id: str
     provider: str
     name: str
@@ -786,7 +787,8 @@ class Model(_message.Message):
     engine: str
     params: ModelParams
     engine_model_id: str
-    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., name: _Optional[str] = ..., capabilities: _Optional[_Union[ModelCapabilities, _Mapping]] = ..., source: _Optional[_Union[ModelSource, str]] = ..., engine: _Optional[str] = ..., params: _Optional[_Union[ModelParams, _Mapping]] = ..., engine_model_id: _Optional[str] = ...) -> None: ...
+    policy: str
+    def __init__(self, id: _Optional[str] = ..., provider: _Optional[str] = ..., name: _Optional[str] = ..., capabilities: _Optional[_Union[ModelCapabilities, _Mapping]] = ..., source: _Optional[_Union[ModelSource, str]] = ..., engine: _Optional[str] = ..., params: _Optional[_Union[ModelParams, _Mapping]] = ..., engine_model_id: _Optional[str] = ..., policy: _Optional[str] = ...) -> None: ...
 
 class ModelParams(_message.Message):
     __slots__ = ("temperature", "top_p", "max_tokens", "system_prompt", "system_prompt_mode", "top_k", "timeout")
@@ -1311,6 +1313,88 @@ class VSCodeToolCall(_message.Message):
     name: str
     arguments_json: str
     def __init__(self, call_id: _Optional[str] = ..., name: _Optional[str] = ..., arguments_json: _Optional[str] = ...) -> None: ...
+
+class ListPoliciesRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class ListPoliciesResponse(_message.Message):
+    __slots__ = ("policies",)
+    POLICIES_FIELD_NUMBER: _ClassVar[int]
+    policies: _containers.RepeatedCompositeFieldContainer[PolicyInfo]
+    def __init__(self, policies: _Optional[_Iterable[_Union[PolicyInfo, _Mapping]]] = ...) -> None: ...
+
+class PolicyInfo(_message.Message):
+    __slots__ = ("name", "builtin", "config")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    BUILTIN_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    builtin: bool
+    config: PolicyConfig
+    def __init__(self, name: _Optional[str] = ..., builtin: bool = ..., config: _Optional[_Union[PolicyConfig, _Mapping]] = ...) -> None: ...
+
+class PolicyConfig(_message.Message):
+    __slots__ = ("sampling", "output", "context", "tool", "reliability")
+    SAMPLING_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_FIELD_NUMBER: _ClassVar[int]
+    TOOL_FIELD_NUMBER: _ClassVar[int]
+    RELIABILITY_FIELD_NUMBER: _ClassVar[int]
+    sampling: PolicySampling
+    output: PolicyOutput
+    context: PolicyContext
+    tool: PolicyTool
+    reliability: PolicyReliability
+    def __init__(self, sampling: _Optional[_Union[PolicySampling, _Mapping]] = ..., output: _Optional[_Union[PolicyOutput, _Mapping]] = ..., context: _Optional[_Union[PolicyContext, _Mapping]] = ..., tool: _Optional[_Union[PolicyTool, _Mapping]] = ..., reliability: _Optional[_Union[PolicyReliability, _Mapping]] = ...) -> None: ...
+
+class PolicySampling(_message.Message):
+    __slots__ = ("temperature", "top_p", "top_k")
+    TEMPERATURE_FIELD_NUMBER: _ClassVar[int]
+    TOP_P_FIELD_NUMBER: _ClassVar[int]
+    TOP_K_FIELD_NUMBER: _ClassVar[int]
+    temperature: float
+    top_p: float
+    top_k: int
+    def __init__(self, temperature: _Optional[float] = ..., top_p: _Optional[float] = ..., top_k: _Optional[int] = ...) -> None: ...
+
+class PolicyOutput(_message.Message):
+    __slots__ = ("max_tokens", "reserved_output_tokens", "format", "system_prompt_snippet", "system_prompt_mode")
+    MAX_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    RESERVED_OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    SYSTEM_PROMPT_SNIPPET_FIELD_NUMBER: _ClassVar[int]
+    SYSTEM_PROMPT_MODE_FIELD_NUMBER: _ClassVar[int]
+    max_tokens: int
+    reserved_output_tokens: int
+    format: str
+    system_prompt_snippet: str
+    system_prompt_mode: str
+    def __init__(self, max_tokens: _Optional[int] = ..., reserved_output_tokens: _Optional[int] = ..., format: _Optional[str] = ..., system_prompt_snippet: _Optional[str] = ..., system_prompt_mode: _Optional[str] = ...) -> None: ...
+
+class PolicyContext(_message.Message):
+    __slots__ = ("context_threshold", "compression_strategy")
+    CONTEXT_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    COMPRESSION_STRATEGY_FIELD_NUMBER: _ClassVar[int]
+    context_threshold: float
+    compression_strategy: str
+    def __init__(self, context_threshold: _Optional[float] = ..., compression_strategy: _Optional[str] = ...) -> None: ...
+
+class PolicyTool(_message.Message):
+    __slots__ = ("max_tool_iterations", "tool_mode")
+    MAX_TOOL_ITERATIONS_FIELD_NUMBER: _ClassVar[int]
+    TOOL_MODE_FIELD_NUMBER: _ClassVar[int]
+    max_tool_iterations: int
+    tool_mode: str
+    def __init__(self, max_tool_iterations: _Optional[int] = ..., tool_mode: _Optional[str] = ...) -> None: ...
+
+class PolicyReliability(_message.Message):
+    __slots__ = ("retry_on_invalid_json", "timeout")
+    RETRY_ON_INVALID_JSON_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    retry_on_invalid_json: bool
+    timeout: int
+    def __init__(self, retry_on_invalid_json: bool = ..., timeout: _Optional[int] = ...) -> None: ...
 
 class RegisterMcpServerRequest(_message.Message):
     __slots__ = ("server_id", "transport", "capabilities")
