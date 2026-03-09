@@ -62,7 +62,7 @@ export class McpClientPool {
       const transport = this.buildTransport(config);
       const client = await createMCPClient({
         transport,
-        name: `openllm-${serverId}`,
+        name: `abbenay-${serverId}`,
         onUncaughtError: (error) => {
           console.error(`[McpClientPool] Uncaught error from ${serverId}:`, error);
           status.connected = false;

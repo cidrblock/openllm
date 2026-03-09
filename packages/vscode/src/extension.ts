@@ -7,27 +7,27 @@ import {
   getDaemonClient,
   BackchannelHandler
 } from './daemon';
-import { OpenLLMLanguageModelProvider } from './providers';
+import { AbbenayLanguageModelProvider } from './providers';
 
 // Default dashboard URL - daemon serves web UI here
 const DASHBOARD_URL = 'http://localhost:8787';
 
 let daemonConnected = false;
-let languageModelProvider: OpenLLMLanguageModelProvider | null = null;
+let languageModelProvider: AbbenayLanguageModelProvider | null = null;
 let backchannelHandler: BackchannelHandler | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('[OpenLLM] activate() called');
+  console.log('[Abbenay] activate() called');
   const logger = getLogger();
   logger.info('Open LLM Provider activating...');
 
   // Set extension path for finding bundled daemon binary
   setExtensionPath(context.extensionPath);
-  console.log('[OpenLLM] extensionPath:', context.extensionPath);
+  console.log('[Abbenay] extensionPath:', context.extensionPath);
 
   // Initialize daemon connection (auto-starts daemon if not running)
   try {
-    logger.info('[Daemon] Connecting to OpenLLM daemon...');
+    logger.info('[Daemon] Connecting to Abbenay daemon...');
     await initializeDaemon();
     logger.info('[Daemon] Connected and registered');
     daemonConnected = true;
@@ -42,7 +42,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // Start the Language Model Provider to expose models to VS Code
-    languageModelProvider = new OpenLLMLanguageModelProvider(client);
+    languageModelProvider = new AbbenayLanguageModelProvider(client);
     await languageModelProvider.start();
     logger.info('[LMProvider] Language Model Provider started');
 
@@ -73,7 +73,7 @@ export async function activate(context: vscode.ExtensionContext) {
       logger.error(`[Daemon] Stack: ${e.stack}`);
     }
     vscode.window.showWarningMessage(
-      `OpenLLM: Could not connect to daemon — ${msg}`
+      `Abbenay: Could not connect to daemon — ${msg}`
     );
   }
 
@@ -85,29 +85,29 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.StatusBarAlignment.Right,
     100
   );
-  statusBarItem.text = daemonConnected ? '$(sparkle) OpenLLM' : '$(warning) OpenLLM';
+  statusBarItem.text = daemonConnected ? '$(sparkle) Abbenay' : '$(warning) Abbenay';
   statusBarItem.tooltip = daemonConnected 
-    ? 'OpenLLM Daemon Connected - Click to open dashboard' 
-    : 'OpenLLM Daemon Not Connected';
-  statusBarItem.command = 'openLLM.openDashboard';
+    ? 'Abbenay Daemon Connected - Click to open dashboard' 
+    : 'Abbenay Daemon Not Connected';
+  statusBarItem.command = 'abbenay.openDashboard';
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
   // Watch for configuration changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('openLLM.logLevel')) {
+      if (e.affectsConfiguration('abbenay.logLevel')) {
         updateLogLevel();
       }
     })
   );
 
-  logger.info('Open LLM Provider activated');
+  logger.info('Abbenay Provider activated');
 }
 
 export async function deactivate() {
   const logger = getLogger();
-  logger.info('Open LLM Provider deactivating...');
+  logger.info('Abbenay Provider deactivating...');
   
   // Stop the backchannel
   if (backchannelHandler) {
@@ -136,8 +136,8 @@ export async function deactivate() {
 function registerCommands(context: vscode.ExtensionContext): void {
   // Daemon status command
   context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.daemonStatus', async () => {
-      console.log('[OpenLLM] daemonStatus command');
+    vscode.commands.registerCommand('abbenay.daemonStatus', async () => {
+      console.log('[Abbenay] daemonStatus command');
       
       try {
         const client = getDaemonClient();
@@ -148,7 +148,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
           : 'unknown';
         
         const msg = [
-          `OpenLLM Daemon v${status.version || 'unknown'}`,
+          `Abbenay Daemon v${status.version || 'unknown'}`,
           `Started: ${startedAt}`,
           `Clients: ${status.connectedClients || 0}`,
           `Sessions: ${status.activeSessions || 0}`,
@@ -160,9 +160,9 @@ function registerCommands(context: vscode.ExtensionContext): void {
           }
         });
       } catch (e) {
-        console.error('[OpenLLM] daemonStatus error:', e);
+        console.error('[Abbenay] daemonStatus error:', e);
         vscode.window.showErrorMessage(
-          `OpenLLM: Cannot get daemon status. Is the daemon running?`,
+          `Abbenay: Cannot get daemon status. Is the daemon running?`,
           'Open Dashboard Anyway'
         ).then(action => {
           if (action === 'Open Dashboard Anyway') {
@@ -175,7 +175,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
 
   // Open dashboard command - starts web server via gRPC, then opens browser
   context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.openDashboard', async () => {
+    vscode.commands.registerCommand('abbenay.openDashboard', async () => {
       const logger = getLogger();
       logger.info('[Dashboard] Opening dashboard...');
       
@@ -209,8 +209,8 @@ function registerCommands(context: vscode.ExtensionContext): void {
 
   // Configure provider command - opens dashboard for API key configuration
   context.subscriptions.push(
-    vscode.commands.registerCommand('openLLM.configureProvider', () => {
-      console.log('[OpenLLM] configureProvider command');
+    vscode.commands.registerCommand('abbenay.configureProvider', () => {
+      console.log('[Abbenay] configureProvider command');
       vscode.env.openExternal(vscode.Uri.parse(DASHBOARD_URL));
     })
   );

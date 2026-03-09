@@ -1,9 +1,9 @@
-# OpenLLM Architecture
+# Abbenay Architecture
 
 ## Overview
 
-OpenLLM is a unified AI daemon and library written in TypeScript/Node.js that provides:
-- A **reusable core library** (`@openllm/core`) for LLM engine abstraction, streaming chat, and config
+Abbenay is a unified AI daemon and library written in TypeScript/Node.js that provides:
+- A **reusable core library** (`@abbenay/core`) for LLM engine abstraction, streaming chat, and config
 - A **gRPC API** for chat and configuration
 - A **web dashboard** for provider/model management
 - A **VS Code extension** that registers models with VS Code's Language Model API
@@ -23,9 +23,9 @@ OpenLLM is a unified AI daemon and library written in TypeScript/Node.js that pr
                                  │ gRPC over Unix Socket (or named pipe)
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     openllm daemon (TypeScript)                          │
+│                     abbenay daemon (TypeScript)                          │
 │                                                                          │
-│  ┌─ @openllm/core ──────────────────────────────────────────────────┐   │
+│  ┌─ @abbenay/core ──────────────────────────────────────────────────┐   │
 │  │  CoreState          Engines (Vercel AI SDK)    Config (YAML)      │   │
 │  │  SecretStore i/f    Streaming chat + tools     Model discovery    │   │
 │  └───────────────────────────────────────────────────────────────────┘   │
@@ -50,7 +50,7 @@ OpenLLM is a unified AI daemon and library written in TypeScript/Node.js that pr
 
 The source tree is organized into two layers:
 
-### @openllm/core (`src/core/`)
+### @abbenay/core (`src/core/`)
 
 Reusable library with zero transport dependencies. Can be used standalone by agent developers, web developers, or any Node.js application.
 
@@ -64,7 +64,7 @@ Reusable library with zero transport dependencies. Can be used standalone by age
 | `core/mock.ts` | Mock engine for testing |
 | `core/index.ts` | Public API surface |
 
-### @openllm/daemon (`src/daemon/`)
+### @abbenay/daemon (`src/daemon/`)
 
 Full application layer. Extends core with transport, UI, and CLI.
 
@@ -74,26 +74,26 @@ Full application layer. Extends core with transport, UI, and CLI.
 | `daemon/daemon.ts` | Process lifecycle, gRPC server startup, signal handling |
 | `daemon/transport.ts` | Unix socket and PID file management |
 | `daemon/index.ts` | CLI entry point (Commander) |
-| `daemon/server/openllm-service.ts` | gRPC service handlers |
+| `daemon/server/abbenay-service.ts` | gRPC service handlers |
 | `daemon/web/server.ts` | Express web server + REST API |
 | `daemon/web/grpc-web-control.ts` | gRPC client for web server control |
 | `daemon/secrets/keychain.ts` | `KeychainSecretStore` (keytar native addon) |
 
 ## Components
 
-### openllm daemon
+### abbenay daemon
 
 The core TypeScript/Node.js process that runs as a background daemon.
 
 **Subcommands:**
-- `openllm daemon` - Start the gRPC server on Unix socket (or named pipe on Windows)
-- `openllm web` - Start the web dashboard (embedded in daemon or started via gRPC if daemon already running)
-- `openllm status` - Check if daemon is running
-- `openllm stop` - Stop the running daemon
+- `abbenay daemon` - Start the gRPC server on Unix socket (or named pipe on Windows)
+- `abbenay web` - Start the web dashboard (embedded in daemon or started via gRPC if daemon already running)
+- `abbenay status` - Check if daemon is running
+- `abbenay stop` - Stop the running daemon
 
 **Socket location:**
-- Linux/macOS: `$XDG_RUNTIME_DIR/openllm/daemon.sock` or `/run/user/{uid}/openllm/daemon.sock`
-- Windows: `\\.\pipe\openllm-daemon`
+- Linux/macOS: `$XDG_RUNTIME_DIR/abbenay/daemon.sock` or `/run/user/{uid}/abbenay/daemon.sock`
+- Windows: `\\.\pipe\abbenay-daemon`
 
 ### Web Dashboard (Embedded)
 
@@ -105,8 +105,8 @@ The web dashboard runs inside the daemon process via Express:
 - **Chat SSE**: `POST /api/chat` -> Streaming responses via Server-Sent Events
 
 The web server is started either:
-1. In-process when `openllm web` runs and no daemon is running
-2. Via gRPC `StartWebServer` when a daemon is already running and `openllm web` is invoked
+1. In-process when `abbenay web` runs and no daemon is running
+2. Via gRPC `StartWebServer` when a daemon is already running and `abbenay web` is invoked
 
 ### VS Code Extension
 
@@ -121,7 +121,7 @@ The extension acts as a **thin gRPC client** to the daemon:
 - `extension.ts` - Activation, commands, status bar
 - `daemon/client.ts` - gRPC client wrapper
 - `daemon/backchannel.ts` - Bidirectional stream handler
-- `providers/OpenLLMLanguageModelProvider.ts` - VS Code LM API integration
+- `providers/AbbenayLanguageModelProvider.ts` - VS Code LM API integration
 
 ## Engine Architecture
 
@@ -196,8 +196,8 @@ interface SecretStore {
 
 ### Config Files
 
-- **User level**: `~/.openllm/config.yaml`
-- **Workspace level**: `<workspace>/.config/openllm/config.yaml`
+- **User level**: `~/.config/abbenay/config.yaml`
+- **Workspace level**: `<workspace>/.config/abbenay/config.yaml`
 
 ### Config Format
 
@@ -225,7 +225,7 @@ User and workspace configs are merged (workspace overrides user):
 
 ## gRPC Protocol
 
-Defined in `proto/openllm/v1/service.proto`. The daemon loads protos dynamically via `@grpc/proto-loader` (no code generation for the daemon).
+Defined in `proto/abbenay/v1/service.proto`. The daemon loads protos dynamically via `@grpc/proto-loader` (no code generation for the daemon).
 
 ### Core RPCs (Implemented)
 
@@ -326,11 +326,11 @@ Session management is **deferred**. Stub RPCs exist in the proto and service han
 
 | File | Path | Purpose |
 |------|------|---------|
-| Socket (Linux/macOS) | `$XDG_RUNTIME_DIR/openllm/daemon.sock` | gRPC server socket |
-| Socket (Windows) | `\\.\pipe\openllm-daemon` | gRPC named pipe |
-| PID file | `~/.openllm/openllm.pid` | Daemon process ID |
-| User Config | `~/.openllm/config.yaml` | User-level provider config |
-| Workspace Config | `<ws>/.config/openllm/config.yaml` | Workspace-level config |
+| Socket (Linux/macOS) | `$XDG_RUNTIME_DIR/abbenay/daemon.sock` | gRPC server socket |
+| Socket (Windows) | `\\.\pipe\abbenay-daemon` | gRPC named pipe |
+| PID file | `~/.config/abbenay/abbenay.pid` | Daemon process ID |
+| User Config | `~/.config/abbenay/config.yaml` | User-level provider config |
+| Workspace Config | `<ws>/.config/abbenay/config.yaml` | Workspace-level config |
 | Logs | Stdout/stderr | Daemon logs |
 
 ## Security

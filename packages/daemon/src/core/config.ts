@@ -3,7 +3,7 @@
  * 
  * Loads and saves YAML configuration from:
  * - User level:      <configDir>/config.yaml   (platform-aware via paths.ts)
- * - Workspace level:  <workspace>/.config/openllm/config.yaml
+ * - Workspace level:  <workspace>/.config/abbenay/config.yaml
  * 
  * The config uses "virtual" provider and model names as primary keys.
  * See the plan's Terminology section for virtual vs actual distinction.
@@ -131,7 +131,7 @@ export function getUserConfigPath(): string {
 }
 
 /**
- * Get workspace config path: <workspace>/.config/openllm/config.yaml
+ * Get workspace config path: <workspace>/.config/abbenay/config.yaml
  */
 export function getWorkspaceConfigPath(workspacePath: string): string {
   return _getWorkspaceConfigPath(workspacePath);

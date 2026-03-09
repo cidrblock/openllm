@@ -1,8 +1,8 @@
 {
-  "name": "openllm-monorepo",
+  "name": "abbenay-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Open LLM Provider - Monorepo",
+  "description": "Abbenay - Unified AI Daemon Monorepo",
   "workspaces": [
     "packages/*"
   ],

@@ -1,12 +1,12 @@
-# OpenLLM Protocol Buffers
+# Abbenay Protocol Buffers
 
-This directory contains the gRPC service definition for the OpenLLM daemon.
+This directory contains the gRPC service definition for the Abbenay daemon.
 
 ## Structure
 
 ```
 proto/
-└── openllm/
+└── abbenay/
     └── v1/
         └── service.proto    # Main service definition
 ```
@@ -23,7 +23,7 @@ protoc \
   --ts_proto_out=packages/vscode/src/proto \
   --ts_proto_opt=outputServices=nice-grpc,outputServices=generic-definitions,useExactTypes=false \
   -I proto \
-  proto/openllm/v1/service.proto
+  proto/abbenay/v1/service.proto
 ```
 
 ### TypeScript Daemon
@@ -43,15 +43,15 @@ Generate Python client:
 ```bash
 python -m grpc_tools.protoc \
   -I proto \
-  --python_out=packages/python/src/openllm_grpc \
-  --pyi_out=packages/python/src/openllm_grpc \
-  --grpc_python_out=packages/python/src/openllm_grpc \
-  proto/openllm/v1/service.proto
+  --python_out=packages/python/src/abbenay_grpc \
+  --pyi_out=packages/python/src/abbenay_grpc \
+  --grpc_python_out=packages/python/src/abbenay_grpc \
+  proto/abbenay/v1/service.proto
 ```
 
 ## Service Overview
 
-The `OpenLLM` service provides:
+The `Abbenay` service provides:
 
 - **Chat**: Stateless streaming chat with LLM providers
 - **Models & Providers**: List available models and provider status

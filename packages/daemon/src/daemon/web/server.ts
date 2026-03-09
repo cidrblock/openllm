@@ -5,8 +5,8 @@
  * No gRPC client layer — the web server calls state methods directly.
  * 
  * Lifecycle:
- * - Started via `openllm web` or gRPC StartWebServer
- * - Stopped via Ctrl+C, `openllm web` exit, or gRPC StopWebServer
+ * - Started via `abbenay web` or gRPC StartWebServer
+ * - Stopped via Ctrl+C, `abbenay web` exit, or gRPC StopWebServer
  */
 
 import express, { type Express } from 'express';
@@ -26,14 +26,14 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Resolve the static files directory. Checks:
- *  1) OPENLLM_STATIC_DIR env var
+ *  1) ABBENAY_STATIC_DIR env var
  *  2) Next to parent dir: __dirname/../static/  (esbuild bundle, __dirname is web/)
  *  3) __dirname/static/ (flat bundle)
  *  4) Monorepo layout: __dirname/../../static/  (development from dist/web/)
  */
 function resolveStaticPath(): string {
   const candidates = [
-    process.env.OPENLLM_STATIC_DIR,
+    process.env.ABBENAY_STATIC_DIR,
     path.resolve(__dirname, '../static'),
     path.resolve(__dirname, 'static'),
     path.resolve(__dirname, '../../../static'),

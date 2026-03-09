@@ -1,5 +1,5 @@
 /**
- * @openllm/core — Public API
+ * @abbenay/core — Public API
  *
  * Lightweight library for agent developers, web developers, and custom apps.
  * Provides LLM engine abstraction, streaming chat, model discovery,
@@ -8,7 +8,7 @@
  * Zero transport dependencies — no gRPC, no Express, no CLI.
  *
  * Quick start:
- *   import { CoreState, MemorySecretStore } from '@openllm/core';
+ *   import { CoreState, MemorySecretStore } from '@abbenay/core';
  *   const state = new CoreState({ secretStore: new MemorySecretStore() });
  *   const models = await state.listModels();
  *
@@ -18,13 +18,13 @@
  *   npm install @ai-sdk/anthropic     # for Anthropic
  *   npm install @ai-sdk/google        # for Gemini
  *
- * @module @openllm/core
+ * @module @abbenay/core
  */
 
 // ─── Primary API ────────────────────────────────────────────────────────
 // These are the stable, documented entry points for library consumers.
 
-/** Core state manager — the main entry point for @openllm/core */
+/** Core state manager — the main entry point for @abbenay/core */
 export { CoreState } from './state.js';
 export type { CoreStateOptions, AddProviderOptions } from './state.js';
 

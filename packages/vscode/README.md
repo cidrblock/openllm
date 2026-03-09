@@ -1,10 +1,10 @@
-# Open LLM Provider
+# Abbenay Provider
 
 **Use any LLM with any VS Code extension** — OpenAI, Anthropic, Google, Ollama & more.
 
 ## Overview
 
-This VS Code extension connects to the OpenLLM daemon and registers configured LLM models with VS Code's Language Model API. Other extensions can then use these models through the standard `vscode.lm` API.
+This VS Code extension connects to the Abbenay daemon and registers configured LLM models with VS Code's Language Model API. Other extensions can then use these models through the standard `vscode.lm` API.
 
 ## How It Works
 
@@ -13,14 +13,14 @@ This VS Code extension connects to the OpenLLM daemon and registers configured L
 │  Other VS Code Extensions (e.g., Ansible, custom tools)        │
 │                                                                 │
 │  const models = await vscode.lm.selectChatModels({             │
-│    vendor: 'openllm'                                            │
+│    vendor: 'abbenay'                                            │
 │  });                                                            │
 │  const response = await models[0].sendRequest(messages, ...);  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  OpenLLM Extension (this extension)                            │
+│  Abbenay Extension (this extension)                            │
 │                                                                 │
 │  • Connects to daemon on activation                            │
 │  • Registers models with VS Code Language Model API            │
@@ -30,7 +30,7 @@ This VS Code extension connects to the OpenLLM daemon and registers configured L
                               │ gRPC (Unix socket)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  OpenLLM Daemon (TypeScript/Node.js)                             │
+│  Abbenay Daemon (TypeScript/Node.js)                             │
 │                                                                 │
 │  • Handles all LLM provider communication                      │
 │  • Manages configuration and secrets                           │
@@ -46,12 +46,12 @@ This VS Code extension connects to the OpenLLM daemon and registers configured L
 cd packages/vscode
 npm install
 npm run package
-code --install-extension open-llm-provider-0.1.0.vsix
+code --install-extension abbenay-provider-0.1.0.vsix
 ```
 
 ### Prerequisites
 
-The OpenLLM daemon must be running:
+The Abbenay daemon must be running:
 
 ```bash
 # From the repository root
@@ -88,8 +88,8 @@ Configuration is stored in YAML files:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.openllm/config.yaml` | User-level (global) settings |
-| `<workspace>/.openllm/config.yaml` | Workspace-specific settings |
+| `~/.config/abbenay/config.yaml` | User-level (global) settings |
+| `<workspace>/.config/abbenay/config.yaml` | Workspace-specific settings |
 
 Example config:
 
@@ -110,9 +110,9 @@ providers:
 
 | Command | Description |
 |---------|-------------|
-| `Open LLM: Show Daemon Status` | Check daemon connection status |
-| `Open LLM: Open Dashboard` | Open web dashboard in browser |
-| `Open LLM: Configure Provider` | Open provider configuration |
+| `Abbenay: Show Daemon Status` | Check daemon connection status |
+| `Abbenay: Open Dashboard` | Open web dashboard in browser |
+| `Abbenay: Configure Provider` | Open provider configuration |
 
 ## Supported Providers
 
@@ -128,16 +128,16 @@ providers:
 | DeepSeek | ✓ | ✗ | ✓ |
 | Groq | ✓ | ✗ | ✓ |
 
-## Using OpenLLM Models from Other Extensions
+## Using Abbenay Models from Other Extensions
 
-Other extensions can use OpenLLM models through the standard VS Code Language Model API:
+Other extensions can use Abbenay models through the standard VS Code Language Model API:
 
 ```typescript
 import * as vscode from 'vscode';
 
-// Get OpenLLM models
+// Get Abbenay models
 const models = await vscode.lm.selectChatModels({
-  vendor: 'openllm'
+  vendor: 'abbenay'
 });
 
 if (models.length > 0) {
@@ -159,7 +159,7 @@ The extension is a thin gRPC client with these responsibilities:
 
 | Component | Description |
 |-----------|-------------|
-| **Daemon Client** | Connects to the OpenLLM daemon via Unix socket |
+| **Daemon Client** | Connects to the Abbenay daemon via Unix socket |
 | **Backchannel** | Provides workspace path to daemon for workspace-level config |
 | **LM Provider** | Implements `LanguageModelChatProvider` to register models with VS Code |
 | **Status Bar** | Shows connection status |
@@ -196,22 +196,22 @@ npm run package
 
 1. Check if daemon is running:
    ```bash
-   pgrep -f "openllm daemon"
+   pgrep -f "abbenay daemon"
    ```
 
 2. Check socket exists:
    ```bash
-   ls -la /run/user/$(id -u)/openllm/daemon.sock
+   ls -la /run/user/$(id -u)/abbenay/daemon.sock
    ```
 
 3. Restart daemon:
    ```bash
-   pkill -f "node.*openllm"
-   rm -f /run/user/$(id -u)/openllm/daemon.sock
+   pkill -f "node.*abbenay"
+   rm -f /run/user/$(id -u)/abbenay/daemon.sock
    cd packages/daemon && node dist/index.js daemon
    ```
 
-4. Check Output panel: View → Output → "Open LLM Provider"
+4. Check Output panel: View → Output → "Abbenay Provider"
 
 ### Models Not Appearing
 

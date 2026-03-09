@@ -1,10 +1,10 @@
 /**
- * CoreState — the reusable library core of OpenLLM.
+ * CoreState — the reusable library core of Abbenay.
  *
  * Contains pure provider/model logic with zero transport awareness.
  * SecretStore is injected, ToolExecutor is injectable per-call.
  *
- * This class is the public API surface for @openllm/core consumers
+ * This class is the public API surface for @abbenay/core consumers
  * (agent devs, web devs, custom apps).
  */
 
@@ -197,7 +197,7 @@ export class CoreState {
 
     // Store API key in SecretStore if provided
     if (options.apiKey) {
-      const keychainName = `openllm.${providerId}`;
+      const keychainName = `abbenay.${providerId}`;
       await this.secretStore.set(keychainName, options.apiKey);
       providerCfg.api_key_keychain_name = keychainName;
     } else if (options.apiKeyEnvVar) {

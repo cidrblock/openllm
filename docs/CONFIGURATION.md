@@ -1,14 +1,14 @@
 # Configuration Guide
 
-OpenLLM uses YAML configuration files and system keychain for secrets.
+Abbenay uses YAML configuration files and system keychain for secrets.
 
 ## Config File Locations
 
 ### User Level
-`~/.openllm/config.yaml` - Applies globally to all workspaces
+`~/.config/abbenay/config.yaml` - Applies globally to all workspaces
 
 ### Workspace Level
-`<workspace>/.config/openllm/config.yaml` - Workspace-specific settings (overrides user-level)
+`<workspace>/.config/abbenay/config.yaml` - Workspace-specific settings (overrides user-level)
 
 ## Config File Format
 
@@ -124,10 +124,10 @@ An empty object `{}` means "enabled with all defaults."
 
 ## Web Dashboard Configuration
 
-The easiest way to configure OpenLLM is via the web dashboard:
+The easiest way to configure Abbenay is via the web dashboard:
 
-1. Start the daemon: `npm run daemon` (or `openllm daemon`)
-2. Start the web server: `npm run web` (or `openllm web`)
+1. Start the daemon: `npm run daemon` (or `abbenay daemon`)
+2. Start the web server: `npm run web` (or `abbenay web`)
 3. Open http://localhost:8787
 
 ### Provider Cards
@@ -143,8 +143,8 @@ Each provider shows:
 ### Config Location
 
 Click the settings icon to choose where config is saved:
-- **User**: `~/.openllm/config.yaml` (default)
-- **Workspace**: `<workspace>/.config/openllm/config.yaml` (requires VS Code connection)
+- **User**: `~/.config/abbenay/config.yaml` (default)
+- **Workspace**: `<workspace>/.config/abbenay/config.yaml` (requires VS Code connection)
 
 ## VS Code Extension
 
@@ -163,7 +163,7 @@ No configuration is stored in the extension itself.
 npm run status
 
 # Or with compiled binary
-openllm status
+abbenay status
 ```
 
 ### Start Services
@@ -173,8 +173,8 @@ npm run daemon    # Start daemon (foreground)
 npm run web       # Start web dashboard
 
 # Production
-openllm daemon &
-openllm web
+abbenay daemon &
+abbenay web
 ```
 
 ## Example Configurations
@@ -254,7 +254,7 @@ providers:
 - Configure via web dashboard for easy management
 
 ### Team Projects
-- Use workspace-level config (`.config/openllm/config.yaml`)
+- Use workspace-level config (`.config/abbenay/config.yaml`)
 - Reference env vars for API keys
 - Team members set their own env vars
 - Commit config file, add env var docs to README

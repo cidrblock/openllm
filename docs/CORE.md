@@ -1,10 +1,10 @@
-# @openllm/core
+# @abbenay/core
 
 A lightweight, transport-agnostic library for integrating LLM engines into your applications. Use it in agents, web apps, CLI tools, or any Node.js project that needs multi-provider LLM access.
 
 ## What is it?
 
-`@openllm/core` is the reusable library extracted from the OpenLLM daemon. It provides:
+`@abbenay/core` is the reusable library extracted from the Abbenay daemon. It provides:
 
 - **Multi-engine abstraction** over 15+ LLM providers via the Vercel AI SDK
 - **Streaming chat** with tool calling support
@@ -17,7 +17,7 @@ It has **zero transport dependencies** — no gRPC, no Express, no CLI. Just the
 ## Install
 
 ```bash
-npm install @openllm/core
+npm install @abbenay/core
 ```
 
 Then install only the AI SDK provider packages you need:
@@ -38,7 +38,7 @@ Provider packages are **optional peer dependencies** — loaded dynamically at r
 Build providers entirely in memory — no YAML, no disk:
 
 ```typescript
-import { CoreState, MemorySecretStore } from '@openllm/core';
+import { CoreState, MemorySecretStore } from '@abbenay/core';
 
 const core = new CoreState({ secretStore: new MemorySecretStore() });
 
@@ -60,7 +60,7 @@ for await (const chunk of core.chat('my-openai/gpt-4o', [
 
 ### From config files
 
-If you have a `~/.openllm/config.yaml`, CoreState reads it automatically:
+If you have a `~/.config/abbenay/config.yaml`, CoreState reads it automatically:
 
 ```typescript
 const core = new CoreState({ secretStore: new MemorySecretStore() });
@@ -74,12 +74,12 @@ You can also mix both — disk config plus programmatic additions. In-memory pro
 
 ## Configuration
 
-`@openllm/core` uses the same YAML config files as the full OpenLLM daemon.
+`@abbenay/core` uses the same YAML config files as the full Abbenay daemon.
 
 ### Config file locations
 
-- **User level**: `~/.openllm/config.yaml`
-- **Workspace level**: `<workspace>/.config/openllm/config.yaml`
+- **User level**: `~/.config/abbenay/config.yaml`
+- **Workspace level**: `<workspace>/.config/abbenay/config.yaml`
 
 ### Config format
 
@@ -113,7 +113,7 @@ Key concepts:
 ### Programmatic config access
 
 ```typescript
-import { loadConfig, saveConfig, getUserConfigPath } from '@openllm/core';
+import { loadConfig, saveConfig, getUserConfigPath } from '@abbenay/core';
 
 const config = loadConfig();
 console.log(config.providers);
@@ -130,7 +130,7 @@ saveConfig(config);
 The main entry point. Manages providers, models, and chat.
 
 ```typescript
-import { CoreState, MemorySecretStore } from '@openllm/core';
+import { CoreState, MemorySecretStore } from '@abbenay/core';
 
 const core = new CoreState({
   secretStore: new MemorySecretStore(),  // or your own SecretStore implementation
@@ -291,17 +291,17 @@ The Vercel AI SDK handles the tool execution loop automatically (up to `maxSteps
 | Meta (Llama) | `meta` | Yes | `@ai-sdk/openai-compatible` | Llama API |
 | Mock | `mock` | No | *(built-in)* | Testing only |
 
-## Relationship to @openllm/daemon
+## Relationship to @abbenay/daemon
 
-`@openllm/core` is the library. `@openllm/daemon` is the full application built on top of it.
+`@abbenay/core` is the library. `@abbenay/daemon` is the full application built on top of it.
 
 ```
-@openllm/core (this package)
+@abbenay/core (this package)
   CoreState, engines, config, secrets interface
   Zero transport dependencies
   For: agent devs, web devs, custom apps
 
-@openllm/daemon (full application)
+@abbenay/daemon (full application)
   DaemonState extends CoreState
   + gRPC server, web UI, CLI, VS Code backchannel
   + KeychainSecretStore (keytar), MCP, SEA binary

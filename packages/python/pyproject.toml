@@ -3,15 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openllm-client"
+name = "abbenay-client"
 version = "0.1.0"
-description = "OpenLLM gRPC client for Python"
+description = "Abbenay gRPC client for Python"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
-keywords = ["openllm", "llm", "grpc", "ai", "client"]
+keywords = ["abbenay", "llm", "grpc", "ai", "client"]
 authors = [
-    { name = "OpenLLM Contributors" }
+    { name = "Abbenay Contributors" }
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -37,9 +37,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/openllm/openllm"
-Documentation = "https://github.com/openllm/openllm#readme"
-Repository = "https://github.com/openllm/openllm"
+Homepage = "https://github.com/abbenay/abbenay"
+Documentation = "https://github.com/abbenay/abbenay#readme"
+Repository = "https://github.com/abbenay/abbenay"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -47,7 +47,7 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/openllm_grpc"]
+packages = ["src/abbenay_grpc"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

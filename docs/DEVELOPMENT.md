@@ -49,11 +49,11 @@ If `NODE_SEA_BASE` is not set, the build checks your system node for the fuse an
 ## Repository Structure
 
 ```
-openllm/
+abbenay/
 ├── packages/
 │   ├── daemon/              # TypeScript daemon + core library
 │   │   ├── src/
-│   │   │   ├── core/        # @openllm/core (reusable library)
+│   │   │   ├── core/        # @abbenay/core (reusable library)
 │   │   │   │   ├── index.ts # Public API
 │   │   │   │   ├── state.ts # CoreState
 │   │   │   │   ├── engines.ts # Engine registry (Vercel AI SDK)
@@ -151,7 +151,7 @@ node dist/daemon/index.js daemon
 
 ### 2. Making Proto Changes
 
-1. Edit `proto/openllm/v1/service.proto`
+1. Edit `proto/abbenay/v1/service.proto`
 2. Regenerate TypeScript stubs for VS Code:
    ```bash
    node build.js --proto-only
@@ -162,7 +162,7 @@ node dist/daemon/index.js daemon
 
 1. Open `packages/vscode` in VS Code
 2. Press **F5** to launch Extension Development Host
-3. Check Output panel -> "Open LLM Provider" for logs
+3. Check Output panel -> "Abbenay Provider" for logs
 
 ### 4. Web Dashboard
 
@@ -216,7 +216,7 @@ The engine will automatically appear in:
 
 ## Adding a New gRPC RPC
 
-1. **Define in proto** - Edit `proto/openllm/v1/service.proto`:
+1. **Define in proto** - Edit `proto/abbenay/v1/service.proto`:
    ```protobuf
    rpc NewMethod(NewMethodRequest) returns (NewMethodResponse);
    message NewMethodRequest { string field = 1; }
@@ -225,7 +225,7 @@ The engine will automatically appear in:
 
 2. **Regenerate stubs** - Run `node build.js --proto-only` for the VS Code extension
 
-3. **Implement handler** - Edit `packages/daemon/src/daemon/server/openllm-service.ts`:
+3. **Implement handler** - Edit `packages/daemon/src/daemon/server/abbenay-service.ts`:
    ```typescript
    NewMethod(
      call: grpc.ServerUnaryCall<any, any>,
@@ -252,15 +252,15 @@ npx vitest run tests/       # Integration tests only
 ## Debugging
 
 - **Daemon logs** - Console output from the daemon process
-- **Socket check** - `ls -la /run/user/$(id -u)/openllm/`
-- **VS Code logs** - Output panel -> "Open LLM Provider"
+- **Socket check** - `ls -la /run/user/$(id -u)/abbenay/`
+- **VS Code logs** - Output panel -> "Abbenay Provider"
 
 ## Common Issues
 
 ### Socket Permission Denied
 
 ```bash
-ls -la /run/user/$(id -u)/openllm/daemon.sock
+ls -la /run/user/$(id -u)/abbenay/daemon.sock
 # Should be owned by your user with appropriate permissions
 ```
 
@@ -268,10 +268,10 @@ ls -la /run/user/$(id -u)/openllm/daemon.sock
 
 ```bash
 # Kill any stale processes
-pkill -f "openllm-daemon"
+pkill -f "abbenay-daemon"
 
 # Remove stale socket
-rm -f /run/user/$(id -u)/openllm/daemon.sock
+rm -f /run/user/$(id -u)/abbenay/daemon.sock
 
 # Check for port conflicts
 lsof -i :8787

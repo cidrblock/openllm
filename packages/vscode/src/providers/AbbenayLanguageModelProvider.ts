@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import { DaemonClient } from '../daemon/client';
-import * as proto from '../proto/openllm/v1/service';
+import * as proto from '../proto/abbenay/v1/service';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
 
 /** Single vendor ID used in package.json */
-const VENDOR_ID = 'openllm';
+const VENDOR_ID = 'abbenay';
 
 /**
  * Format the `detail` field for a model in the VS Code picker.
@@ -72,11 +72,11 @@ function formatTooltip(model: proto.Model): string {
 }
 
 /**
- * Single handler for the `openllm` vendor.
+ * Single handler for the `abbenay` vendor.
  * All virtual models from all virtual providers are served through this one handler.
  * The `family` field provides grouping by virtual provider in the picker.
  */
-class OpenLLMHandler implements vscode.LanguageModelChatProvider {
+class AbbenayHandler implements vscode.LanguageModelChatProvider {
     constructor(
         private readonly models: proto.Model[],
         private readonly client: DaemonClient,
@@ -97,7 +97,7 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
             const info = {
                 id: compositeId,                              // Routing key: "anthropic-test/claude-opus-4-6"
                 name: compositeId,                            // Display: "anthropic-test/claude-opus-4-6"
-                family: provider || 'openllm',                // Grouping (not prominent in picker)
+                family: provider || 'abbenay',                // Grouping (not prominent in picker)
                 detail: formatDetail(model),                  // "anthropic-test (anthropic) · default"
                 tooltip: formatTooltip(model),                // Full details on hover
                 version: '1.0.0',
@@ -245,7 +245,7 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
 }
 
 /**
- * Manages the single `openllm` Language Model registration with VS Code.
+ * Manages the single `abbenay` Language Model registration with VS Code.
  * 
  * All virtual models across all virtual providers are served through one vendor.
  * The `family` field on each model provides visual grouping by virtual provider
@@ -253,8 +253,8 @@ class OpenLLMHandler implements vscode.LanguageModelChatProvider {
  * 
  * Model refresh is driven by backchannel push notifications from the daemon.
  */
-export class OpenLLMLanguageModelProvider {
-    private handler: OpenLLMHandler | null = null;
+export class AbbenayLanguageModelProvider {
+    private handler: AbbenayHandler | null = null;
     private disposable: vscode.Disposable | null = null;
 
     constructor(private client: DaemonClient) {}
@@ -263,7 +263,7 @@ export class OpenLLMLanguageModelProvider {
      * Start the provider - fetches models and registers the single vendor.
      */
     async start(): Promise<void> {
-        logger.info('[LMProvider] Starting OpenLLM Language Model Provider (single vendor)');
+        logger.info('[LMProvider] Starting Abbenay Language Model Provider (single vendor)');
         await this.refreshModels();
         logger.info('[LMProvider] Language Model Provider started');
     }
@@ -272,7 +272,7 @@ export class OpenLLMLanguageModelProvider {
      * Stop the provider and clean up registration
      */
     stop(): void {
-        logger.info('[LMProvider] Stopping OpenLLM Language Model Provider');
+        logger.info('[LMProvider] Stopping Abbenay Language Model Provider');
         if (this.disposable) {
             this.disposable.dispose();
             this.disposable = null;
@@ -302,7 +302,7 @@ export class OpenLLMLanguageModelProvider {
                 this.disposable.dispose();
                 this.disposable = null;
             }
-            this.handler = new OpenLLMHandler(allModels, this.client);
+            this.handler = new AbbenayHandler(allModels, this.client);
             this.disposable = vscode.lm.registerLanguageModelChatProvider(VENDOR_ID, this.handler);
             logger.info(`[LMProvider] Registered vendor: ${VENDOR_ID} (${allModels.length} models)`);
 

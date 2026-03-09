@@ -1,11 +1,11 @@
-// OpenLLM Daemon gRPC Service Definition
+// Abbenay Daemon gRPC Service Definition
 // 
-// This is the contract for all OpenLLM clients (VS Code, Python, Node.js, CLI)
-// to communicate with the central OpenLLM daemon.
+// This is the contract for all Abbenay clients (VS Code, Python, Node.js, CLI)
+// to communicate with the central Abbenay daemon.
 
 syntax = "proto3";
 
-package openllm.v1;
+package abbenay.v1;
 
 // We define our own Empty and Timestamp to avoid protoc include path issues.
 // These will be mapped to prost_types equivalents in Rust.
@@ -235,7 +235,7 @@ message PromptMessage {
 // Main Service - Unified daemon API
 //
 
-service OpenLLM {
+service Abbenay {
   //
   // Chat
   //
@@ -401,7 +401,7 @@ service OpenLLM {
 //
 
 message ChatRequest {
-  string model = 1;                     // e.g., "openai/gpt-4o" or "openllm/copilot-gpt-4o"
+  string model = 1;                     // e.g., "openai/gpt-4o" or "abbenay/copilot-gpt-4o"
   repeated Message messages = 2;
   ChatOptions options = 3;
   repeated Tool tools = 4;             // Client-provided tool definitions (overrides registry)

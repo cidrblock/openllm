@@ -1,5 +1,5 @@
 /**
- * Thin gRPC client used ONLY by `openllm web` CLI (Case A)
+ * Thin gRPC client used ONLY by `abbenay web` CLI (Case A)
  * to send StartWebServer / StopWebServer to an already-running daemon.
  * 
  * This is NOT used by the web dashboard itself — the dashboard
@@ -18,21 +18,21 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Resolve proto directory. Checks:
- *  1) OPENLLM_PROTO_DIR env var
+ *  1) ABBENAY_PROTO_DIR env var
  *  2) Next to parent dir: __dirname/../proto/  (esbuild bundle, __dirname is web/)
  *  3) __dirname/proto/ (flat bundle)
  *  4) Monorepo layout: __dirname/../../../../proto/  (development from dist/web/)
  */
 function resolveProtoDir(): string {
   const candidates = [
-    process.env.OPENLLM_PROTO_DIR,
+    process.env.ABBENAY_PROTO_DIR,
     path.resolve(__dirname, '../proto'),
     path.resolve(__dirname, 'proto'),
     path.resolve(__dirname, '../../../../../proto'),
   ].filter(Boolean) as string[];
   
   for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, 'openllm', 'v1', 'service.proto'))) {
+    if (fs.existsSync(path.join(dir, 'abbenay', 'v1', 'service.proto'))) {
       return dir;
     }
   }
@@ -40,7 +40,7 @@ function resolveProtoDir(): string {
 }
 
 const PROTO_DIR = resolveProtoDir();
-const PROTO_PATH = path.join(PROTO_DIR, 'openllm', 'v1', 'service.proto');
+const PROTO_PATH = path.join(PROTO_DIR, 'abbenay', 'v1', 'service.proto');
 
 function createClient(): any {
   const socketPath = getDefaultSocketPath();
@@ -56,7 +56,7 @@ function createClient(): any {
   });
   
   const proto = grpc.loadPackageDefinition(packageDef);
-  return new (proto as any).openllm.v1.OpenLLM(
+  return new (proto as any).abbenay.v1.Abbenay(
     address,
     grpc.credentials.createInsecure(),
   );

@@ -6,7 +6,7 @@ import type { SecretStore } from '../../core/secrets.js';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 
-const SERVICE_NAME = 'openllm';
+const SERVICE_NAME = 'abbenay';
 
 /**
  * Check if we are running inside a Node.js Single Executable Application (SEA).

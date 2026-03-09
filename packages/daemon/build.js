@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * OpenLLM Daemon — Unified Build Script
+ * Abbenay Daemon — Unified Build Script
  *
  * Handles the entire pipeline: esbuild bundle -> SEA blob -> inject -> sidecar copy -> zip.
  * A developer just needs Node.js and npm to build the whole project.
@@ -24,7 +24,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const IS_WIN = process.platform === 'win32';
-const APP_NAME = 'openllm-daemon';
+const APP_NAME = 'abbenay-daemon';
 const PLATFORM = process.platform === 'win32' ? 'win32'
   : process.platform === 'darwin' ? 'darwin' : 'linux';
 const ARCH = process.arch;
@@ -35,7 +35,7 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const SKIP_ZIP = process.argv.includes('--skip-zip');
 
 async function build() {
-  console.log(`Building OpenLLM daemon for ${PLATFORM}-${ARCH}...`);
+  console.log(`Building Abbenay daemon for ${PLATFORM}-${ARCH}...`);
 
   // ── 1. Clean & Setup ──────────────────────────────────────────────────
   if (fs.existsSync(PLATFORM_DIR)) {
@@ -65,8 +65,8 @@ async function build() {
   });
   console.log(`  Bundle: ${bundlePath} (${formatSize(fs.statSync(bundlePath).size)})`);
 
-  // ── 1b. Build @openllm/core package ──────────────────────────────────
-  console.log('[1b/5] Building @openllm/core package...');
+  // ── 1b. Build @abbenay/core package ──────────────────────────────────
+  console.log('[1b/5] Building @abbenay/core package...');
 
   const coreOutDir = path.join(__dirname, 'dist', 'core');
   // Don't clean dist/core/ — tsc may have already written .d.ts files there.
@@ -97,7 +97,7 @@ async function build() {
   // Generate package.json for core
   const rootPkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
   const corePkg = {
-    name: '@openllm/core',
+    name: '@abbenay/core',
     version: rootPkg.version || '0.1.0',
     type: 'module',
     main: 'index.js',

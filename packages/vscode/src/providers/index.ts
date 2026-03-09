@@ -1,1 +1,1 @@
-export { OpenLLMLanguageModelProvider } from './OpenLLMLanguageModelProvider';
+export { AbbenayLanguageModelProvider } from './AbbenayLanguageModelProvider';

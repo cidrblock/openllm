@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bundle the OpenLLM daemon for the VS Code extension.
+ * Bundle the Abbenay daemon for the VS Code extension.
  *
  * Delegates to packages/daemon/build.js which handles the entire pipeline:
  * esbuild bundle -> SEA injection -> sidecar copy.
@@ -37,7 +37,7 @@ function copyDirRecursive(src, dest) {
 }
 
 function bundleDaemon() {
-    console.log('Building OpenLLM daemon for VS Code extension...');
+    console.log('Building Abbenay daemon for VS Code extension...');
     ensureDir(BIN_DIR);
 
     // Run the unified build script (--skip-zip since we embed in the VSIX)
@@ -67,7 +67,7 @@ function bundleDaemon() {
             } else {
                 fs.copyFileSync(src, dest);
                 // Preserve executable permission on binaries
-                if (entry.name.startsWith('openllm-daemon-') || entry.name.endsWith('.node')) {
+                if (entry.name.startsWith('abbenay-daemon-') || entry.name.endsWith('.node')) {
                     fs.chmodSync(dest, 0o755);
                 }
             }

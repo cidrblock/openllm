@@ -1,9 +1,9 @@
 {
-  "name": "open-llm-provider",
-  "displayName": "Open LLM Provider",
+  "name": "abbenay-provider",
+  "displayName": "Abbenay Provider",
   "description": "Use any LLM with any VS Code extension - OpenAI, Anthropic, Google, Ollama & more. The open alternative to Copilot.",
   "version": "0.1.0",
-  "publisher": "open-llm",
+  "publisher": "abbenay",
   "license": "MIT",
   "icon": "images/icon.png",
   "engines": {
@@ -30,7 +30,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/open-llm/open-llm-provider"
+    "url": "https://github.com/abbenay/abbenay"
   },
   "activationEvents": [
     "onStartupFinished"
@@ -39,26 +39,26 @@
   "contributes": {
     "commands": [
       {
-        "command": "openLLM.daemonStatus",
+        "command": "abbenay.daemonStatus",
         "title": "Show Daemon Status",
-        "category": "Open LLM"
+        "category": "Abbenay"
       },
       {
-        "command": "openLLM.openDashboard",
+        "command": "abbenay.openDashboard",
         "title": "Open Dashboard",
-        "category": "Open LLM",
+        "category": "Abbenay",
         "icon": "$(dashboard)"
       },
       {
-        "command": "openLLM.configureProvider",
+        "command": "abbenay.configureProvider",
         "title": "Configure Provider",
-        "category": "Open LLM"
+        "category": "Abbenay"
       }
     ],
     "configuration": {
-      "title": "Open LLM Provider",
+      "title": "Abbenay Provider",
       "properties": {
-        "openLLM.logLevel": {
+        "abbenay.logLevel": {
           "type": "string",
           "enum": [
             "debug",
@@ -73,8 +73,8 @@
     },
     "languageModelChatProviders": [
       {
-        "vendor": "openllm",
-        "displayName": "OpenLLM"
+        "vendor": "abbenay",
+        "displayName": "Abbenay"
       }
     ]
   },

@@ -15749,6 +15749,10 @@ function isObject(value: any): boolean {
   return typeof value === "object" && value !== null;
 }
 
+/** Aliases for Abbenay (proto service renamed from OpenLLM) */
+export type AbbenayClient = OpenLLMClient;
+export const AbbenayDefinition = OpenLLMDefinition;
+
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
 }

@@ -1,29 +1,29 @@
 /**
- * Platform-aware path utilities for OpenLLM
+ * Platform-aware path utilities for Abbenay
  *
  * All daemon, extension, and CLI code should use these helpers to ensure
  * consistent file placement across Linux, macOS, and Windows.
  *
  * Conventions:
  *   Runtime dir  (ephemeral: PID, socket, lock)
- *     Linux:   $XDG_RUNTIME_DIR/openllm  → /run/user/<uid>/openllm
- *     macOS:   os.tmpdir()/openllm        → /var/folders/.../openllm
+ *     Linux:   $XDG_RUNTIME_DIR/abbenay  → /run/user/<uid>/abbenay
+ *     macOS:   os.tmpdir()/abbenay        → /var/folders/.../abbenay
  *     Windows: named pipe (no dir needed for socket)
- *     Fallback: /tmp/openllm
+ *     Fallback: /tmp/abbenay
  *
  *   Config dir   (persistent user config)
- *     Linux:   $XDG_CONFIG_HOME/openllm   → ~/.config/openllm
- *     macOS:   ~/Library/Application Support/openllm
- *     Windows: %APPDATA%/openllm
+ *     Linux:   $XDG_CONFIG_HOME/abbenay   → ~/.config/abbenay
+ *     macOS:   ~/Library/Application Support/abbenay
+ *     Windows: %APPDATA%/abbenay
  *
  *   Workspace config dir
- *     All:     <workspace>/.config/openllm
+ *     All:     <workspace>/.config/abbenay
  */
 
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-const APP_NAME = 'openllm';
+const APP_NAME = 'abbenay';
 
 // ── Runtime directory ────────────────────────────────────────────────
 
@@ -64,9 +64,9 @@ export function getRuntimeDir(): string {
 /**
  * Get the persistent user config directory.
  *
- * - macOS:   ~/Library/Application Support/openllm
- * - Windows: %APPDATA%/openllm
- * - Linux:   $XDG_CONFIG_HOME/openllm → ~/.config/openllm
+ * - macOS:   ~/Library/Application Support/abbenay
+ * - Windows: %APPDATA%/abbenay
+ * - Linux:   $XDG_CONFIG_HOME/abbenay → ~/.config/abbenay
  */
 export function getConfigDir(): string {
     if (process.platform === 'darwin') {
@@ -88,7 +88,7 @@ export function getConfigDir(): string {
 /**
  * Get the workspace-level config directory.
  *
- *   <workspacePath>/.config/openllm
+ *   <workspacePath>/.config/abbenay
  */
 export function getWorkspaceConfigDir(workspacePath: string): string {
     return path.join(workspacePath, '.config', APP_NAME);
@@ -99,14 +99,14 @@ export function getWorkspaceConfigDir(workspacePath: string): string {
 /** Socket path:  <runtimeDir>/daemon.sock  (or Windows named pipe) */
 export function getSocketPath(): string {
     if (process.platform === 'win32') {
-        return '\\\\.\\pipe\\openllm-daemon';
+        return '\\\\.\\pipe\\abbenay-daemon';
     }
     return path.join(getRuntimeDir(), 'daemon.sock');
 }
 
-/** PID file:  <runtimeDir>/openllm.pid */
+/** PID file:  <runtimeDir>/abbenay.pid */
 export function getPidPath(): string {
-    return path.join(getRuntimeDir(), 'openllm.pid');
+    return path.join(getRuntimeDir(), 'abbenay.pid');
 }
 
 /** User config file:  <configDir>/config.yaml */

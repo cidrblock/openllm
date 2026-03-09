@@ -1,9 +1,9 @@
 {
-  "name": "@openllm/proto",
+  "name": "@abbenay/proto",
   "version": "0.1.0",
-  "description": "OpenLLM gRPC protocol definitions for TypeScript",
-  "main": "src/openllm/v1/service.ts",
-  "types": "src/openllm/v1/service.ts",
+  "description": "Abbenay gRPC protocol definitions for TypeScript",
+  "main": "src/abbenay/v1/service.ts",
+  "types": "src/abbenay/v1/service.ts",
   "type": "module",
   "scripts": {
     "generate": "../../proto/generate.sh typescript"
@@ -23,7 +23,7 @@
     "src"
   ],
   "keywords": [
-    "openllm",
+    "abbenay",
     "grpc",
     "protobuf"
   ],

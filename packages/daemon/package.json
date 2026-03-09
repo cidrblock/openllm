@@ -1,11 +1,12 @@
 {
-  "name": "@openllm/daemon",
+  "name": "@abbenay/daemon",
   "version": "0.1.0",
-  "description": "OpenLLM daemon - unified AI service",
+  "description": "Abbenay daemon - unified AI service",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "openllm": "dist/index.js"
+    "abbenay": "dist/index.js",
+    "aby": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

@@ -1,21 +1,21 @@
-# OpenLLM Python Client
+# Abbenay Python Client
 
-A Python gRPC client for the OpenLLM daemon.
+A Python gRPC client for the Abbenay daemon.
 
 ## Installation
 
 ```bash
-pip install openllm-client
+pip install abbenay-client
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-from openllm_grpc import OpenLLMClient
+from abbenay_grpc import AbbenayClient
 
 async def main():
-    async with OpenLLMClient() as client:
+    async with AbbenayClient() as client:
         # Chat with a model
         async for chunk in client.chat("openai/gpt-4o", "Hello!"):
             if chunk.type == "text":
@@ -46,7 +46,7 @@ asyncio.run(main())
 ## Requirements
 
 - Python 3.9+
-- OpenLLM daemon running (`openllm daemon`)
+- Abbenay daemon running (`abbenay daemon`)
 
 ## License
 

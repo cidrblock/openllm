@@ -12,7 +12,7 @@ import { KeychainSecretStore } from './secrets/keychain.js';
 import { ToolRegistry } from '../core/tool-registry.js';
 import { ToolRouter } from './tool-router.js';
 import { McpClientPool } from './mcp-client-pool.js';
-import { OpenLLMMcpServer } from './mcp-server.js';
+import { AbbenayMcpServer } from './mcp-server.js';
 
 // Re-export core types needed by daemon consumers (gRPC service, web server)
 export type { ChatToolOptions, ProviderInfo, ModelInfo } from '../core/state.js';
@@ -24,7 +24,7 @@ export { ToolRegistry } from '../core/tool-registry.js';
 export { ToolRouter } from './tool-router.js';
 export { McpClientPool } from './mcp-client-pool.js';
 export type { McpServerStatus } from './mcp-client-pool.js';
-export { OpenLLMMcpServer } from './mcp-server.js';
+export { AbbenayMcpServer } from './mcp-server.js';
 
 // ── Client types ───────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ export class DaemonState extends CoreState {
   private vscodeConnections = new Map<string, VSCodeConnection>();
   public readonly toolRouter: ToolRouter;
   public readonly mcpClientPool: McpClientPool;
-  public readonly mcpServer: OpenLLMMcpServer;
+  public readonly mcpServer: AbbenayMcpServer;
 
   constructor() {
     super({ secretStore: new KeychainSecretStore() });
@@ -76,7 +76,7 @@ export class DaemonState extends CoreState {
     this.toolRegistry = new ToolRegistry();
     this.toolRouter = new ToolRouter();
     this.mcpClientPool = new McpClientPool(this.toolRegistry!);
-    this.mcpServer = new OpenLLMMcpServer(this.toolRegistry!, this.toolRouter);
+    this.mcpServer = new AbbenayMcpServer(this.toolRegistry!, this.toolRouter);
 
     // Wire VS Code tool invoker into the router
     this.toolRouter.setVSCodeInvoker(

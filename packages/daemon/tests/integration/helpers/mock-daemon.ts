@@ -1,7 +1,7 @@
 /**
  * Mock gRPC daemon server for testing.
  * 
- * Implements the OpenLLM gRPC service with predictable, deterministic responses.
+ * Implements the Abbenay gRPC service with predictable, deterministic responses.
  * Uses TCP (127.0.0.1:0) so tests don't need Unix socket permissions.
  */
 
@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Proto path relative to this test helper
-const PROTO_PATH = path.resolve(__dirname, '../../../../../proto/openllm/v1/service.proto');
+const PROTO_PATH = path.resolve(__dirname, '../../../../../proto/abbenay/v1/service.proto');
 const PROTO_INCLUDE = path.resolve(__dirname, '../../../../../proto');
 
 /**
@@ -72,13 +72,13 @@ export async function createMockDaemon(chatOptions?: MockChatOptions): Promise<M
     includeDirs: [PROTO_INCLUDE],
   });
   const proto = grpc.loadPackageDefinition(packageDef);
-  const openllmProto = (proto as any).openllm.v1;
+  const abbenayProto = (proto as any).abbenay.v1;
   
   const server = new grpc.Server();
   
   // ─── Service implementation ───────────────────────────────────────────
   
-  server.addService(openllmProto.OpenLLM.service, {
+  server.addService(abbenayProto.Abbenay.service, {
     /**
      * Register - return a mock client ID
      */
@@ -334,7 +334,7 @@ export function createTestClient(address: string): any {
     includeDirs: [PROTO_INCLUDE],
   });
   const proto = grpc.loadPackageDefinition(packageDef);
-  return new (proto as any).openllm.v1.OpenLLM(
+  return new (proto as any).abbenay.v1.Abbenay(
     address,
     grpc.credentials.createInsecure(),
   );

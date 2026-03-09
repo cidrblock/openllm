@@ -1,7 +1,7 @@
 /**
- * OpenLLMMcpServer — exposes aggregated tools as an MCP server.
+ * AbbenayMcpServer — exposes aggregated tools as an MCP server.
  *
- * External MCP clients can connect to OpenLLM and use all aggregated tools
+ * External MCP clients can connect to Abbenay and use all aggregated tools
  * (from VS Code workspaces, external MCP servers, and agent-registered tools)
  * through the standard MCP protocol.
  *
@@ -15,7 +15,7 @@ import type { Express, Request, Response } from 'express';
 import type { ToolRegistry } from '../core/tool-registry.js';
 import type { ToolRouter } from './tool-router.js';
 
-export class OpenLLMMcpServer {
+export class AbbenayMcpServer {
   private mcpServer: McpServer;
   private transport?: StreamableHTTPServerTransport;
   private running = false;
@@ -25,7 +25,7 @@ export class OpenLLMMcpServer {
     private router: ToolRouter,
   ) {
     this.mcpServer = new McpServer({
-      name: 'openllm',
+      name: 'abbenay',
       version: '0.1.0',
     });
   }

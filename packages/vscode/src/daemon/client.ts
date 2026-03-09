@@ -1,19 +1,19 @@
 /**
- * OpenLLM Daemon Client for VS Code Extension
+ * Abbenay Daemon Client for VS Code Extension
  * 
- * This module provides the gRPC client for communicating with the OpenLLM daemon.
- * The client is generated from proto/openllm/v1/service.proto
+ * This module provides the gRPC client for communicating with the Abbenay daemon.
+ * The client is generated from proto/abbenay/v1/service.proto
  * 
  * The daemon uses Unix Domain Sockets for local IPC.
  * Runtime paths (PID file, socket) are computed using the same platform-aware
  * logic as the daemon (see packages/daemon/src/paths.ts):
- *   Linux:   $XDG_RUNTIME_DIR/openllm  → /run/user/<uid>/openllm
- *   macOS:   os.tmpdir()/openllm
+ *   Linux:   $XDG_RUNTIME_DIR/abbenay  → /run/user/<uid>/abbenay
+ *   macOS:   os.tmpdir()/abbenay
  *   Windows: named pipe
  */
 
 import { createChannel, createClient, Channel } from 'nice-grpc';
-import * as proto from '../proto/openllm/v1/service';
+import * as proto from '../proto/abbenay/v1/service';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,9 +21,9 @@ import * as os from 'os';
 import { getLogger } from '../utils/logger';
 
 // Re-export the generated types for convenience
-export * from '../proto/openllm/v1/service';
+export * from '../proto/abbenay/v1/service';
 
-const APP_NAME = 'openllm';
+const APP_NAME = 'abbenay';
 
 // ── Platform-aware path helpers (mirrors daemon's paths.ts) ─────────
 
@@ -59,7 +59,7 @@ function getRuntimeDir(): string {
 const RUNTIME_DIR = getRuntimeDir();
 const PID_FILE = path.join(RUNTIME_DIR, `${APP_NAME}.pid`);
 const SOCKET_FILE = process.platform === 'win32'
-    ? '\\\\.\\pipe\\openllm-daemon'
+    ? '\\\\.\\pipe\\abbenay-daemon'
     : path.join(RUNTIME_DIR, 'daemon.sock');
 
 // gRPC address for Unix Domain Socket
@@ -104,11 +104,11 @@ export function isDaemonRunning(): boolean {
 }
 
 /**
- * Wrapper around the generated OpenLLM gRPC client
+ * Wrapper around the generated Abbenay gRPC client
  */
 export class DaemonClient {
     private channel: Channel | null = null;
-    private client: proto.OpenLLMClient | null = null;
+    private client: proto.AbbenayClient | null = null;
     private clientId: string | null = null;
     private address: string;
 
@@ -145,23 +145,23 @@ export class DaemonClient {
                 logger.info('[Daemon] Daemon started and ready');
             } else {
                 throw new Error(
-                    `OpenLLM daemon is not running. ` +
+                    `Abbenay daemon is not running. ` +
                     `Expected socket at ${SOCKET_FILE}. ` +
-                    `Start the daemon with: openllm daemon`
+                    `Start the daemon with: abbenay daemon`
                 );
             }
         }
 
         logger.info(`[Daemon] Creating gRPC channel to ${this.address}`);
         this.channel = createChannel(this.address);
-        this.client = createClient(proto.OpenLLMDefinition, this.channel);
+        this.client = createClient(proto.AbbenayDefinition, this.channel);
     }
 
     /**
      * Start the daemon process.
      * 
      * The daemon is a TypeScript/Node.js application.
-     * Priority: 1) `openllm` in PATH (global install or SEA binary)
+     * Priority: 1) `abbenay` in PATH (global install or SEA binary)
      *           2) Workspace monorepo packages/daemon/dist/index.js
      *           3) Bundled daemon JS in extension's bin/ directory
      * 
@@ -182,7 +182,7 @@ export class DaemonClient {
         logger.info(`[Daemon] Spawning: ${cmd} ${[...args, 'daemon'].join(' ')}`);
         
         // Log daemon stdout/stderr to a file so we can debug
-        const logPath = path.join(os.tmpdir(), 'openllm-daemon.log');
+        const logPath = path.join(os.tmpdir(), 'abbenay-daemon.log');
         const logFd = fs.openSync(logPath, 'a');
         logger.info(`[Daemon] Logging to: ${logPath}`);
 
@@ -191,8 +191,8 @@ export class DaemonClient {
             stdio: ['ignore', logFd, logFd],
             env: {
                 ...process.env,
-                OPENLLM_SOCKET: SOCKET_FILE,
-                OPENLLM_PID_FILE: PID_FILE,
+                ABBENAY_SOCKET: SOCKET_FILE,
+                ABBENAY_PID_FILE: PID_FILE,
             },
         });
         
@@ -208,23 +208,23 @@ export class DaemonClient {
      * binary — no Node.js dependency needed at runtime.
      * 
      * Priority:
-     *   1) `openllm` in PATH (global install or SEA binary)
+     *   1) `abbenay` in PATH (global install or SEA binary)
      *   2) Bundled SEA binary in extension's bin/
      */
     private async findDaemonCommand(): Promise<{ cmd: string; args: string[] }> {
         const { execSync } = await import('child_process');
         const logger = getLogger();
         
-        // 1) Try to find openllm in PATH (global npm install, npm link, or SEA binary)
+        // 1) Try to find abbenay in PATH (global npm install, npm link, or SEA binary)
         try {
-            const cmd = process.platform === 'win32' ? 'where openllm' : 'which openllm';
+            const cmd = process.platform === 'win32' ? 'where abbenay' : 'which abbenay';
             const result = execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
             if (result && fs.existsSync(result)) {
-                logger.info(`[Daemon] Found openllm in PATH: ${result}`);
+                logger.info(`[Daemon] Found abbenay in PATH: ${result}`);
                 return { cmd: result, args: [] };
             }
         } catch {
-            logger.info('[Daemon] openllm not found in PATH');
+            logger.info('[Daemon] abbenay not found in PATH');
         }
 
         // 2) Bundled SEA binary — self-contained, no node dependency
@@ -232,7 +232,7 @@ export class DaemonClient {
             const platform = process.platform === 'win32' ? 'win32' 
                 : process.platform === 'darwin' ? 'darwin' : 'linux';
             const arch = process.arch;
-            const seaBinary = path.join(extensionPath, 'bin', `openllm-daemon-${platform}-${arch}`);
+            const seaBinary = path.join(extensionPath, 'bin', `abbenay-daemon-${platform}-${arch}`);
             if (fs.existsSync(seaBinary)) {
                 logger.info(`[Daemon] Found SEA binary: ${seaBinary}`);
                 return { cmd: seaBinary, args: [] };
@@ -241,7 +241,7 @@ export class DaemonClient {
         }
 
         throw new Error(
-            `OpenLLM daemon binary not found. ` +
+            `Abbenay daemon binary not found. ` +
             `The extension package may be corrupt — try reinstalling.`
         );
     }
@@ -275,7 +275,7 @@ export class DaemonClient {
     /**
      * Get the raw client for advanced usage
      */
-    getClient(): proto.OpenLLMClient {
+    getClient(): proto.AbbenayClient {
         if (!this.client) {
             throw new Error('Not connected to daemon. Call connect() first.');
         }
@@ -287,7 +287,7 @@ export class DaemonClient {
      */
     async register(capabilities: string[] = ['chat', 'tools']): Promise<string> {
         const client = this.getClient();
-        const extensionVersion = vscode.extensions.getExtension('open-llm.open-llm-provider')?.packageJSON?.version || '0.1.0';
+        const extensionVersion = vscode.extensions.getExtension('abbenay.abbenay-provider')?.packageJSON?.version || '0.1.0';
         
         // Get workspace path from VS Code
         const workspaceFolders = vscode.workspace.workspaceFolders;

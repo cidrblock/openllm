@@ -1,7 +1,7 @@
-# OpenLLM Daemon Vision
+# Abbenay Daemon Vision
 
 **Status:** Historical (original design document)  
-**Author:** OpenLLM Team  
+**Author:** Abbenay Team  
 **Date:** February 2026
 
 ---
@@ -13,7 +13,7 @@
 > - Providers now use the [Vercel AI SDK](https://sdk.vercel.ai/) (`@ai-sdk/*`), not `multi-llm-ts`
 > - Source reorganized into `src/core/` (reusable library) and `src/daemon/` (full application)
 > - `CoreState` (transport-agnostic) and `DaemonState extends CoreState`
-> - `@openllm/core` published as a standalone library for agent/web developers
+> - `@abbenay/core` published as a standalone library for agent/web developers
 > - Dynamic provider loading — AI SDK packages loaded on demand
 >
 > **Implemented:**
@@ -42,7 +42,7 @@
 
 ## Executive Summary
 
-OpenLLM is a **unified AI daemon** that serves as the single source of truth for LLM access, configuration, and session state across all clients—VS Code, CLI, Python scripts, and web dashboard.
+Abbenay is a **unified AI daemon** that serves as the single source of truth for LLM access, configuration, and session state across all clients—VS Code, CLI, Python scripts, and web dashboard.
 
 The daemon enables:
 - **Session continuity**: Start a chat in VS Code, continue it from the CLI
@@ -69,7 +69,7 @@ The daemon enables:
                                               │
                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        openllm-daemon (Rust)                             │
+│                        abbenay-daemon (Rust)                             │
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐│
 │  │                         Session Manager                              ││
@@ -102,12 +102,12 @@ The daemon enables:
 
 ## Core Components
 
-### 1. openllm-daemon
+### 1. abbenay-daemon
 
 The central Rust binary that runs as a background process.
 
 **Responsibilities:**
-- Serve gRPC API on Unix socket (`/run/user/{uid}/openllm.sock`)
+- Serve gRPC API on Unix socket (`/run/user/{uid}/abbenay.sock`)
 - Manage persistent chat sessions
 - Route requests to LLM providers (HTTP) or VS Code (MCP)
 - Execute tool calling loops
@@ -133,7 +133,7 @@ The extension acts as a **gRPC client** to the daemon with a **backchannel** for
 1. Disconnect from daemon
 2. Unregister from VS Code LM API
 
-### 3. Web Dashboard (`openllm web`)
+### 3. Web Dashboard (`abbenay web`)
 
 Browser-based configuration UI served by a separate process.
 
@@ -152,9 +152,9 @@ Browser-based configuration UI served by a separate process.
 Thin gRPC client libraries (auto-generated from proto).
 
 ```python
-from openllm import Client
+from abbenay_grpc import AbbenayClient
 
-client = Client()  # Connects to daemon, starts if needed
+client = AbbenayClient()  # Connects to daemon, starts if needed
 
 # Chat with any model
 for chunk in client.chat("openai/gpt-4o", "Hello!"):
@@ -176,35 +176,35 @@ Command-line interface for interactive and scripted use.
 
 ```bash
 # Quick chat
-$ openllm chat "Hello" --model openai/gpt-4o
+$ abbenay chat "Hello" --model openai/gpt-4o
 
 # List sessions
-$ openllm session list
+$ abbenay session list
 ID            MODEL           MESSAGES  AGE        SOURCE
 sess-abc123   openai/gpt-4o   15        10m ago    vscode
 sess-def456   anthropic/...   3         2h ago     cli
 
 # Attach to a session (started in VS Code)
-$ openllm session attach sess-abc123
+$ abbenay session attach sess-abc123
 Resuming session with openai/gpt-4o (15 messages)
 ---
 You: Now add error handling
 Assistant: Here's the updated code...
 
 # Detach (session persists)
-$ openllm session detach
+$ abbenay session detach
 Session saved.
 
 # Export session to share with team
-$ openllm session export sess-abc123 > session.json
+$ abbenay session export sess-abc123 > session.json
 
 # Import a colleague's session
-$ openllm session import < session.json
+$ abbenay session import < session.json
 Imported session: sess-abc123
 
 # Daemon management
-$ openllm daemon status
-$ openllm daemon stop
+$ abbenay daemon status
+$ abbenay daemon stop
 ```
 
 ---
@@ -298,7 +298,7 @@ pub enum ClientType {
 Sessions are persisted to disk for crash recovery:
 
 ```
-~/.openllm/sessions/
+~/.config/abbenay/sessions/
 ├── sess-abc123.json
 ├── sess-def456.json
 └── index.json  # Quick lookup metadata
@@ -315,18 +315,18 @@ Because sessions are human-readable JSON files, they become **shareable knowledg
 
 ```bash
 # Export a session
-$ openllm session export sess-abc123 > debugging-session.json
+$ abbenay session export sess-abc123 > debugging-session.json
 
 # Share via git, Slack, email, etc.
 $ git add docs/ai-sessions/auth-refactor.json
 $ git commit -m "Add AI-assisted auth refactor session for reference"
 
 # Colleague imports the session
-$ openllm session import < debugging-session.json
+$ abbenay session import < debugging-session.json
 Imported session: sess-abc123 (15 messages)
 
 # Or just copy the file
-$ cp debugging-session.json ~/.openllm/sessions/
+$ cp debugging-session.json ~/.config/abbenay/sessions/
 ```
 
 **Use cases:**
@@ -346,7 +346,7 @@ $ cp debugging-session.json ~/.openllm/sessions/
 {
   "id": "sess-abc123",
   "topic": "Debugging memory leak in auth service",
-  "model": "openllm/copilot-gpt-4o",
+  "model": "abbenay/copilot-gpt-4o",
   "created_by": { "client": "vscode", "user": "alice" },
   "created_at": "2026-02-09T10:30:00Z",
   "messages": [
@@ -375,7 +375,7 @@ The readable format means sessions can be:
 When a session is modified by one client, others can be notified:
 
 ```protobuf
-service OpenLLM {
+service Abbenay {
   // Subscribe to session events
   rpc WatchSessions(WatchSessionsRequest) returns (stream SessionEvent);
 }
@@ -400,12 +400,12 @@ VS Code could use this to show a notification: "Session updated from CLI."
 
 ```protobuf
 syntax = "proto3";
-package openllm.v1;
+package abbenay.v1;
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 
-service OpenLLM {
+service Abbenay {
   //
   // Chat
   //
@@ -710,35 +710,35 @@ The daemon exposes itself as an MCP server (via the shim) with these tools:
 
 | Tool | Description |
 |------|-------------|
-| `openllm_chat` | Send a chat message, get streaming response |
-| `openllm_list_models` | List all available models (all providers) |
-| `openllm_get_config` | Get configuration |
+| `abbenay_chat` | Send a chat message, get streaming response |
+| `abbenay_list_models` | List all available models (all providers) |
+| `abbenay_get_config` | Get configuration |
 
 ### Session Tools (Cross-Tool Pickup)
 
 | Tool | Description |
 |------|-------------|
-| `openllm_session_list` | List available sessions with metadata |
-| `openllm_session_get` | Get full session with message history |
-| `openllm_session_create` | Create a new session |
-| `openllm_session_chat` | Chat within a session (uses session's model) |
-| `openllm_session_replay` | Get session formatted for context injection |
-| `openllm_session_summarize` | Get AI-generated summary of a session |
-| `openllm_session_fork` | Fork a session (new session linked to parent) |
-| `openllm_session_export` | Export session as shareable JSON artifact |
+| `abbenay_session_list` | List available sessions with metadata |
+| `abbenay_session_get` | Get full session with message history |
+| `abbenay_session_create` | Create a new session |
+| `abbenay_session_chat` | Chat within a session (uses session's model) |
+| `abbenay_session_replay` | Get session formatted for context injection |
+| `abbenay_session_summarize` | Get AI-generated summary of a session |
+| `abbenay_session_fork` | Fork a session (new session linked to parent) |
+| `abbenay_session_export` | Export session as shareable JSON artifact |
 
-This allows Claude Desktop to use OpenLLM's configured models:
+This allows Claude Desktop to use Abbenay's configured models:
 
 ```
 Claude Desktop
      │
-     │ "Use openllm_chat with gpt-4o to..."
+     │ "Use abbenay_chat with gpt-4o to..."
      ▼
-openllm-mcp-server
+abbenay-mcp-server
      │
      │ gRPC Chat(openai/gpt-4o, ...)
      ▼
-openllm-daemon
+abbenay-daemon
      │
      │ HTTP
      ▼
@@ -753,10 +753,10 @@ One of the most powerful features: **start a session in one tool (VS Code), cont
 
 ### Important: The Proxy Requirement
 
-For OpenLLM to capture a session, **all chat messages must flow through OpenLLM**, even when using underlying models like Copilot. Native Copilot Chat (or any direct model access) bypasses OpenLLM and cannot be captured.
+For Abbenay to capture a session, **all chat messages must flow through Abbenay**, even when using underlying models like Copilot. Native Copilot Chat (or any direct model access) bypasses Abbenay and cannot be captured.
 
 ```
-❌ Native Copilot Chat (OpenLLM CANNOT capture):
+❌ Native Copilot Chat (Abbenay CANNOT capture):
 
   VS Code Copilot Chat
        │
@@ -764,18 +764,18 @@ For OpenLLM to capture a session, **all chat messages must flow through OpenLLM*
        ▼
   GitHub Copilot → GPT-4o
   
-  OpenLLM has NO visibility. Session NOT captured.
+  Abbenay has NO visibility. Session NOT captured.
 
 
-✅ OpenLLM Chat using Copilot model (OpenLLM CAN capture):
+✅ Abbenay Chat using Copilot model (Abbenay CAN capture):
 
-  OpenLLM Chat UI (or VS Code Chat with vendor: 'open-llm')
+  Abbenay Chat UI (or VS Code Chat with vendor: 'abbenay')
        │
-       │ User selects: "openllm/copilot-gpt-4o"
+       │ User selects: "abbenay/copilot-gpt-4o"
        ▼
-  OpenLLM Daemon ◄─── Session captured here (sess-abc123)
+  Abbenay Daemon ◄─── Session captured here (sess-abc123)
        │
-       │ MCP: openllm_llm_send
+       │ MCP: abbenay_llm_send
        ▼
   VS Code Extension (MCP Server)
        │
@@ -783,21 +783,21 @@ For OpenLLM to capture a session, **all chat messages must flow through OpenLLM*
        ▼
   GitHub Copilot → GPT-4o
   
-  Same model underneath, but OpenLLM sees all messages.
+  Same model underneath, but Abbenay sees all messages.
 ```
 
-### How OpenLLM Exposes vscode.lm Models
+### How Abbenay Exposes vscode.lm Models
 
-OpenLLM acts as a **proxy** for vscode.lm models:
+Abbenay acts as a **proxy** for vscode.lm models:
 
 1. **Discovery**: Daemon queries VS Code's MCP server for available `vscode.lm` models
-2. **Re-exposure**: Models appear in OpenLLM with `openllm/` prefix (e.g., `openllm/copilot-gpt-4o`)
-3. **Routing**: When user selects this model, OpenLLM routes through MCP to real Copilot
+2. **Re-exposure**: Models appear in Abbenay with `abbenay/` prefix (e.g., `abbenay/copilot-gpt-4o`)
+3. **Routing**: When user selects this model, Abbenay routes through MCP to real Copilot
 4. **Capture**: All messages flow through daemon → session persisted
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  OpenLLM Model Selector                                         │
+│  Abbenay Model Selector                                         │
 │                                                                  │
 │  Direct Providers (HTTP):                                        │
 │    ○ openai/gpt-4o                                              │
@@ -805,9 +805,9 @@ OpenLLM acts as a **proxy** for vscode.lm models:
 │    ○ ollama/llama3                                              │
 │                                                                  │
 │  VS Code LM Models (via MCP proxy):                             │
-│    ● openllm/copilot-gpt-4o        ◄── Same as native Copilot  │
-│    ○ openllm/copilot-gpt-4              but OpenLLM sees it    │
-│    ○ openllm/github-claude-3-5-sonnet                           │
+│    ● abbenay/copilot-gpt-4o        ◄── Same as native Copilot  │
+│    ○ abbenay/copilot-gpt-4              but Abbenay sees it    │
+│    ○ abbenay/github-claude-3-5-sonnet                           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -817,10 +817,10 @@ OpenLLM acts as a **proxy** for vscode.lm models:
 | Approach | Session Captured? | Cross-Tool Pickup? | Notes |
 |----------|-------------------|-------------------|-------|
 | Native Copilot Chat | ❌ No | ❌ No | Direct, but isolated |
-| OpenLLM Chat → Copilot | ✅ Yes | ✅ Yes | Same model, full features |
-| OpenLLM Chat → OpenAI | ✅ Yes | ✅ Yes | Direct HTTP, full features |
+| Abbenay Chat → Copilot | ✅ Yes | ✅ Yes | Same model, full features |
+| Abbenay Chat → OpenAI | ✅ Yes | ✅ Yes | Direct HTTP, full features |
 
-**Recommendation**: For users who want session continuity, use OpenLLM's chat interface (or VS Code Chat with OpenLLM as provider) instead of native Copilot Chat. The underlying model is identical—only the routing changes.
+**Recommendation**: For users who want session continuity, use Abbenay's chat interface (or VS Code Chat with Abbenay as provider) instead of native Copilot Chat. The underlying model is identical—only the routing changes.
 
 ### The Challenge
 
@@ -838,9 +838,9 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│  Step 1: User works in OpenLLM Chat (VS Code) with Copilot model   │
+│  Step 1: User works in Abbenay Chat (VS Code) with Copilot model   │
 │                                                                     │
-│  [User selected model: openllm/copilot-gpt-4o]                     │
+│  [User selected model: abbenay/copilot-gpt-4o]                     │
 │                                                                     │
 │  User: "Help me refactor auth.ts to async/await"                   │
 │  Assistant: "I'll help with that. Looking at your code..."        │
@@ -848,10 +848,10 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 │  User: "Now I need to handle session refresh"                      │
 │  Assistant: "For session refresh, consider..."                     │
 │                                                                     │
-│  [Session sess-abc123 captured by OpenLLM daemon]                  │
-│  [20 messages, model: openllm/copilot-gpt-4o, source: vscode]      │
+│  [Session sess-abc123 captured by Abbenay daemon]                  │
+│  [20 messages, model: abbenay/copilot-gpt-4o, source: vscode]      │
 │                                                                     │
-│  Note: Under the hood, OpenLLM routes to real Copilot via MCP.     │
+│  Note: Under the hood, Abbenay routes to real Copilot via MCP.     │
 │  User gets same responses as native Copilot, but session is saved. │
 └────────────────────────────────────────────────────────────────────┘
                               │
@@ -863,13 +863,13 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 │  User: "Continue my VS Code session about the refactor"            │
 │                                                                     │
 │  Claude: Let me check for your recent sessions...                  │
-│          [calls openllm_session_list]                              │
+│          [calls abbenay_session_list]                              │
 │                                                                     │
 │  Tool Result:                                                       │
 │  ┌────────────────────────────────────────────────────────────────┐│
 │  │ Sessions:                                                       ││
 │  │ - sess-abc123: "Refactoring auth module"                       ││
-│  │   Model: openllm/copilot-gpt-4o | 20 msgs | VS Code | 1 hour ago││
+│  │   Model: abbenay/copilot-gpt-4o | 20 msgs | VS Code | 1 hour ago││
 │  │ - sess-def456: "Bug investigation"                             ││
 │  │   Model: openai/gpt-4o | 5 msgs | CLI | 3 hours ago            ││
 │  └────────────────────────────────────────────────────────────────┘│
@@ -882,7 +882,7 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 │                                                                     │
 │  User: Option 1, read the context                                  │
 │                                                                     │
-│  Claude: [calls openllm_session_replay(session_id="sess-abc123")]  │
+│  Claude: [calls abbenay_session_replay(session_id="sess-abc123")]  │
 │                                                                     │
 └────────────────────────────────────────────────────────────────────┘
                               │
@@ -890,10 +890,10 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 ┌────────────────────────────────────────────────────────────────────┐
 │  Step 3: Claude receives the session context                       │
 │                                                                     │
-│  Tool Result (openllm_session_replay):                             │
+│  Tool Result (abbenay_session_replay):                             │
 │  ┌────────────────────────────────────────────────────────────────┐│
-│  │ === OpenLLM Session: sess-abc123 ===                           ││
-│  │ Model: openllm/copilot-gpt-4o (via vscode.lm)                  ││
+│  │ === Abbenay Session: sess-abc123 ===                           ││
+│  │ Model: abbenay/copilot-gpt-4o (via vscode.lm)                  ││
 │  │ Created: 2026-02-09 10:30 in VS Code                           ││
 │  │ Topic: Refactoring auth module to async/await                  ││
 │  │                                                                 ││
@@ -923,7 +923,7 @@ The daemon exposes session tools via MCP, allowing any MCP client to discover an
 └────────────────────────────────────────────────────────────────────┘
 
 Key insight: The original session used GPT-4o (via Copilot), but Claude can 
-now continue it because OpenLLM captured and persisted the session history.
+now continue it because Abbenay captured and persisted the session history.
 The model changed, but the context transferred successfully.
 ```
 
@@ -931,8 +931,8 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_list",
-  "description": "List OpenLLM chat sessions available for continuation. Sessions can be started in VS Code, CLI, or other tools.",
+  "name": "abbenay_session_list",
+  "description": "List Abbenay chat sessions available for continuation. Sessions can be started in VS Code, CLI, or other tools.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -955,14 +955,14 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_replay",
+  "name": "abbenay_session_replay",
   "description": "Get a session's conversation history formatted for context injection. Use this to understand and continue a conversation started in another tool.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "session_id": {
         "type": "string",
-        "description": "Session ID from openllm_session_list"
+        "description": "Session ID from abbenay_session_list"
       },
       "max_messages": {
         "type": "integer",
@@ -981,7 +981,7 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_summarize",
+  "name": "abbenay_session_summarize",
   "description": "Get an AI-generated summary of a session. Useful for large sessions that won't fit in context, or to quickly understand what was discussed.",
   "inputSchema": {
     "type": "object",
@@ -1005,7 +1005,7 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_continue",
+  "name": "abbenay_session_continue",
   "description": "Send a message to an existing session. The response comes from the session's original model (e.g., if session was with GPT-4o, response comes from GPT-4o).",
   "inputSchema": {
     "type": "object",
@@ -1025,7 +1025,7 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_fork",
+  "name": "abbenay_session_fork",
   "description": "Fork a session to create a new branch. The new session starts with the same history but can diverge. Useful for exploring alternative approaches.",
   "inputSchema": {
     "type": "object",
@@ -1050,8 +1050,8 @@ The model changed, but the context transferred successfully.
 
 ```json
 {
-  "name": "openllm_session_export",
-  "description": "Export a session as a portable JSON artifact. Can be shared with colleagues, stored in git, or imported into another OpenLLM instance.",
+  "name": "abbenay_session_export",
+  "description": "Export a session as a portable JSON artifact. Can be shared with colleagues, stored in git, or imported into another Abbenay instance.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1079,7 +1079,7 @@ The model changed, but the context transferred successfully.
 Complete message history, suitable for models with large context windows:
 
 ```markdown
-=== OpenLLM Session: sess-abc123 ===
+=== Abbenay Session: sess-abc123 ===
 Model: copilot/gpt-4o
 Created: 2026-02-09 10:30 in VS Code
 Topic: Refactoring auth module
@@ -1115,7 +1115,7 @@ Here's how I'd break it down...
 Summary + recent messages, for models with smaller context:
 
 ```markdown
-=== OpenLLM Session: sess-abc123 ===
+=== Abbenay Session: sess-abc123 ===
 Model: copilot/gpt-4o
 Created: 2026-02-09 10:30 in VS Code
 
@@ -1156,7 +1156,7 @@ refreshSession() function that checks token expiry before each API call...
 Just the high-level summary, for quick context:
 
 ```markdown
-=== OpenLLM Session Summary: sess-abc123 ===
+=== Abbenay Session Summary: sess-abc123 ===
 Model: copilot/gpt-4o | 20 messages | VS Code | 1 hour ago
 
 **Topic**: Refactoring auth.ts from callbacks to async/await
@@ -1192,10 +1192,10 @@ Cursor (Claude) reads sess-abc123 history
 
 #### Option 2: Relay (True Continuation)
 
-Messages are relayed through OpenLLM to the original model.
+Messages are relayed through Abbenay to the original model.
 
 ```
-Cursor sends message → openllm_session_continue(sess-abc123, msg)
+Cursor sends message → abbenay_session_continue(sess-abc123, msg)
    → Daemon routes to copilot/gpt-4o
    → Response added to sess-abc123
    → Cursor displays response
@@ -1208,7 +1208,7 @@ Cursor sends message → openllm_session_continue(sess-abc123, msg)
 Create a new session that starts with the same history.
 
 ```
-Cursor: openllm_session_fork(sess-abc123, new_model="anthropic/claude-3-5-sonnet")
+Cursor: abbenay_session_fork(sess-abc123, new_model="anthropic/claude-3-5-sonnet")
    → Creates sess-xyz789 (forked from sess-abc123)
    → New session uses Claude, starts with full history
    → Both sessions exist independently
@@ -1312,9 +1312,9 @@ pub struct CachedSummary {
 
 ```
 1. Extension activates
-2. Try connect to /run/user/{uid}/openllm.sock
+2. Try connect to /run/user/{uid}/abbenay.sock
 3. Connection fails → socket doesn't exist
-4. Spawn: openllm-daemon --socket /run/user/{uid}/openllm.sock
+4. Spawn: abbenay-daemon --socket /run/user/{uid}/abbenay.sock
 5. Wait for socket to appear (poll with backoff)
 6. Connect via gRPC
 7. Register MCP endpoint: RegisterMcpEndpoint(my_mcp_socket)
@@ -1324,8 +1324,8 @@ pub struct CachedSummary {
 ### Second Client (CLI)
 
 ```
-1. CLI command: openllm chat "Hello"
-2. Try connect to /run/user/{uid}/openllm.sock
+1. CLI command: abbenay chat "Hello"
+2. Try connect to /run/user/{uid}/abbenay.sock
 3. Connection succeeds → daemon already running
 4. Send Chat request
 5. Stream response
@@ -1335,10 +1335,10 @@ pub struct CachedSummary {
 ### Third Client (Claude Desktop via MCP)
 
 ```
-1. Claude Desktop spawns: openllm-mcp-server
+1. Claude Desktop spawns: abbenay-mcp-server
 2. MCP shim tries connect to socket → succeeds
 3. MCP shim translates MCP calls to gRPC
-4. Claude Desktop uses openllm_chat tool
+4. Claude Desktop uses abbenay_chat tool
 5. Works seamlessly
 ```
 
@@ -1366,7 +1366,7 @@ pub struct CachedSummary {
 | **Session Sharing** | Export sessions as JSON; share via git, Slack, or email with colleagues |
 | **Universal Model Access** | Python/CLI can use Copilot via daemon's MCP connection |
 | **Zero Config Conflicts** | One daemon = one config = no drift |
-| **MCP Exposure** | Claude Desktop, Cursor can use OpenLLM's models |
+| **MCP Exposure** | Claude Desktop, Cursor can use Abbenay's models |
 | **Warm Performance** | Daemon stays loaded; fast for all clients |
 | **Tool Sharing** | VS Code tools available to all clients |
 | **Unified Secrets** | One keychain/env lookup, shared |
@@ -1378,8 +1378,8 @@ pub struct CachedSummary {
 
 ### Phase 1: Add gRPC Server (Parallel)
 
-1. Add `tonic` gRPC server to `openllm-core`
-2. Create `openllm-daemon` binary
+1. Add `tonic` gRPC server to `abbenay-core`
+2. Create `abbenay-daemon` binary
 3. Implement core RPC methods (Chat, ListModels)
 4. VS Code can optionally use daemon mode
 
@@ -1392,7 +1392,7 @@ pub struct CachedSummary {
 
 ### Phase 3: MCP Shim
 
-1. Create `openllm-mcp-server` binary
+1. Create `abbenay-mcp-server` binary
 2. Publish mcpserver.json configuration
 3. Test with Claude Desktop
 
@@ -1419,8 +1419,8 @@ pub struct CachedSummary {
 
 | File | Path | Purpose |
 |------|------|---------|
-| Socket | `/run/user/{uid}/openllm.sock` | gRPC server socket |
-| Sessions | `~/.openllm/sessions/*.json` | Persisted sessions |
-| Config | `~/.openllm/config.yaml` | User configuration |
-| Logs | `~/.openllm/logs/daemon.log` | Daemon logs |
-| PID | `~/.openllm/daemon.pid` | Process ID for management |
+| Socket | `/run/user/{uid}/abbenay.sock` | gRPC server socket |
+| Sessions | `~/.config/abbenay/sessions/*.json` | Persisted sessions |
+| Config | `~/.config/abbenay/config.yaml` | User configuration |
+| Logs | `~/.config/abbenay/logs/daemon.log` | Daemon logs |
+| PID | `~/.config/abbenay/daemon.pid` | Process ID for management |

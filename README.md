@@ -1,15 +1,15 @@
-# OpenLLM
+# Abbenay
 
 A unified AI daemon and library for OpenAI, Anthropic, Google Gemini, Mistral, Ollama, and 10+ more providers.
 
 ## Packages
 
-OpenLLM produces two packages from a single source tree:
+Abbenay produces two packages from a single source tree:
 
 | Package | What | For |
 |---------|------|-----|
-| **@openllm/core** | Lightweight library — LLM engine abstraction, streaming chat, model discovery, config, secret store interface. Zero transport deps. | Agent developers, web developers, custom apps |
-| **@openllm/daemon** | Complete application — gRPC server, web dashboard, CLI, VS Code backchannel, SEA binary. Bundles core internally. | End users running the daemon |
+| **@abbenay/core** | Lightweight library — LLM engine abstraction, streaming chat, model discovery, config, secret store interface. Zero transport deps. | Agent developers, web developers, custom apps |
+| **@abbenay/daemon** | Complete application — gRPC server, web dashboard, CLI, VS Code backchannel, SEA binary. Bundles core internally. | End users running the daemon |
 
 ## Features
 
@@ -17,10 +17,16 @@ OpenLLM produces two packages from a single source tree:
 - **Unified daemon**: TypeScript/Node.js service serves all clients via gRPC
 - **Web dashboard**: Configure providers, API keys, and models via browser UI
 - **VS Code integration**: Models appear in VS Code's Language Model picker
-- **Reusable core library**: Use `@openllm/core` in your own apps without the daemon
+- **Reusable core library**: Use `@abbenay/core` in your own apps without the daemon
 - **Dynamic model discovery**: Fetches available models from provider APIs
 - **Tool calling**: Full tool execution loop with approval tiers
 - **Single Executable Application (SEA)**: Self-contained binary, no Node.js install required
+
+## Why "Abbenay"?
+
+**Abbenay** is the central settlement on the anarchist moon Anarres in Ursula K. Le Guin's *The Dispossessed* (1974). The name means "mind" in the constructed language Pravic.
+
+The name fits this project on three levels: it literally means *mind* (an AI/LLM tool), it comes from a society built on openness and shared resources rather than proprietary ownership (the open alternative to vendor lock-in), and Abbenay itself is a coordination hub in a decentralized world -- exactly what this daemon does for LLM providers, VS Code, and MCP servers.
 
 ## Architecture
 
@@ -30,14 +36,14 @@ OpenLLM produces two packages from a single source tree:
 │  ├── VS Code Extension (gRPC)                                            │
 │  ├── Web Dashboard (HTTP, embedded)                                      │
 │  ├── Python scripts (gRPC)                                               │
-│  └── Custom apps (@openllm/core)                                         │
+│  └── Custom apps (@abbenay/core)                                         │
 └─────────────────────────────────────────────────────────────────────────┘
                               │ gRPC (Unix socket) or direct library use
                               ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  openllm daemon (TypeScript/Node.js)                                     │
+│  abbenay daemon (TypeScript/Node.js)                                    │
 │                                                                          │
-│  ┌─ @openllm/core ──────────────────────────────────────────────────┐   │
+│  ┌─ @abbenay/core ──────────────────────────────────────────────────┐   │
 │  │  CoreState       engines.ts (Vercel AI SDK)    config.ts (YAML)   │   │
 │  │  SecretStore     streaming chat + tools        model discovery    │   │
 │  └───────────────────────────────────────────────────────────────────┘   │
@@ -71,7 +77,7 @@ npm run web       # Start web dashboard at http://localhost:8787
 ### Using the core library
 
 ```typescript
-import { CoreState, MemorySecretStore } from '@openllm/core';
+import { CoreState, MemorySecretStore } from '@abbenay/core';
 
 const core = new CoreState({ secretStore: new MemorySecretStore() });
 
@@ -143,8 +149,8 @@ AI SDK provider packages are **dynamically loaded** — install only the ones yo
 
 ### Config files
 
-- **User level**: `~/.openllm/config.yaml`
-- **Workspace level**: `<workspace>/.config/openllm/config.yaml`
+- **User level**: `~/.config/abbenay/config.yaml`
+- **Workspace level**: `<workspace>/.config/abbenay/config.yaml`
 
 ### Example
 
@@ -175,11 +181,11 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full config reference
 ## Project Structure
 
 ```
-openllm/
+abbenay/
 ├── packages/
 │   ├── daemon/                # TypeScript daemon + core library
 │   │   ├── src/
-│   │   │   ├── core/          # @openllm/core (reusable library)
+│   │   │   ├── core/          # @abbenay/core (reusable library)
 │   │   │   │   ├── index.ts   # Public API exports
 │   │   │   │   ├── state.ts   # CoreState class
 │   │   │   │   ├── engines.ts # Engine registry (Vercel AI SDK)

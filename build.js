@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unified OpenLLM monorepo build script.
+ * Unified Abbenay monorepo build script.
  *
  * One command builds everything:
  *   node build.js                # Full build (proto + SEA + VSIX + zip)
@@ -25,7 +25,7 @@ const __dirname = path.dirname(__filename);
 // ── Paths ──────────────────────────────────────────────────────────────
 const ROOT = __dirname;
 const PROTO_DIR = path.join(ROOT, 'proto');
-const PROTO_FILE = path.join(PROTO_DIR, 'openllm', 'v1', 'service.proto');
+const PROTO_FILE = path.join(PROTO_DIR, 'abbenay', 'v1', 'service.proto');
 const DAEMON_ROOT = path.join(ROOT, 'packages', 'daemon');
 const VSCODE_ROOT = path.join(ROOT, 'packages', 'vscode');
 const PYTHON_ROOT = path.join(ROOT, 'packages', 'python');
@@ -101,8 +101,8 @@ function generatePython() {
     }
 
     // Generate
-    const pyOut = path.join(PYTHON_ROOT, 'src', 'openllm_grpc');
-    ensureDir(path.join(pyOut, 'openllm', 'v1'));
+    const pyOut = path.join(PYTHON_ROOT, 'src', 'abbenay_grpc');
+    ensureDir(path.join(pyOut, 'abbenay', 'v1'));
 
     run(
         `"${venvPython}" -m grpc_tools.protoc ` +
@@ -114,8 +114,8 @@ function generatePython() {
     );
 
     // Create __init__.py files
-    fs.writeFileSync(path.join(pyOut, 'openllm', '__init__.py'), '');
-    fs.writeFileSync(path.join(pyOut, 'openllm', 'v1', '__init__.py'), '');
+    fs.writeFileSync(path.join(pyOut, 'abbenay', '__init__.py'), '');
+    fs.writeFileSync(path.join(pyOut, 'abbenay', 'v1', '__init__.py'), '');
 
     console.log(`  Python client generated at ${pyOut}`);
 }
@@ -196,7 +196,7 @@ function buildDaemon() {
             const dest = path.join(binDir, entry.name);
             if (entry.isFile()) {
                 fs.copyFileSync(src, dest);
-                if (entry.name.startsWith('openllm-daemon-') || entry.name.endsWith('.node')) {
+                if (entry.name.startsWith('abbenay-daemon-') || entry.name.endsWith('.node')) {
                     fs.chmodSync(dest, 0o755);
                 }
             } else if (entry.isDirectory()) {
@@ -207,7 +207,7 @@ function buildDaemon() {
     }
 }
 
-// Stage 3b removed: vendor list is now static in package.json (single "openllm" vendor).
+// Stage 3b removed: vendor list is now static in package.json (single "abbenay" vendor).
 // No build-time generation needed.
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -238,7 +238,7 @@ function createDistribution() {
 
     // Copy SEA binary
     const seaDir = path.join(DAEMON_ROOT, 'dist', 'sea');
-    const seaBinaryName = `openllm-daemon-${PLATFORM}-${ARCH}`;
+    const seaBinaryName = `abbenay-daemon-${PLATFORM}-${ARCH}`;
     const seaBinary = path.join(seaDir, seaBinaryName);
     if (fs.existsSync(seaBinary)) {
         fs.copyFileSync(seaBinary, path.join(PLATFORM_DIR, seaBinaryName));
@@ -272,7 +272,7 @@ function createDistribution() {
     }
 
     // Zip
-    const zipName = `openllm-${PLATFORM}-${ARCH}.zip`;
+    const zipName = `abbenay-${PLATFORM}-${ARCH}.zip`;
     console.log(`  Creating ${zipName}...`);
     if (IS_WIN) {
         run(`powershell Compress-Archive -Path "${PLATFORM_DIR}/*" -DestinationPath "${path.join(DIST_DIR, zipName)}" -Force`);
@@ -303,14 +303,14 @@ function installExtension() {
 
     // Uninstall first to force a clean install (--force alone doesn't always replace files)
     try {
-        run('code --uninstall-extension open-llm.open-llm-provider 2>/dev/null || true');
+        run('code --uninstall-extension abbenay.abbenay-provider 2>/dev/null || true');
     } catch { /* ignore if not installed */ }
 
     // Remove stale extension directories
     const extDir = path.join(process.env.HOME || '~', '.vscode', 'extensions');
     if (fs.existsSync(extDir)) {
         for (const entry of fs.readdirSync(extDir)) {
-            if (entry.startsWith('open-llm.open-llm-provider-')) {
+            if (entry.startsWith('abbenay.abbenay-provider-')) {
                 const fullPath = path.join(extDir, entry);
                 console.log(`  Removing stale: ${entry}`);
                 fs.rmSync(fullPath, { recursive: true, force: true });
@@ -327,7 +327,7 @@ function installExtension() {
 // ═══════════════════════════════════════════════════════════════════════
 async function main() {
     const startTime = Date.now();
-    console.log(`OpenLLM build for ${PLATFORM}-${ARCH}`);
+    console.log(`Abbenay build for ${PLATFORM}-${ARCH}`);
 
     // Stage 1 & 2: Proto generation
     if (!SKIP_PROTO) {
@@ -345,7 +345,7 @@ async function main() {
     // Stage 3: Build daemon (SEA)
     buildDaemon();
 
-    // Stage 3b removed: vendor list is static (single "openllm" vendor)
+    // Stage 3b removed: vendor list is static (single "abbenay" vendor)
 
     // Stage 4: Package extension
     packageExtension();

@@ -3,7 +3,7 @@
  *
  * Provides the fallback executor for ToolRegistry.buildExecutor() in the daemon context.
  * Knows how to reach VS Code backchannel and MCP client pool — things that
- * @openllm/core doesn't (and shouldn't) know about.
+ * @abbenay/core doesn't (and shouldn't) know about.
  */
 
 import type { RegisteredTool } from '../core/tool-registry.js';

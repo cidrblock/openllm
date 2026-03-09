@@ -21,7 +21,7 @@ import {
   isProcessRunning,
 } from './transport.js';
 import { DaemonState } from './state.js';
-import { createOpenLLMService } from './server/openllm-service.js';
+import { createAbbenayService } from './server/abbenay-service.js';
 import { stopEmbeddedWebServer } from './web/server.js';
 
 export type { DaemonState };
@@ -31,19 +31,19 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Resolve the proto file path. Checks multiple locations:
- *  1) OPENLLM_PROTO_DIR env var (explicit override)
+ *  1) ABBENAY_PROTO_DIR env var (explicit override)
  *  2) Next to the current file: __dirname/proto/  (esbuild bundle)
  *  3) Monorepo layout: __dirname/../../../proto/  (development from dist/)
  */
 function resolveProtoPath(): { protoFile: string; includeDir: string } {
   const candidates = [
-    process.env.OPENLLM_PROTO_DIR,
+    process.env.ABBENAY_PROTO_DIR,
     path.resolve(__dirname, 'proto'),
     path.resolve(__dirname, '../../../../proto'),
   ].filter(Boolean) as string[];
   
   for (const dir of candidates) {
-    const file = path.join(dir, 'openllm', 'v1', 'service.proto');
+    const file = path.join(dir, 'abbenay', 'v1', 'service.proto');
     if (fs.existsSync(file)) {
       return { protoFile: file, includeDir: dir };
     }
@@ -51,7 +51,7 @@ function resolveProtoPath(): { protoFile: string; includeDir: string } {
   
   throw new Error(
     `Proto file not found. Searched:\n` +
-    candidates.map(d => `  - ${path.join(d, 'openllm/v1/service.proto')}`).join('\n')
+    candidates.map(d => `  - ${path.join(d, 'abbenay/v1/service.proto')}`).join('\n')
   );
 }
 
@@ -82,15 +82,15 @@ function loadProto() {
 
 /**
  * Start the daemon (gRPC server only, no web).
- * Returns the DaemonState for callers that need it (e.g. `openllm web` in-process mode).
+ * Returns the DaemonState for callers that need it (e.g. `abbenay web` in-process mode).
  */
 export async function startDaemon(opts?: { keepAlive?: boolean }): Promise<DaemonState> {
   // Check if already running
   if (isDaemonRunningSync()) {
-    throw new Error('OpenLLM daemon is already running');
+    throw new Error('Abbenay daemon is already running');
   }
   
-  console.log('Starting OpenLLM daemon...');
+  console.log('Starting Abbenay daemon...');
   
   // Ensure directories exist
   ensureSocketDir();
@@ -106,13 +106,13 @@ export async function startDaemon(opts?: { keepAlive?: boolean }): Promise<Daemo
   
   // Load proto and create server
   const proto = loadProto();
-  const openllmProto = (proto.openllm as any).v1;
+  const abbenayProto = (proto.abbenay as any).v1;
   
   server = new grpc.Server();
   
-  // Add OpenLLM service
-  const openllmService = createOpenLLMService(state);
-  server.addService(openllmProto.OpenLLM.service, openllmService);
+  // Add Abbenay service
+  const abbenayService = createAbbenayService(state);
+  server.addService(abbenayProto.Abbenay.service, abbenayService);
   
   // Bind to Unix socket
   const socketPath = getDefaultSocketPath();
@@ -131,7 +131,7 @@ export async function startDaemon(opts?: { keepAlive?: boolean }): Promise<Daemo
     );
   });
   
-  console.log(`OpenLLM daemon listening on ${socketPath}`);
+  console.log(`Abbenay daemon listening on ${socketPath}`);
   console.log(`Version: ${state.version}`);
   
   // Initialize MCP connections from config (non-blocking)

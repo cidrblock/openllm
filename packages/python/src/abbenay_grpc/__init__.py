@@ -1,21 +1,21 @@
-"""OpenLLM gRPC Client for Python.
+"""Abbenay gRPC Client for Python.
 
-This module provides a Python client for communicating with the OpenLLM daemon
+This module provides a Python client for communicating with the Abbenay daemon
 via gRPC over Unix Domain Sockets.
 
 Daemon paths:
-    Socket: $XDG_RUNTIME_DIR/openllm/daemon.sock (or ~/.openllm/daemon.sock)
-    PID file: $XDG_RUNTIME_DIR/openllm/openllm.pid (or ~/.openllm/openllm.pid)
+    Socket: $XDG_RUNTIME_DIR/abbenay/daemon.sock (or ~/.abbenay/daemon.sock)
+    PID file: $XDG_RUNTIME_DIR/abbenay/abbenay.pid (or ~/.abbenay/abbenay.pid)
 
 Example usage:
 
-    from openllm_grpc import OpenLLMClient
+    from abbenay_grpc import AbbenayClient
 
     # Check if daemon is running
-    if not OpenLLMClient.is_daemon_running():
-        print("Start the daemon: openllm daemon")
+    if not AbbenayClient.is_daemon_running():
+        print("Start the daemon: abbenay daemon")
     
-    async with OpenLLMClient() as client:
+    async with AbbenayClient() as client:
         # Chat with a model
         async for chunk in client.chat("openai/gpt-4o", "Hello!"):
             print(chunk.text, end="")
@@ -30,8 +30,8 @@ Example usage:
 """
 
 from .client import (
-    OpenLLMClient,
-    OpenLLMError,
+    AbbenayClient,
+    AbbenayError,
     ConnectionError,
     NotFoundError,
     ChatChunk,
@@ -40,8 +40,8 @@ from .client import (
 )
 
 __all__ = [
-    "OpenLLMClient",
-    "OpenLLMError",
+    "AbbenayClient",
+    "AbbenayError",
     "ConnectionError",
     "NotFoundError",
     "ChatChunk",

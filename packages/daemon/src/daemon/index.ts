@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * OpenLLM Daemon - TypeScript Implementation
+ * Abbenay Daemon - TypeScript Implementation
  * 
  * Usage:
- *   openllm daemon       # Start daemon (foreground)
- *   openllm status       # Check daemon status
- *   openllm stop         # Stop running daemon
- *   openllm web          # Start web dashboard
+ *   abbenay daemon       # Start daemon (foreground)
+ *   abbenay status       # Check daemon status
+ *   abbenay stop         # Stop running daemon
+ *   abbenay web          # Start web dashboard
  */
 
 import { Command } from 'commander';
@@ -20,8 +20,8 @@ const VERSION = '0.1.0';
 const program = new Command();
 
 program
-  .name('openllm')
-  .description('OpenLLM - Unified AI Daemon')
+  .name('abbenay')
+  .description('Abbenay - Unified AI Daemon')
   .version(VERSION);
 
 program
@@ -42,13 +42,13 @@ program
   .action(() => {
     const status = getDaemonStatus();
     if (status.running) {
-      console.log('OpenLLM daemon is running');
+      console.log('Abbenay daemon is running');
       if (status.pid) {
         console.log(`  PID: ${status.pid}`);
       }
       console.log(`  Socket: ${status.socketPath}`);
     } else {
-      console.log('OpenLLM daemon is not running');
+      console.log('Abbenay daemon is not running');
       process.exit(1);
     }
   });
@@ -84,7 +84,7 @@ program
         const { sendStartWebServer, sendStopWebServer } = await import('./web/grpc-web-control.js');
         const result = await sendStartWebServer(port);
         
-        console.log(`OpenLLM Web Dashboard: ${result.url}`);
+        console.log(`Abbenay Web Dashboard: ${result.url}`);
         if (result.already_running) {
           console.log('(web server was already running)');
         }
@@ -109,7 +109,7 @@ program
         const daemonState = await startDaemon({ keepAlive: false });
         
         const { url, app } = await startEmbeddedWebServer(daemonState, port);
-        console.log(`OpenLLM Web Dashboard: ${url}`);
+        console.log(`Abbenay Web Dashboard: ${url}`);
         
         // Start MCP server if --mcp flag is set
         if (options.mcp && app) {

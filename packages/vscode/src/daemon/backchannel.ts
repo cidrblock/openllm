@@ -12,14 +12,14 @@
 
 import * as vscode from 'vscode';
 import { getLogger } from '../utils/logger';
-import * as proto from '../proto/openllm/v1/service';
+import * as proto from '../proto/abbenay/v1/service';
 import { DaemonClient } from './client';
 
 const logger = getLogger();
 
 // Our vendor ID prefix for filtering out our own models (avoid circular calls).
-// All our per-provider vendors start with 'openllm-' (e.g. openllm-openrouter).
-const OUR_VENDOR_PREFIX = 'openllm-';
+// All our per-provider vendors start with 'abbenay-' (e.g. abbenay-openrouter).
+const OUR_VENDOR_PREFIX = 'abbenay-';
 
 /**
  * Recursively extract plain text from a VS Code PromptTsx tree node.
@@ -144,7 +144,7 @@ export class BackchannelHandler {
     /**
      * Run the backchannel message loop
      */
-    private async runBackchannelLoop(grpcClient: proto.OpenLLMClient): Promise<void> {
+    private async runBackchannelLoop(grpcClient: proto.AbbenayClient): Promise<void> {
         try {
             // For nice-grpc bidirectional streams, we create an async generator
             // that yields our responses, and iterate over the requests

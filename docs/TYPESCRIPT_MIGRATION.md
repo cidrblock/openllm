@@ -1,4 +1,4 @@
-# OpenLLM TypeScript Migration Plan
+# Abbenay TypeScript Migration Plan
 
 > **Historical document.** This plan described the Rust-to-TypeScript migration, which is complete.
 > The codebase has since moved from `multi-llm-ts` to the Vercel AI SDK (`@ai-sdk/*`)
@@ -28,7 +28,7 @@
 
 ## Executive Summary
 
-This document outlines the plan to migrate the OpenLLM daemon from Rust to TypeScript. The migration will:
+This document outlines the plan to migrate the Abbenay daemon from Rust to TypeScript. The migration will:
 
 - **Keep**: gRPC API, web dashboard UI, VS Code extension, all current functionality
 - **Replace**: Rust daemon with TypeScript/Node.js daemon
@@ -50,12 +50,12 @@ The migration prioritizes functionality preservation and incremental delivery.
 ## Current Rust Architecture
 
 ```
-crates/openllm/src/
+crates/abbenay/src/
 ├── main.rs                 # CLI entrypoint (daemon, web, status, stop)
 ├── state.rs                # Central daemon state
 ├── transport.rs            # Unix socket / TCP transport
 ├── server/                 # gRPC service handlers
-│   ├── service.rs          # OpenLLM service implementation
+│   ├── service.rs          # Abbenay service implementation
 │   ├── handlers.rs         # RPC handlers
 │   └── mcp_bridge.rs       # MCP bridge service
 ├── session/                # Session management
@@ -112,7 +112,7 @@ packages/daemon/
 │   ├── transport.ts          # Unix socket / TCP transport
 │   ├── server/
 │   │   ├── grpc-server.ts    # gRPC server setup
-│   │   └── openllm-service.ts # OpenLLM service handlers
+│   │   └── abbenay-service.ts # Abbenay service handlers
 │   ├── providers/
 │   │   ├── adapter.ts        # multi-llm-ts adapter
 │   │   └── registry.ts       # Provider registry
@@ -163,7 +163,7 @@ packages/daemon/
    - Test basic connectivity
 
 4. **Port configuration loader**
-   - Read `~/.openllm/config.yaml`
+   - Read `~/.config/abbenay/config.yaml`
    - Parse provider config structure
    - Support workspace-level config
 
@@ -178,7 +178,7 @@ packages/daemon/
 #### Tasks
 
 1. **Create provider adapter**
-   - Map `multi-llm-ts` engines to OpenLLM provider interface
+   - Map `multi-llm-ts` engines to Abbenay provider interface
    - Implement `chat()` with streaming
    - Implement `listModels()`
 
@@ -192,9 +192,9 @@ packages/daemon/
    - Dynamic model discovery
    - API key resolution from config
 
-**Provider Mapping (multi-llm-ts → OpenLLM):**
+**Provider Mapping (multi-llm-ts → Abbenay):**
 
-| OpenLLM Provider | multi-llm-ts Engine | Notes |
+| Abbenay Provider | multi-llm-ts Engine | Notes |
 |------------------|---------------------|-------|
 | `openai` | `OpenAI` | Direct mapping |
 | `anthropic` | `Anthropic` | Direct mapping |
@@ -307,14 +307,14 @@ Node.js 20+ supports [Single Executable Applications (SEA)](https://nodejs.org/a
 4. **Create executable**
    ```bash
    # Copy node binary
-   cp $(which node) dist/openllm
+   cp $(which node) dist/abbenay
    
    # Inject SEA blob
-   npx postject dist/openllm NODE_SEA_BLOB dist/sea-prep.blob \
+   npx postject dist/abbenay NODE_SEA_BLOB dist/sea-prep.blob \
      --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
    
    # Sign on macOS
-   codesign --sign - dist/openllm
+   codesign --sign - dist/abbenay
    ```
 
 5. **Handle native modules (keytar)**
@@ -328,13 +328,13 @@ Node.js 20+ supports [Single Executable Applications (SEA)](https://nodejs.org/a
    
    | Platform | Architecture | Binary |
    |----------|--------------|--------|
-   | Linux | x64 | `openllm-linux-x64` |
-   | Linux | arm64 | `openllm-linux-arm64` |
-   | macOS | x64 | `openllm-darwin-x64` |
-   | macOS | arm64 | `openllm-darwin-arm64` |
-   | Windows | x64 | `openllm-win-x64.exe` |
+   | Linux | x64 | `abbenay-linux-x64` |
+   | Linux | arm64 | `abbenay-linux-arm64` |
+   | macOS | x64 | `abbenay-darwin-x64` |
+   | macOS | arm64 | `abbenay-darwin-arm64` |
+   | Windows | x64 | `abbenay-win-x64.exe` |
 
-**Deliverable:** Single `openllm` binary that works without Node.js installed.
+**Deliverable:** Single `abbenay` binary that works without Node.js installed.
 
 ---
 
@@ -380,7 +380,7 @@ These features are defined in the proto but not currently implemented:
 - `SessionChat` (chat within a session context)
 - `ForkSession`, `ReplaySession`
 - `ExportSession`, `ImportSession`
-- Persistence to `~/.openllm/sessions/*.json`
+- Persistence to `~/.config/abbenay/sessions/*.json`
 
 ### MCP Bridge
 
@@ -397,7 +397,7 @@ The gRPC API remains unchanged. The proto file stays the same.
 **RPCs to implement in initial migration:**
 
 ```protobuf
-service OpenLLM {
+service Abbenay {
   // Client lifecycle
   rpc Register(RegisterRequest) returns (RegisterResponse);
   rpc Unregister(UnregisterRequest) returns (Empty);
@@ -490,7 +490,7 @@ Missing providers we need to add or implement separately:
 | `main.rs` | `src/index.ts` | CLI with commander |
 | `state.rs` | `src/state.ts` | Class-based state |
 | `transport.rs` | `src/transport.ts` | Node.js `net` module |
-| `server/service.rs` | `src/server/openllm-service.ts` | @grpc/grpc-js |
+| `server/service.rs` | `src/server/abbenay-service.ts` | @grpc/grpc-js |
 | `providers/genai_adapter.rs` | `src/providers/adapter.ts` | Wrap multi-llm-ts |
 | `secrets/keychain_store.rs` | `src/secrets/keychain.ts` | Use keytar |
 | `resolver/config_resolver.rs` | `src/config/loader.ts` | Use js-yaml |

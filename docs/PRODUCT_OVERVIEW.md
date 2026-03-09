@@ -1,4 +1,4 @@
-# OpenLLM - Product Overview
+# Abbenay - Product Overview
 
 **Status:** MVP Complete  
 **Version:** 0.1.0  
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-OpenLLM is a unified AI daemon that provides consistent access to multiple LLM providers through a single interface. It enables the "Bring Your Own Model" (BYOM) vision by supporting both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama).
+Abbenay is a unified AI daemon that provides consistent access to multiple LLM providers through a single interface. It enables the "Bring Your Own Model" (BYOM) vision by supporting both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama).
 
 The project implements a **TypeScript daemon** with **gRPC API**, a **web dashboard** for configuration, and a **VS Code extension** that registers models with VS Code's Language Model API.
 
@@ -68,16 +68,16 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 │   (gRPC client)         (gRPC client)       (HTTP → DaemonState) │
 │         │                      │                   │             │
 │   Custom Apps                                                    │
-│   (@openllm/core)                                                │
+│   (@abbenay/core)                                                │
 └─────────┼──────────────────────┼───────────────────┼─────────────┘
           │                      │                   │
           └──────────────────────┼───────────────────┘
                                  │ gRPC over Unix Socket
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     openllm daemon (TypeScript)                  │
+│                     abbenay daemon (TypeScript)                  │
 │                                                                  │
-│   ┌─ @openllm/core ────────────────────────────────────────┐    │
+│   ┌─ @abbenay/core ────────────────────────────────────────┐    │
 │   │  CoreState       Engines (Vercel AI SDK)   Config (YAML) │    │
 │   │  SecretStore     Streaming chat + tools    Discovery     │    │
 │   └──────────────────────────────────────────────────────────┘    │
@@ -101,8 +101,8 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 
 | Package | Contents | Audience |
 |---------|----------|----------|
-| **@openllm/core** | LLM engine abstraction, streaming chat, config, secret store interface | Agent devs, web devs, custom apps |
-| **@openllm/daemon** | gRPC, web UI, CLI, VS Code backchannel, SEA binary (bundles core) | End users |
+| **@abbenay/core** | LLM engine abstraction, streaming chat, config, secret store interface | Agent devs, web devs, custom apps |
+| **@abbenay/daemon** | gRPC, web UI, CLI, VS Code backchannel, SEA binary (bundles core) | End users |
 
 ### Why TypeScript Daemon?
 
@@ -115,7 +115,7 @@ The project implements a **TypeScript daemon** with **gRPC API**, a **web dashbo
 
 ## Components
 
-### 1. TypeScript Daemon (`openllm daemon`)
+### 1. TypeScript Daemon (`abbenay daemon`)
 
 The core service that runs as a background process:
 - Listens on Unix socket for gRPC requests
@@ -123,7 +123,7 @@ The core service that runs as a background process:
 - Handles chat streaming and session persistence
 - Stores secrets in system keychain
 
-### 2. Web Dashboard (`openllm web`)
+### 2. Web Dashboard (`abbenay web`)
 
 Browser-based configuration UI:
 - Configure API keys (keychain or environment variable)
@@ -133,7 +133,7 @@ Browser-based configuration UI:
 
 ### 3. VS Code Extension
 
-Integrates OpenLLM with VS Code:
+Integrates Abbenay with VS Code:
 - Connects to daemon on activation
 - Registers models with VS Code's Language Model API
 - Provides workspace path info via backchannel
@@ -148,16 +148,16 @@ Integrates OpenLLM with VS Code:
 ```
 Other VS Code Extensions (e.g., Ansible)
          │
-         │  vscode.lm.selectChatModels({ vendor: 'openllm' })
+         │  vscode.lm.selectChatModels({ vendor: 'abbenay' })
          ▼
-OpenLLM Extension → Returns configured models
+Abbenay Extension → Returns configured models
          │
          │  model.sendRequest(messages, options)
          ▼
 Daemon → Streams response from actual provider
 ```
 
-Any extension using VS Code's standard LM API can use OpenLLM providers without custom code.
+Any extension using VS Code's standard LM API can use Abbenay providers without custom code.
 
 ---
 
@@ -167,8 +167,8 @@ Any extension using VS Code's standard LM API can use OpenLLM providers without 
 
 | Location | Purpose |
 |----------|---------|
-| `~/.openllm/config.yaml` | User-level (global) settings |
-| `<workspace>/.openllm/config.yaml` | Workspace-specific settings |
+| `~/.config/abbenay/config.yaml` | User-level (global) settings |
+| `<workspace>/.config/abbenay/config.yaml` | Workspace-specific settings |
 
 ### API Key Storage
 
@@ -222,7 +222,7 @@ providers:
 
 | Criterion | Status | Notes |
 |-----------|--------|-------|
-| VS Code Language Model API | ✅ Complete | `vscode.lm.selectChatModels({ vendor: 'openllm' })` |
+| VS Code Language Model API | ✅ Complete | `vscode.lm.selectChatModels({ vendor: 'abbenay' })` |
 | Connection status | ✅ Complete | Status bar item + status panel |
 | Web-based configuration | ✅ Complete | Dashboard at localhost:8787 |
 
@@ -262,7 +262,7 @@ Session continuity is **deferred** to a future release. Stub RPCs exist in the g
 2. **Marketplace Publishing** - Submit VS Code extension
 3. **PyPI Publishing** - Publish Python gRPC client
 4. **RHEL AI Testing** - Validate with RHEL AI endpoints
-5. **Ansible Extension Integration** - Enable Ansible extension to use OpenLLM
+5. **Ansible Extension Integration** - Enable Ansible extension to use Abbenay
 
 ---
 

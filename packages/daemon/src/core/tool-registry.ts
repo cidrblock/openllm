@@ -1,7 +1,7 @@
 /**
  * ToolRegistry — transport-agnostic tool collection and namespacing.
  *
- * Part of @openllm/core. Usable by both the daemon and standalone library consumers.
+ * Part of @abbenay/core. Usable by both the daemon and standalone library consumers.
  *
  * Tools are collected from multiple sources (VS Code workspaces, MCP servers,
  * agent-registered local tools) and namespaced to prevent collisions.

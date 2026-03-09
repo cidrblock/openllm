@@ -13,19 +13,19 @@ PROTO_DIR="$ROOT_DIR/proto"
 generate_python() {
     echo "Generating Python client..."
     
-    PYTHON_OUT="$ROOT_DIR/packages/python/src/openllm_grpc"
-    mkdir -p "$PYTHON_OUT/openllm/v1"
+    PYTHON_OUT="$ROOT_DIR/packages/python/src/abbenay_grpc"
+    mkdir -p "$PYTHON_OUT/abbenay/v1"
     
     python -m grpc_tools.protoc \
         -I "$PROTO_DIR" \
         --python_out="$PYTHON_OUT" \
         --pyi_out="$PYTHON_OUT" \
         --grpc_python_out="$PYTHON_OUT" \
-        "$PROTO_DIR/openllm/v1/service.proto"
+        "$PROTO_DIR/abbenay/v1/service.proto"
     
     # Create __init__.py files
-    touch "$PYTHON_OUT/openllm/__init__.py"
-    touch "$PYTHON_OUT/openllm/v1/__init__.py"
+    touch "$PYTHON_OUT/abbenay/__init__.py"
+    touch "$PYTHON_OUT/abbenay/v1/__init__.py"
     
     echo "Python client generated at $PYTHON_OUT"
 }
@@ -62,7 +62,7 @@ generate_typescript() {
         --ts_proto_opt=forceLong=long \
         --ts_proto_opt=oneof=unions \
         -I "$PROTO_DIR" \
-        "$PROTO_DIR/openllm/v1/service.proto"
+        "$PROTO_DIR/abbenay/v1/service.proto"
     
     echo "TypeScript client generated at $TS_OUT"
     

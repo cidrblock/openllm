@@ -2,7 +2,7 @@
  * Shared type definitions for the VS Code extension.
  *
  * Provider/model/chat types live in the gRPC proto definitions
- * (see proto/openllm/v1/service.ts). Only extension-internal
+ * (see proto/abbenay/v1/service.ts). Only extension-internal
  * interfaces belong here.
  */
 

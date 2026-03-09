@@ -15,7 +15,7 @@ import yaml from 'js-yaml';
 let mockUserConfigPath = '/tmp/nonexistent-user-config.yaml';
 vi.mock('./paths.js', () => ({
   getUserConfigPath: () => mockUserConfigPath,
-  getWorkspaceConfigPath: (wsPath: string) => path.join(wsPath, '.config', 'openllm', 'config.yaml'),
+  getWorkspaceConfigPath: (wsPath: string) => path.join(wsPath, '.config', 'abbenay', 'config.yaml'),
 }));
 
 import {
@@ -33,7 +33,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openllm-test-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'abbenay-test-'));
 });
 
 afterEach(() => {
@@ -53,7 +53,7 @@ function setUserConfig(data: any): void {
 
 function createWorkspace(name: string, data: any): string {
   const wsDir = path.join(tmpDir, name);
-  writeYaml(path.join(wsDir, '.config', 'openllm', 'config.yaml'), data);
+  writeYaml(path.join(wsDir, '.config', 'abbenay', 'config.yaml'), data);
   return wsDir;
 }
 

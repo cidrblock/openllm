@@ -1,5 +1,5 @@
 /**
- * Provider adapter - wraps Vercel AI SDK providers for OpenLLM
+ * Provider adapter - wraps Vercel AI SDK providers for Abbenay
  *
  * The "actual" layer: engines are fixed API implementations from the Vercel AI SDK.
  * Virtual providers (user-defined instances) live in config/state -- not here.

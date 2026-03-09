@@ -1,5 +1,5 @@
 /**
- * OpenLLM gRPC service implementation
+ * Abbenay gRPC service implementation
  */
 
 import * as grpc from '@grpc/grpc-js';
@@ -61,9 +61,9 @@ function toRole(protoRole: string | number): string {
 }
 
 /**
- * Create the OpenLLM service handlers
+ * Create the Abbenay service handlers
  */
-export function createOpenLLMService(state: DaemonState) {
+export function createAbbenayService(state: DaemonState) {
   return {
     /**
      * Register a client with the daemon

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenLLM Dashboard</title>
+  <title>Abbenay Dashboard</title>
   
   <!-- Red Hat Design System -->
   <link rel="stylesheet" href="https://ux.redhat.com/assets/css/red-hat-font.css">
@@ -373,7 +373,7 @@
 <div x-data="dashboard()" x-init="init()">
   <!-- Header -->
   <header class="header-bar">
-    <h1>OpenLLM Dashboard</h1>
+    <h1>Abbenay Dashboard</h1>
     <div class="header-actions">
       <button class="header-btn" @click="openConfigModal()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor">
@@ -561,7 +561,7 @@
         <div style="padding: var(--rh-space-lg);">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--rh-space-md);">
             <p style="margin: 0; color: #6a6e73; font-size: 0.85rem;">
-              MCP servers provide tools to the LLM. Configure them in <code>~/.config/openllm/config.yaml</code> under <code>mcp_servers</code>.
+              MCP servers provide tools to the LLM. Configure them in <code>~/.config/abbenay/config.yaml</code> under <code>mcp_servers</code>.
             </p>
             <button class="btn btn-secondary btn-sm" @click="loadMcpServers()">Refresh</button>
           </div>
@@ -1268,7 +1268,7 @@
                   <p class="rh-helper-text">No VS Code connected. Enter path manually.</p>
                 </div>
               </template>
-              <code class="rh-tile-path" x-show="workspacePath" x-text="workspacePath + '/.config/openllm/config.yaml'" style="margin-top: 8px;"></code>
+              <code class="rh-tile-path" x-show="workspacePath" x-text="workspacePath + '/.config/abbenay/config.yaml'" style="margin-top: 8px;"></code>
             </div>
           </div>
         </div>

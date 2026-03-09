@@ -1,10 +1,10 @@
 /**
- * OpenLLM Daemon Client
+ * Abbenay Daemon Client
  * 
  * The daemon uses Unix Domain Sockets for local IPC:
- * - Socket: <runtimeDir>/daemon.sock   (Linux: /run/user/<uid>/openllm/)
- * - PID file: <runtimeDir>/openllm.pid
- * - Config: <configDir>/config.yaml    (Linux: ~/.config/openllm/)
+ * - Socket: <runtimeDir>/daemon.sock   (Linux: /run/user/<uid>/abbenay/)
+ * - PID file: <runtimeDir>/abbenay.pid
+ * - Config: <configDir>/config.yaml    (Linux: ~/.config/abbenay/)
  * 
  * Architecture:
  * - VS Code → Daemon: gRPC client for chat, sessions, config, etc.
